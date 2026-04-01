@@ -1,0 +1,181 @@
+"use client";
+import { StockAnalysisResult } from "@/types";
+import {
+  BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, LineChart, Line, ReferenceLine,
+} from "recharts";
+
+interface Props { result: StockAnalysisResult; }
+
+function Row({ label, value, color }: { label: string; value: string | number; color?: string }) {
+  return (
+    <div className="flex justify-between py-1 border-b border-[#1e2d4a]/40">
+      <span className="text-[#6b85a0] text-xs">{label}</span>
+      <span className={`text-xs font-mono ${color ?? "text-[#c8d8f0]"}`}>{value}</span>
+    </div>
+  );
+}
+
+export default function BacktestTab({ result }: Props) {
+  const bt = result.backtest;
+  const wf = result.walk_forward;
+  const kelly = result.kelly;
+  if (!bt) return <div className="p-4 text-[#4a6080] text-xs">No backtest data</div>;
+
+  // Equity curve chart
+  const eqData = bt.equity_curve.map((v, i) => ({ i, v }));
+
+  // Waterfall (last 15 trades)
+  const lastTrades = (bt.trades ?? []).slice(-15);
+  const waterfallData = lastTrades.map((t) => ({
+    n: `T${t.trade_num}`,
+    r: Math.round(t.return * 1000) / 10,
+    fill: t.return > 0 ? "#00ff88" : "#ff4757",
+  }));
+
+  const alphaColor = (bt.alpha ?? 0) >= 0 ? "text-[#00ff88]" : "text-[#ff4757]";
+  const sharpeColor = (bt.sharpe ?? 0) >= 1 ? "text-[#00ff88]" : (bt.sharpe ?? 0) >= 0.5 ? "text-[#ffa502]" : "text-[#ff4757]";
+
+  return (
+    <div className="p-3 space-y-3">
+      {/* Equity curve */}
+      {eqData.length > 2 && (
+        <div>
+          <div className="text-[#4a6080] text-xs mb-1">EQUITY CURVE</div>
+          <div className="h-28">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={eqData}>
+                <XAxis dataKey="i" hide />
+                <YAxis domain={["auto", "auto"]} hide />
+                <ReferenceLine y={result.backtest?.equity_curve?.[0] ?? 10000} stroke="#1e2d4a" strokeDasharray="4 2" />
+                <Line type="monotone" dataKey="v" stroke="#00d4ff" strokeWidth={1.5} dot={false} />
+                <Tooltip contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
+                  formatter={(v: number) => [`$${v.toFixed(0)}`, "Equity"]} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Trade waterfall */}
+      {waterfallData.length > 0 && (
+        <div>
+          <div className="text-[#4a6080] text-xs mb-1">TRADE RETURNS (last {waterfallData.length})</div>
+          <div className="h-20">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={waterfallData} barSize={12}>
+                <XAxis dataKey="n" tick={{ fontSize: 8, fill: "#4a6080" }} />
+                <YAxis hide />
+                <ReferenceLine y={0} stroke="#1e2d4a" />
+                <Tooltip contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
+                  formatter={(v: number) => [`${v.toFixed(1)}%`, "Return"]} />
+                <Bar dataKey="r">
+                  {waterfallData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Metrics */}
+      <div className="grid grid-cols-2 gap-x-4">
+        <div>
+          <div className="text-[#4a6080] text-xs font-bold mb-1">PERFORMANCE</div>
+          <Row label="Total Return" value={`${bt.total_return?.toFixed(1)}%`}
+            color={(bt.total_return ?? 0) >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"} />
+          <Row label="vs Buy & Hold" value={`${bt.buy_hold_return?.toFixed(1)}%`} />
+          <Row label="Alpha" value={`${(bt.alpha ?? 0) >= 0 ? "+" : ""}${bt.alpha?.toFixed(1)}%`} color={alphaColor} />
+          <Row label="Sharpe" value={bt.sharpe?.toFixed(2) ?? "—"} color={sharpeColor} />
+          <Row label="Sortino" value={bt.sortino?.toFixed(2) ?? "—"} />
+          <Row label="Calmar" value={bt.calmar_ratio?.toFixed(2) ?? "—"} />
+          <Row label="Omega" value={bt.omega_ratio?.toFixed(2) ?? "—"} />
+          <Row label="Ulcer Index" value={`${bt.ulcer_index?.toFixed(2)}%`} />
+        </div>
+        <div>
+          <div className="text-[#4a6080] text-xs font-bold mb-1">TRADE STATS</div>
+          <Row label="Trades" value={bt.num_trades ?? 0} />
+          <Row label="Win Rate" value={`${bt.win_rate?.toFixed(1)}%`}
+            color={(bt.win_rate ?? 0) >= 55 ? "text-[#00ff88]" : "text-[#ff4757]"} />
+          <Row label="Expectancy" value={`${bt.expectancy?.toFixed(2)}%`}
+            color={(bt.expectancy ?? 0) >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"} />
+          <Row label="Profit Factor" value={bt.profit_factor?.toFixed(2) ?? "—"}
+            color={(bt.profit_factor ?? 0) >= 1.5 ? "text-[#00ff88]" : "text-[#ffa502]"} />
+          <Row label="Avg Win" value={`${bt.avg_win?.toFixed(2)}%`} color="text-[#00ff88]" />
+          <Row label="Avg Loss" value={`${bt.avg_loss?.toFixed(2)}%`} color="text-[#ff4757]" />
+          <Row label="Max DD" value={`${bt.max_drawdown?.toFixed(1)}%`} color="text-[#ff4757]" />
+          {bt.kill_switch_triggered && <Row label="Kill Switch" value="TRIGGERED" color="text-[#ff4757]" />}
+        </div>
+      </div>
+
+      {/* Duration stats */}
+      <div>
+        <div className="text-[#4a6080] text-xs font-bold mb-1">DURATION (bars)</div>
+        <div className="grid grid-cols-4 gap-2 text-xs">
+          {[
+            { label: "AVG", val: bt.avg_duration?.toFixed(1) },
+            { label: "MED", val: bt.median_duration?.toFixed(0) },
+            { label: "WIN AVG", val: bt.avg_winner_duration?.toFixed(1) },
+            { label: "LOSE AVG", val: bt.avg_loser_duration?.toFixed(1) },
+          ].map((m) => (
+            <div key={m.label} className="bg-[#0a0e1a] border border-[#1e2d4a] p-1.5 rounded text-center">
+              <div className="text-[#4a6080]">{m.label}</div>
+              <div className="text-[#c8d8f0]">{m.val ?? "—"}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Exit reasons */}
+      {Object.keys(bt.exit_reasons ?? {}).length > 0 && (
+        <div>
+          <div className="text-[#4a6080] text-xs font-bold mb-1">EXIT REASONS</div>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(bt.exit_reasons).map(([r, c]) => (
+              <span key={r} className="text-xs border border-[#1e2d4a] px-2 py-0.5 rounded text-[#6b85a0]">
+                {r}: <span className="text-[#c8d8f0]">{c}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* MAE/MFE */}
+      <div>
+        <div className="text-[#4a6080] text-xs font-bold mb-1">MAE / MFE</div>
+        <div className="grid grid-cols-2 gap-x-4">
+          <Row label="Avg MAE" value={`${bt.avg_mae?.toFixed(2)}%`} color="text-[#ff4757]" />
+          <Row label="Avg MFE" value={`${bt.avg_mfe?.toFixed(2)}%`} color="text-[#00ff88]" />
+          <Row label="Winner MAE" value={`${bt.winner_mae?.toFixed(2)}%`} />
+          <Row label="Winner MFE" value={`${bt.winner_mfe?.toFixed(2)}%`} />
+        </div>
+      </div>
+
+      {/* Walk-Forward */}
+      {wf && (
+        <div>
+          <div className="text-[#4a6080] text-xs font-bold mb-1">WALK-FORWARD</div>
+          <Row label="Best Entry" value={wf.best_params?.entryThreshold} />
+          <Row label="Best Max Hold" value={`${wf.best_params?.maxHoldingDays}d`} />
+          <Row label="Train Sharpe" value={wf.train_sharpe} />
+          <Row label="Test Sharpe" value={wf.test_sharpe}
+            color={(wf.test_sharpe ?? 0) > 0 ? "text-[#00ff88]" : "text-[#ff4757]"} />
+          <Row label="Efficiency" value={`${wf.efficiency_ratio} (${wf.efficiency_quality})`}
+            color={wf.efficiency_quality === "GOOD" ? "text-[#00ff88]" : wf.efficiency_quality === "ACCEPTABLE" ? "text-[#ffa502]" : "text-[#ff4757]"} />
+          <Row label="Passed" value={wf.passed ? "YES" : "NO"} color={wf.passed ? "text-[#00ff88]" : "text-[#ff4757]"} />
+        </div>
+      )}
+
+      {/* Kelly */}
+      {kelly && (
+        <div>
+          <div className="text-[#4a6080] text-xs font-bold mb-1">KELLY POSITION SIZING</div>
+          <Row label="Full Kelly" value={`${(kelly.full_kelly * 100).toFixed(1)}%`} />
+          <Row label="Kelly (¼×0.8)" value={`${(kelly.kelly_fraction * 100).toFixed(1)}%`} />
+          <Row label="Recommended" value={`${(kelly.recommended_fraction * 100).toFixed(1)}%`} color="text-[#00d4ff]" />
+          <Row label="Method" value={kelly.sizing_method} />
+          {kelly.atr_shares > 0 && <Row label="ATR Shares" value={kelly.atr_shares} />}
+        </div>
+      )}
+    </div>
+  );
+}

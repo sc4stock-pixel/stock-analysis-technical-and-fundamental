@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --bg: #0a0e1a;
+  --card: #0f1629;
+  --border: #1e2d4a;
+  --accent: #00d4ff;
+  --green: #00ff88;
+  --red: #ff4757;
+  --amber: #ffa502;
+  --text: #c8d8f0;
+  --dim: #6b85a0;
+  --muted: #4a6080;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 13px;
+  margin: 0;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* Terminal card */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* Signal badge */
+.badge-buy { background: rgba(0, 255, 136, 0.12); color: #00ff88; border: 1px solid rgba(0, 255, 136, 0.3); }
+.badge-sell { background: rgba(255, 71, 87, 0.12); color: #ff4757; border: 1px solid rgba(255, 71, 87, 0.3); }
+.badge-hold { background: rgba(255, 165, 2, 0.12); color: #ffa502; border: 1px solid rgba(255, 165, 2, 0.3); }
+
+/* Blink animation for live indicator */
+@keyframes blink { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
+.blink { animation: blink 2s ease-in-out infinite; }
+
+/* Score gauge gradient */
+.score-low { color: #ff4757; }
+.score-mid { color: #ffa502; }
+.score-high { color: #00ff88; }
+
+/* Recharts override */
+.recharts-tooltip-wrapper { font-family: 'JetBrains Mono', monospace !important; font-size: 11px !important; }
