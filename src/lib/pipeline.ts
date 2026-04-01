@@ -71,25 +71,15 @@ export function runPipeline(
     closeArr: closes, sma20Arr, sma50Arr, rsiArr,
   });
 
-  // ── RSI Divergence per bar ────────────────────────────────────
-  const rsiDivArr = closes.map((_, i) => {
-    if (i < config.analysis.divergenceLookback) return 0;
-    const [div] = detectRsiDivergence(
-      closes.slice(0, i + 1),
-      rsiArr.slice(0, i + 1),
-      config.analysis.divergenceLookback
-    );
-    return div;
-  });
-  const rsiDivTypeArr = closes.map((_, i) => {
-    if (i < config.analysis.divergenceLookback) return "None";
-    const [, type] = detectRsiDivergence(
-      closes.slice(0, i + 1),
-      rsiArr.slice(0, i + 1),
-      config.analysis.divergenceLookback
-    );
-    return type;
-  });
+  // ── RSI Divergence — matches Python: single call on full dataset ─────
+  // Python: divergence, divergence_type = self.detect_rsi_divergence(df, lookback)
+  // Then broadcasts scalar to entire df['RSI_Divergence'] column.
+  // We do the same: one call on the full arrays, broadcast to all bars.
+  const [rsiDivScalar, rsiDivTypeScalar] = detectRsiDivergence(
+    closes, rsiArr, config.analysis.divergenceLookback
+  );
+  const rsiDivArr = closes.map(() => rsiDivScalar);
+  const rsiDivTypeArr = closes.map(() => rsiDivTypeScalar);
 
   // ── Scores ───────────────────────────────────────────────────
   const barScores = calculateScores({

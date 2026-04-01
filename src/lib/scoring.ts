@@ -208,7 +208,8 @@ export function calculateScores(params: {
     // Confidence: 100 - std(subscores) * 10
     const subScores = [rScore, mScore, aScore, tScore, maScore, bbScore, vScore];
     const mean = subScores.reduce((a, b) => a + b, 0) / subScores.length;
-    const variance = subScores.reduce((a, b) => a + (b - mean) ** 2, 0) / subScores.length;
+    // pandas std() default is sample std (ddof=1) — match Python exactly
+    const variance = subScores.reduce((a, b) => a + (b - mean) ** 2, 0) / (subScores.length - 1);
     const std = Math.sqrt(variance);
     const confidence = Math.min(95, Math.max(50, 100 - std * 10));
 
