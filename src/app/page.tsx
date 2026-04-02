@@ -1,143 +1,136 @@
-// src/app/api/stocks/route.ts
-import { NextRequest, NextResponse } from "next/server";
+"use client";
+import { useState, useCallback } from "react";
 import { DEFAULT_CONFIG } from "@/lib/config";
-import { runPipeline, RawOHLCV } from "@/lib/pipeline";
-import { AppConfig } from "@/types";
+import { AppConfig, StockAnalysisResult } from "@/types";
+import ConfigPanel from "@/components/ConfigPanel";
+import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
+import PortfolioTable from "@/components/PortfolioTable";
+import StockCard from "@/components/StockCard";
 
-export const maxDuration = 30;
+export default function Dashboard() {
+  const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
+  const [results, setResults] = useState<StockAnalysisResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [showConfig, setShowConfig] = useState(false);
 
-// ─── Yahoo Finance OHLCV fetch ────────────────────────────────
-async function fetchYahooOHLCV(
-  symbol: string,
-  lookbackDays: number
-): Promise<{ bars: RawOHLCV[]; currentPrice: number; changePct: number } | null> {
-  try {
-    const calendarDays = Math.floor(lookbackDays * 7 / 5) + 15;
-    const end = Math.floor(Date.now() / 1000);
-    const start = end - calendarDays * 86400;
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${start}&period2=${end}&interval=1d&events=div,splits`;
-
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      next: { revalidate: 900 }, // 15-min cache
-    });
-    if (!res.ok) return null;
-
-    const json = await res.json();
-    const result = json?.chart?.result?.[0];
-    if (!result) return null;
-
-    const timestamps: number[] = result.timestamp ?? [];
-    const ohlcv = result.indicators?.quote?.[0];
-    const meta = result.meta ?? {};
-    if (!ohlcv || timestamps.length === 0) return null;
-
-    const bars: RawOHLCV[] = [];
-    for (let i = 0; i < timestamps.length; i++) {
-      const o = ohlcv.open?.[i];
-      const h = ohlcv.high?.[i];
-      const l = ohlcv.low?.[i];
-      const c = ohlcv.close?.[i];
-      const v = ohlcv.volume?.[i];
-      if (o == null || h == null || l == null || c == null || c <= 0) continue;
-      bars.push({
-        date: new Date(timestamps[i] * 1000).toISOString().split("T")[0],
-        open: o, high: h, low: l, close: c, volume: v ?? 0,
-      });
-    }
-    if (bars.length < 50) return null;
-
-    // ── Current price & change ──────────────────────────────────
-    // Yahoo meta.regularMarketPrice = live/latest price
-    // Yahoo meta.regularMarketChangePercent = already a percentage (e.g. 2.9 means +2.9%)
-    // BUT: during market hours it may be a small decimal (0.029). We normalise both cases.
-    const lastBar = bars[bars.length - 1];
-    const prevBar = bars[bars.length - 2];
-
-    // Prefer live meta price; fall back to last OHLCV close
-    let currentPrice: number = meta.regularMarketPrice ?? lastBar.close;
-    if (!currentPrice || currentPrice <= 0) currentPrice = lastBar.close;
-
-    // Change % — use previous close from OHLCV as the most reliable source
-    // This avoids the Yahoo decimal/percent ambiguity entirely
-    const prevClose = meta.chartPreviousClose ?? meta.previousClose ?? prevBar?.close ?? lastBar.open;
-    let changePct = 0;
-    if (prevClose && prevClose > 0 && currentPrice > 0) {
-      changePct = ((currentPrice - prevClose) / prevClose) * 100;
-    }
-
-    return { bars, currentPrice, changePct };
-  } catch {
-    return null;
-  }
-}
-
-// ─── Single stock analysis ────────────────────────────────────
-async function analyzeStock(
-  stock: { symbol: string; name: string; exchange: string },
-  config: AppConfig
-) {
-  try {
-    const data = await fetchYahooOHLCV(stock.symbol, config.backtest.lookbackDays);
-
-    if (!data) {
-      return {
-        symbol: stock.symbol, name: stock.name, exchange: stock.exchange,
-        signal: "ERROR", score: 0, confidence: 0,
-        regime: "UNKNOWN",
-        regime_info: { regime: "UNKNOWN", atr_ratio: 1, adx_slope: 0, bullish_count: 0, is_high_volatility: false, is_extreme_dislocation: false },
-        current_price: 0, change_pct: 0,
-        backtest: null, monte_carlo: null, walk_forward: null, kelly: null,
-        error: "Insufficient data",
-      };
-    }
-
-    const result = runPipeline(
-      data.bars, stock, config, data.currentPrice, data.changePct
-    );
-    return result;
-  } catch (e) {
-    return {
-      symbol: stock.symbol, name: stock.name, exchange: stock.exchange,
-      signal: "ERROR", score: 0, confidence: 0,
-      regime: "ERROR",
-      regime_info: { regime: "ERROR", atr_ratio: 1, adx_slope: 0, bullish_count: 0, is_high_volatility: false, is_extreme_dislocation: false },
-      current_price: 0, change_pct: 0,
-      backtest: null, monte_carlo: null, walk_forward: null, kelly: null,
-      error: String(e),
-    };
-  }
-}
-
-// ─── POST handler ─────────────────────────────────────────────
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const config: AppConfig = body.config ?? DEFAULT_CONFIG;
-
-    if (body.symbol) {
-      const stock = config.stocks.PORTFOLIO.find((s) => s.symbol === body.symbol)
-        ?? { symbol: body.symbol, name: body.symbol, exchange: "US" };
-      const result = await analyzeStock(stock, config);
-      return NextResponse.json(result);
-    }
+  const runAnalysis = useCallback(async () => {
+    setLoading(true);
+    setProgress(0);
+    setResults([]);
 
     const portfolio = config.stocks.PORTFOLIO;
-    const results = [];
-    for (const stock of portfolio) {
-      results.push(await analyzeStock(stock, config));
-    }
-    return NextResponse.json({ results, timestamp: new Date().toISOString(), config });
-  } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
-  }
-}
+    const allResults: StockAnalysisResult[] = [];
 
-export async function GET(req: NextRequest) {
-  const symbol = req.nextUrl.searchParams.get("symbol");
-  if (!symbol) return NextResponse.json({ error: "symbol required" }, { status: 400 });
-  const stock = DEFAULT_CONFIG.stocks.PORTFOLIO.find((s) => s.symbol === symbol)
-    ?? { symbol, name: symbol, exchange: "US" };
-  const result = await analyzeStock(stock, DEFAULT_CONFIG);
-  return NextResponse.json(result);
+    for (let i = 0; i < portfolio.length; i++) {
+      const stock = portfolio[i];
+      try {
+        const res = await fetch("/api/stocks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbol: stock.symbol, config }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          allResults.push(data);
+          setResults([...allResults]);
+        }
+      } catch (e) {
+        console.error(`Error fetching ${stock.symbol}:`, e);
+      }
+      setProgress(Math.round(((i + 1) / portfolio.length) * 100));
+    }
+
+    setLastUpdated(new Date().toLocaleTimeString());
+    setLoading(false);
+  }, [config]);
+
+  return (
+    <div className="min-h-screen bg-[#0a0e1a]">
+
+      {/* ── TOP BAR ── */}
+      <header className="border-b border-[#1e2d4a] bg-[#0f1629] px-4 py-3 flex items-center justify-between sticky top-0 z-50">
+        <div className="flex items-center gap-3">
+          <span className="text-[#00d4ff] font-bold text-sm tracking-widest">▶ TA DASHBOARD</span>
+          <span className="text-[#4a6080] text-xs">V12.5.6 UNIFIED</span>
+          {lastUpdated && <span className="text-[#4a6080] text-xs">· {lastUpdated}</span>}
+          {loading && <span className="text-[#ffa502] text-xs blink">· SCANNING {progress}%</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowConfig(!showConfig)}
+            className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#6b85a0] hover:border-[#00d4ff] hover:text-[#00d4ff] rounded transition-all"
+          >
+            {showConfig ? "▲ HIDE CONFIG" : "▼ CONFIG"}
+          </button>
+          <button
+            onClick={runAnalysis}
+            disabled={loading}
+            className="px-4 py-1.5 text-xs font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all"
+          >
+            {loading ? `SCANNING... ${progress}%` : "▶ RUN ANALYSIS"}
+          </button>
+        </div>
+      </header>
+
+      {/* ── CONFIG PANEL ── */}
+      {showConfig && (
+        <div className="border-b border-[#1e2d4a] bg-[#0a0e1a]">
+          <ConfigPanel config={config} onChange={setConfig} />
+        </div>
+      )}
+
+      {/* ── PORTFOLIO SUMMARY BAR ── */}
+      {results.length > 0 && (
+        <div className="border-b border-[#1e2d4a]">
+          <PortfolioSummaryBar results={results} />
+        </div>
+      )}
+
+      {/* ── PORTFOLIO TABLE ── */}
+      {results.length > 0 && (
+        <div className="border-b border-[#1e2d4a] bg-[#0f1629]">
+          <PortfolioTable results={results} />
+        </div>
+      )}
+
+      {/* ── STOCK CARDS ── */}
+      <main className="p-4">
+        {loading && results.length === 0 && (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {config.stocks.PORTFOLIO.map((s) => (
+              <div key={s.symbol} className="card p-4 h-48 animate-pulse">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="h-4 w-16 bg-[#1e2d4a] rounded" />
+                  <div className="h-4 w-24 bg-[#1e2d4a] rounded" />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-3 w-full bg-[#1e2d4a] rounded" />
+                  <div className="h-3 w-3/4 bg-[#1e2d4a] rounded" />
+                  <div className="h-3 w-1/2 bg-[#1e2d4a] rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {results.map((result) => (
+              <StockCard key={result.symbol} result={result} config={config} />
+            ))}
+          </div>
+        )}
+
+        {!loading && results.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-96 text-[#4a6080]">
+            <div className="text-4xl mb-4 opacity-20">◈</div>
+            <div className="text-sm mb-2">No analysis running</div>
+            <div className="text-xs">Click ▶ RUN ANALYSIS to scan portfolio</div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
 }
