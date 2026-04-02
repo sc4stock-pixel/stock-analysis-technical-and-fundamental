@@ -122,8 +122,8 @@ export default function PortfolioSummaryBar({ results }: Props) {
   const sell = results.filter(r => r.signal === "SELL").length;
   const hold = results.filter(r => r.signal === "HOLD").length;
   const withBt = results.filter(r => (r.backtest?.num_trades ?? 0) > 0);
-  const avgSharpe  = withBt.length ? withBt.reduce((a, r) => a + r.backtest.sharpe, 0) / withBt.length : 0;
-  const avgWinRate = withBt.length ? withBt.reduce((a, r) => a + r.backtest.win_rate, 0) / withBt.length : 0;
+  const avgSharpe  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.sharpe ?? 0), 0) / withBt.length : 0;
+  const avgWinRate = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.win_rate ?? 0), 0) / withBt.length : 0;
   const avgAlpha   = results.length ? results.reduce((a, r) => a + (r.backtest?.alpha ?? 0), 0) / results.length : 0;
 
   const SortTh = ({ col: c }: { col: ColDef }) => {

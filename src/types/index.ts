@@ -227,7 +227,7 @@ export interface StockAnalysisResult {
   regime_info: RegimeInfo;
   current_price: number;
   change_pct: number;
-  backtest: BacktestResult;
+  backtest: BacktestResult | null;
   monte_carlo: MonteCarloResult | null;
   walk_forward: WalkForwardResult | null;
   kelly: KellyResult | null;

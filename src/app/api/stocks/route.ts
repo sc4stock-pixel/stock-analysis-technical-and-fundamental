@@ -121,12 +121,10 @@ async function fetchYahooOHLCV(
     let currentPrice: number = meta.regularMarketPrice ?? lastBar.close;
     if (!currentPrice || currentPrice <= 0) currentPrice = lastBar.close;
 
-    // ── Change % — normalise Yahoo's regularMarketChangePercent ──
-    // Yahoo returns this field inconsistently:
-    //   - After market close: decimal fraction e.g. 0.029 meaning +2.9%
-    //   - During market hours: sometimes already a % e.g. 2.9
-    // Strategy: prefer computing from previousClose (always reliable),
-    // then cross-check with regularMarketChangePercent.
+    // ── Change % — priority order (most reliable first) ─────────
+    // 1. Compute from prevClose × currentPrice (always accurate)
+    // 2. Use regularMarketChange (absolute $, divide by prevClose)
+    // 3. Last resort: regularMarketChangePercent with sanity check
     const prevClose =
       meta.chartPreviousClose ??
       meta.previousClose ??
@@ -135,13 +133,18 @@ async function fetchYahooOHLCV(
 
     let changePct = 0;
     if (prevClose && prevClose > 0 && currentPrice > 0) {
+      // Method 1: compute directly — most reliable
       changePct = ((currentPrice - prevClose) / prevClose) * 100;
+    } else if (meta.regularMarketChange != null && prevClose && prevClose > 0) {
+      // Method 2: absolute dollar change ÷ prevClose
+      changePct = (meta.regularMarketChange / prevClose) * 100;
     } else if (meta.regularMarketChangePercent != null) {
-      // Fallback: normalise the Yahoo field
-      const raw = meta.regularMarketChangePercent as number;
-      // If |raw| < 1 it's likely a fraction (0.029 → 2.9%); else it's already %
-      changePct = Math.abs(raw) < 1 ? raw * 100 : raw;
+      // Method 3: Yahoo's percent field — already a true % (e.g. 2.9 = +2.9%)
+      // Yahoo v8/chart always returns this as a real percentage, not a fraction
+      changePct = meta.regularMarketChangePercent as number;
     }
+    // Clamp to sane range: no stock moves more than 99% in a day (handle bad data)
+    if (Math.abs(changePct) > 99) changePct = 0;
 
     return { bars, currentPrice, changePct };
   } catch {

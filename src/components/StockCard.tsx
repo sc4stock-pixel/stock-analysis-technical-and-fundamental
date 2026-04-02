@@ -2,12 +2,12 @@
 import { useState } from "react";
 import { StockAnalysisResult, AppConfig, CandlestickPattern } from "@/types";
 import { regimeColor } from "@/lib/regime";
-import OverviewTab from "./tabs/OverviewTab";
-import BacktestTab from "./tabs/BacktestTab";
+import OverviewTab    from "./tabs/OverviewTab";
+import BacktestTab   from "./tabs/BacktestTab";
 import MonteCarloTab from "./tabs/MonteCarloTab";
-import TradesTab from "./tabs/TradesTab";
+import TradesTab     from "./tabs/TradesTab";
 import TradingPlanTab from "./tabs/TradingPlanTab";
-import ChartTab from "./tabs/ChartTab";
+import ChartTab      from "./tabs/ChartTab";
 
 interface Props {
   result: StockAnalysisResult;
@@ -46,6 +46,9 @@ export default function StockCard({ result, config }: Props) {
     return result.exchange === "HK" ? `HK$${p.toFixed(2)}` : `$${p.toFixed(2)}`;
   };
 
+  // change_pct is already a true percentage from the API (e.g. +2.9 means +2.9%)
+  const chg = result.change_pct ?? 0;
+
   return (
     <div className="card flex flex-col">
       {/* ── CARD HEADER ── */}
@@ -62,8 +65,8 @@ export default function StockCard({ result, config }: Props) {
           {/* Price row */}
           <div className="flex items-center gap-3 mt-1 flex-wrap">
             <span className="text-[#c8d8f0] text-sm font-bold">{priceFmt(result.current_price)}</span>
-            <span className={`text-xs ${(result.change_pct ?? 0) >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-              {(result.change_pct ?? 0) >= 0 ? "▲" : "▼"}{Math.abs(result.change_pct ?? 0).toFixed(2)}%
+            <span className={`text-xs font-mono ${chg >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+              {chg >= 0 ? "▲" : "▼"}{Math.abs(chg).toFixed(2)}%
             </span>
             <span className={`text-xs font-bold ${
               (result.score ?? 0) >= 6.5 ? "text-[#00ff88]" :
@@ -71,9 +74,7 @@ export default function StockCard({ result, config }: Props) {
             }`}>
               {result.score?.toFixed(1)} / 10
             </span>
-            <span className="text-[#4a6080] text-xs">
-              {result.confidence?.toFixed(0)}% conf
-            </span>
+            <span className="text-[#4a6080] text-xs">{result.confidence?.toFixed(0)}% conf</span>
           </div>
           {/* Regime + patterns */}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -126,11 +127,11 @@ export default function StockCard({ result, config }: Props) {
           <div className="p-4 text-[#ff4757] text-xs">{result.error ?? "Error fetching data"}</div>
         ) : (
           <>
-            {tab === "CHART"       && <ChartTab      result={result} />}
-            {tab === "OVERVIEW"    && <OverviewTab   result={result} />}
-            {tab === "BACKTEST"    && <BacktestTab   result={result} />}
-            {tab === "MONTE CARLO" && <MonteCarloTab result={result} />}
-            {tab === "TRADES"      && <TradesTab     result={result} />}
+            {tab === "CHART"       && <ChartTab       result={result} />}
+            {tab === "OVERVIEW"    && <OverviewTab    result={result} />}
+            {tab === "BACKTEST"    && <BacktestTab    result={result} />}
+            {tab === "MONTE CARLO" && <MonteCarloTab  result={result} />}
+            {tab === "TRADES"      && <TradesTab      result={result} />}
             {tab === "PLAN"        && <TradingPlanTab result={result} />}
           </>
         )}
