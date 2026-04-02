@@ -2,7 +2,7 @@
 // ANALYSIS PIPELINE — orchestrates all modules in sequence
 // Mirrors Python's main analysis flow per stock
 // ============================================================
-import { AppConfig, StockAnalysisResult, KellyResult, WalkForwardResult, OHLCVBar } from "@/types";
+import { AppConfig, StockAnalysisResult, KellyResult, WalkForwardResult, OHLCVBar, ChartBar } from "@/types";
 import { rsi, macd, adx, atr, bollingerBands, sma, volumeRatio } from "./indicators";
 import { calculateRegimePerBar, detectRegime } from "./regime";
 import { calculateScores, detectRsiDivergence } from "./scoring";
@@ -164,6 +164,29 @@ export function runPipeline(
   const lastBar = bars[bars.length - 1];
   const signal = lastBar.signalConfirmed ?? "HOLD";
 
+  // Build per-bar ChartBar data (last 252 bars) for Price/Signal chart tab
+  const chartBars: ChartBar[] = bars.slice(-252).map((b) => ({
+    date: b.date,
+    open: b.open,
+    high: b.high,
+    low: b.low,
+    close: b.close,
+    volume: b.volume,
+    sma20: b.sma20,
+    sma50: b.sma50,
+    bbUpper: b.bbUpper,
+    bbLower: b.bbLower,
+    signal: b.signalConfirmed,
+    score: b.score,
+    rsi: b.rsi,
+    macd: b.macd,
+    macdSig: b.macdSignal,
+    macdHist: b.macdHist,
+    adx: b.adx,
+    pdi: b.plusDI,
+    mdi: b.minusDI,
+  }));
+
   return {
     symbol: stockConfig.symbol,
     name: stockConfig.name,
@@ -179,6 +202,7 @@ export function runPipeline(
     monte_carlo: mcResult,
     walk_forward: walkForward,
     kelly,
+    chart_bars: chartBars,
   };
 }
 
