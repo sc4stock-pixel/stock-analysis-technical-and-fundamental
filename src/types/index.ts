@@ -231,7 +231,20 @@ export interface StockAnalysisResult {
   monte_carlo: MonteCarloResult | null;
   walk_forward: WalkForwardResult | null;
   kelly: KellyResult | null;
+  fundamentals?: Fundamentals;
   error?: string;
+  chart_bars?: ChartBar[];
+}
+
+
+export interface Fundamentals {
+  pe_ratio: number | null;
+  forward_pe: number | null;
+  eps_trailing: number | null;
+  eps_forward: number | null;
+  eps_growth: number | null;
+  analyst_target: number | null;
+  analyst_rating: string | null;
 }
 
 export interface PortfolioResponse {
@@ -277,4 +290,51 @@ export interface OHLCVBar {
   signalConfirmed: string;
   entrySignal: string;
   forceEntry: number;
+}
+
+// Lightweight price bar for chart rendering (returned in API response)
+export interface PriceBar {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  sma20: number;
+  sma50: number;
+  bbUpper: number;
+  bbLower: number;
+  score: number;
+  signal: string;       // "BUY" | "SELL" | "HOLD"
+  entrySignal: string;  // shifted signal used by backtest
+}
+
+// Per-bar chart data returned to client for price/signal chart
+export interface ChartBar {
+  date: string;
+  close: number;
+  open: number;
+  high: number;
+  low: number;
+  volume: number;
+  sma20: number;
+  sma50: number;
+  bbUpper: number;
+  bbLower: number;
+  signal: string;       // signalConfirmed per bar
+  score: number;
+  rsi: number;
+  macd: number;
+  macdSig: number;
+  macdHist: number;
+  adx: number;
+  pdi: number;
+  mdi: number;
+}
+
+// Regime icon/label metadata
+export interface RegimeBadge {
+  icon: string;
+  label: string;
+  dir: string;
 }

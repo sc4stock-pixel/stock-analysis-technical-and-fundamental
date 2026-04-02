@@ -4,7 +4,6 @@ import { DEFAULT_CONFIG } from "@/lib/config";
 import { AppConfig, StockAnalysisResult } from "@/types";
 import ConfigPanel from "@/components/ConfigPanel";
 import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
-import PortfolioTable from "@/components/PortfolioTable";
 import StockCard from "@/components/StockCard";
 
 export default function Dashboard() {
@@ -13,11 +12,13 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [progressSymbol, setProgressSymbol] = useState("");
   const [showConfig, setShowConfig] = useState(false);
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
     setProgress(0);
+    setProgressSymbol("");
     setResults([]);
 
     const portfolio = config.stocks.PORTFOLIO;
@@ -25,6 +26,7 @@ export default function Dashboard() {
 
     for (let i = 0; i < portfolio.length; i++) {
       const stock = portfolio[i];
+      setProgressSymbol(stock.symbol);
       try {
         const res = await fetch("/api/stocks", {
           method: "POST",
@@ -43,6 +45,7 @@ export default function Dashboard() {
     }
 
     setLastUpdated(new Date().toLocaleTimeString());
+    setProgressSymbol("");
     setLoading(false);
   }, [config]);
 
@@ -50,12 +53,16 @@ export default function Dashboard() {
     <div className="min-h-screen bg-[#0a0e1a]">
 
       {/* ── TOP BAR ── */}
-      <header className="border-b border-[#1e2d4a] bg-[#0f1629] px-4 py-3 flex items-center justify-between sticky top-0 z-50">
+      <header className="border-b border-[#1e2d4a] bg-[#0f1629] px-4 py-2.5 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <span className="text-[#00d4ff] font-bold text-sm tracking-widest">▶ TA DASHBOARD</span>
-          <span className="text-[#4a6080] text-xs">V12.5.6 UNIFIED</span>
-          {lastUpdated && <span className="text-[#4a6080] text-xs">· {lastUpdated}</span>}
-          {loading && <span className="text-[#ffa502] text-xs blink">· SCANNING {progress}%</span>}
+          <span className="text-[#4a6080] text-xs">V12.5.6</span>
+          {lastUpdated && <span className="text-[#4a6080] text-xs">· Updated {lastUpdated}</span>}
+          {loading && (
+            <span className="text-[#ffa502] text-xs blink">
+              · {progressSymbol ? `Scanning ${progressSymbol}…` : `Scanning…`} {progress}%
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -69,7 +76,7 @@ export default function Dashboard() {
             disabled={loading}
             className="px-4 py-1.5 text-xs font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all"
           >
-            {loading ? `SCANNING... ${progress}%` : "▶ RUN ANALYSIS"}
+            {loading ? `SCANNING… ${progress}%` : "▶ RUN ANALYSIS"}
           </button>
         </div>
       </header>
@@ -81,22 +88,20 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── PORTFOLIO SUMMARY BAR ── */}
+      {/* ── PORTFOLIO SUMMARY + SORTABLE TABLE ──
+           Renders as soon as the first stock completes.
+           The table IS the summary — it shows signals, regime, score,
+           fundamentals and all backtest metrics in one sortable view. ── */}
       {results.length > 0 && (
         <div className="border-b border-[#1e2d4a]">
           <PortfolioSummaryBar results={results} />
         </div>
       )}
 
-      {/* ── PORTFOLIO TABLE ── */}
-      {results.length > 0 && (
-        <div className="border-b border-[#1e2d4a] bg-[#0f1629]">
-          <PortfolioTable results={results} />
-        </div>
-      )}
-
       {/* ── STOCK CARDS ── */}
       <main className="p-4">
+
+        {/* Skeleton while loading and no results yet */}
         {loading && results.length === 0 && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {config.stocks.PORTFOLIO.map((s) => (
@@ -115,19 +120,44 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Live results grid — streams in stock-by-stock */}
         {results.length > 0 && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {results.map((result) => (
               <StockCard key={result.symbol} result={result} config={config} />
             ))}
+            {/* Skeleton placeholders for stocks still loading */}
+            {loading && config.stocks.PORTFOLIO
+              .filter(s => !results.some(r => r.symbol === s.symbol))
+              .map(s => (
+                <div key={s.symbol} className="card p-4 h-48 animate-pulse">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="h-4 w-16 bg-[#1e2d4a] rounded" />
+                    <span className="text-[#4a6080] text-xs">{s.symbol}</span>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-3 w-full bg-[#1e2d4a] rounded" />
+                    <div className="h-3 w-2/3 bg-[#1e2d4a] rounded" />
+                  </div>
+                  <div className="text-[#ffa502] text-xs mt-3 blink">scanning…</div>
+                </div>
+              ))
+            }
           </div>
         )}
 
+        {/* Empty state */}
         {!loading && results.length === 0 && (
           <div className="flex flex-col items-center justify-center h-96 text-[#4a6080]">
             <div className="text-4xl mb-4 opacity-20">◈</div>
-            <div className="text-sm mb-2">No analysis running</div>
-            <div className="text-xs">Click ▶ RUN ANALYSIS to scan portfolio</div>
+            <div className="text-sm mb-1">No analysis running</div>
+            <div className="text-xs mb-4">Click ▶ RUN ANALYSIS to scan your portfolio</div>
+            <button
+              onClick={runAnalysis}
+              className="px-6 py-2 text-sm font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 rounded transition-all"
+            >
+              ▶ RUN ANALYSIS
+            </button>
           </div>
         )}
       </main>

@@ -8,6 +8,7 @@ import MonteCarloTab from "./tabs/MonteCarloTab";
 import TradesTab from "./tabs/TradesTab";
 import TradingPlanTab from "./tabs/TradingPlanTab";
 import ChartTab from "./tabs/ChartTab";
+import ChartTab from "./tabs/ChartTab";
 
 interface Props {
   result: StockAnalysisResult;
