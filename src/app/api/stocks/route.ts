@@ -23,46 +23,157 @@ interface Fundamentals {
 
 async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
   const empty: Fundamentals = {
-    pe_ratio: null, forward_pe: null, eps_trailing: null,
-    eps_forward: null, eps_growth: null, analyst_target: null, analyst_rating: null,
+    pe_ratio: null, forward_pe: null,
+    eps_trailing: null, eps_forward: null, eps_growth: null,
+    analyst_target: null, analyst_rating: null,
   };
 
-  const API_KEY = process.env.tjyHEDDrVplwTcHdzB8FOPJPZdHBKGXV; // Add this to your Vercel Environment Variables
-  if (!API_KEY) return empty;
+  // ── Helper: extract a .raw numeric value from Yahoo quoteSummary objects ──
+  const raw = (obj: Record<string, unknown> | null | undefined, key: string): number | null => {
+    if (!obj) return null;
+    const v = obj[key];
+    if (v == null) return null;
+    if (typeof v === "number") return v;
+    if (typeof v === "object" && v !== null && "raw" in v) return (v as { raw: number }).raw;
+    return null;
+  };
 
-  try {
-    // 1. Fetch Ratios (for P/E)
-    const ratiosRes = await fetch(`https://financialmodelingprep.com/api/v3/ratios/${symbol}?limit=1&apikey=${API_KEY}`, { next: { revalidate: 3600 } });
-    const ratios = await ratiosRes.json();
+  // ── Attempt 1: Yahoo v11/finance/quoteSummary (same as Python yfinance internally) ──
+  // This is the most complete source — matches ticker.info fields exactly.
+  // Try both query1 and query2 hosts; Vercel IPs sometimes get 401 on one but not both.
+  const v11Modules = "financialData,defaultKeyStatistics,summaryDetail";
+  const v11Hosts = ["query1", "query2"];
+  
+  for (const host of v11Hosts) {
+    try {
+      const url = `https://${host}.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${v11Modules}&crumbStore={}`;
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/json, text/plain, */*",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Referer": "https://finance.yahoo.com/",
+          "Origin": "https://finance.yahoo.com",
+        },
+        next: { revalidate: 3600 },
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      const result = json?.quoteSummary?.result?.[0];
+      if (!result) continue;
 
-    // 2. Fetch Analyst Estimates (for Targets and Forward EPS)
-    const analystRes = await fetch(`https://financialmodelingprep.com/api/v3/analyst-estimates/${symbol}?limit=1&apikey=${API_KEY}`, { next: { revalidate: 3600 } });
-    const analyst = await analystRes.json();
+      const fin   = result.financialData       as Record<string, unknown> ?? {};
+      const stats = result.defaultKeyStatistics as Record<string, unknown> ?? {};
+      const summ  = result.summaryDetail        as Record<string, unknown> ?? {};
 
-    // 3. Fetch Income Statement (for Trailing EPS and Growth)
-    const incomeRes = await fetch(`https://financialmodelingprep.com/api/v3/income-statement/${symbol}?limit=2&apikey=${API_KEY}`, { next: { revalidate: 3600 } });
-    const income = await incomeRes.json();
+      // P/E: summaryDetail > defaultKeyStatistics
+      const pe        = raw(summ, "trailingPE") ?? raw(stats, "trailingPE") ?? null;
+      const forwardPE = raw(summ, "forwardPE")  ?? raw(stats, "forwardPEG") ?? null;
 
-    let eps_growth = null;
-    if (income.length >= 2 && income[1].eps > 0) {
-        eps_growth = ((income[0].eps - income[1].eps) / income[1].eps) * 100;
-    }
+      // EPS
+      const epsTrailing = raw(stats, "trailingEps") ?? raw(fin, "trailingEps") ?? null;
+      const epsForward  = raw(stats, "forwardEps")  ?? raw(fin, "forwardEps")  ?? null;
 
-    return {
-      pe_ratio: ratios[0]?.priceEarningsRatio ? Math.round(ratios[0].priceEarningsRatio * 10) / 10 : null,
-      forward_pe: null, // FMP requires premium for strict forward PE, but you can calculate it from price / estimatedEPS
-      eps_trailing: income[0]?.eps ?? null,
-      eps_forward: analyst[0]?.estimatedEpsConsensus ?? null,
-      eps_growth: eps_growth ? Math.round(eps_growth * 10) / 10 : null,
-      analyst_target: analyst[0]?.estimatedTargetConsensus ?? null,
-      analyst_rating: null, // Premium field in FMP, but target price is free
-    };
+      // EPS growth: financialData.earningsGrowth preferred, else compute
+      let epsGrowth = raw(fin, "earningsGrowth") ?? null;
+      if (epsGrowth == null && epsTrailing != null && epsForward != null && epsTrailing !== 0) {
+        epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
+      }
 
-  } catch (e) {
-    console.error(`FMP Fetch failed for ${symbol}:`, e);
-    return empty;
+      const analystTarget = raw(fin, "targetMeanPrice") ?? null;
+      const recMean       = raw(fin, "recommendationMean") ?? null;
+      const recKey        = typeof fin.recommendationKey === "string"
+        ? fin.recommendationKey : null;
+
+      let analystRating: string | null = recKey
+        ? recKey.charAt(0).toUpperCase() + recKey.slice(1).toLowerCase()
+        : null;
+      if (!analystRating && recMean != null) {
+        if      (recMean <= 1.5) analystRating = "Strong Buy";
+        else if (recMean <= 2.5) analystRating = "Buy";
+        else if (recMean <= 3.5) analystRating = "Hold";
+        else if (recMean <= 4.5) analystRating = "Sell";
+        else                     analystRating = "Strong Sell";
+      }
+
+      // Only return if we got at least one useful field
+      if (pe != null || epsTrailing != null || analystTarget != null) {
+        return {
+          pe_ratio:       pe            != null ? Math.round(pe * 10) / 10            : null,
+          forward_pe:     forwardPE     != null ? Math.round(forwardPE * 10) / 10     : null,
+          eps_trailing:   epsTrailing,
+          eps_forward:    epsForward,
+          eps_growth:     epsGrowth     != null ? Math.round(epsGrowth * 1000) / 10   : null,
+          analyst_target: analystTarget != null ? Math.round(analystTarget * 100) / 100 : null,
+          analyst_rating: analystRating,
+        };
+      }
+    } catch { /* try next host */ }
   }
+
+  // ── Attempt 2: Yahoo v7/finance/quote (lighter, no modules) ──
+  for (const host of ["query1", "query2"]) {
+    try {
+      const url = `https://${host}.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+          "Accept": "application/json",
+          "Referer": "https://finance.yahoo.com/",
+        },
+        next: { revalidate: 3600 },
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      const q = json?.quoteResponse?.result?.[0] as Record<string, unknown> | undefined;
+      if (!q) continue;
+
+      const getNum = (k: string): number | null => {
+        const v = q[k];
+        return typeof v === "number" ? v : null;
+      };
+
+      const pe          = getNum("trailingPE")  ?? null;
+      const forwardPE   = getNum("forwardPE")   ?? null;
+      // v7 uses epsTrailingTwelveMonths, not trailingEps
+      const epsTrailing = getNum("epsTrailingTwelveMonths") ?? getNum("trailingEps") ?? null;
+      const epsForward  = getNum("epsForward")  ?? getNum("forwardEps") ?? null;
+      let   epsGrowth   = getNum("earningsGrowth") ?? null;
+      if (epsGrowth == null && epsTrailing != null && epsForward != null && epsTrailing !== 0) {
+        epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
+      }
+
+      const analystTarget = getNum("targetMeanPrice") ?? null;
+      const recMean       = getNum("recommendationMean") ?? null;
+      const recKey = typeof q.recommendationKey === "string" ? q.recommendationKey : null;
+      let analystRating: string | null = recKey
+        ? recKey.charAt(0).toUpperCase() + recKey.slice(1).toLowerCase()
+        : null;
+      if (!analystRating && recMean != null) {
+        if      (recMean <= 1.5) analystRating = "Strong Buy";
+        else if (recMean <= 2.5) analystRating = "Buy";
+        else if (recMean <= 3.5) analystRating = "Hold";
+        else if (recMean <= 4.5) analystRating = "Sell";
+        else                     analystRating = "Strong Sell";
+      }
+
+      if (pe != null || epsTrailing != null || analystTarget != null) {
+        return {
+          pe_ratio:       pe            != null ? Math.round(pe * 10) / 10            : null,
+          forward_pe:     forwardPE     != null ? Math.round(forwardPE * 10) / 10     : null,
+          eps_trailing:   epsTrailing,
+          eps_forward:    epsForward,
+          eps_growth:     epsGrowth     != null ? Math.round(epsGrowth * 1000) / 10   : null,
+          analyst_target: analystTarget != null ? Math.round(analystTarget * 100) / 100 : null,
+          analyst_rating: analystRating,
+        };
+      }
+    } catch { /* try next */ }
+  }
+
+  return empty;
 }
+
 
 // ─── OHLCV + current price ─────────────────────────────────────
 async function fetchYahooOHLCV(
