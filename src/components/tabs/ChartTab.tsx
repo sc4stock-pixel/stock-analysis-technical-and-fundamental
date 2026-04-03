@@ -68,7 +68,7 @@ const PriceTooltip = ({ active, payload, label }: {
     <div className="bg-[#0f1629] border border-[#1e2d4a] rounded px-2.5 py-2 text-xs font-mono shadow-xl">
       <div className="text-[#6b85a0] mb-1.5 border-b border-[#1e2d4a] pb-1">{label}</div>
       {close != null && <div className="text-[#c8d8f0]">Close: <span className="text-[#00d4ff] font-bold">{close.toFixed(2)}</span></div>}
-      {sma20 != null && <div className="text-[#ffa502]">SMA20: {sma20.toFixed(2)}</div>}
+      {sma20 != null && <div className="text-[#00ff88]">SMA20: {sma20.toFixed(2)}</div>}
       {sma50 != null && <div className="text-[#ff7f50]">SMA50: {sma50.toFixed(2)}</div>}
       {rsi != null && <div className="text-[#a78bfa]">RSI: {rsi.toFixed(1)}</div>}
       {macdH != null && (
@@ -84,7 +84,7 @@ const PriceTooltip = ({ active, payload, label }: {
 };
 
 export default function ChartTab({ result }: Props) {
-  const [range, setRange] = useState<Range>("3M");
+  const [range, setRange] = useState<Range>("1Y");
   const [showSMA, setShowSMA]       = useState(true);
   const [showBB, setShowBB]         = useState(true);
   const [showVol, setShowVol]       = useState(true);
@@ -265,7 +265,7 @@ export default function ChartTab({ result }: Props) {
             {/* SMA lines */}
             {showSMA && (
               <>
-                <Line dataKey="SMA20" stroke="#ffa502" strokeWidth={1.5} dot={false}
+                <Line dataKey="SMA20" stroke="#00ff88" strokeWidth={1.5} dot={false}
                   name="SMA20" strokeOpacity={0.85} legendType="none" />
                 <Line dataKey="SMA50" stroke="#ff7f50" strokeWidth={1.5} dot={false}
                   name="SMA50" strokeOpacity={0.85} legendType="none" />
@@ -381,7 +381,7 @@ export default function ChartTab({ result }: Props) {
         </span>
         {showSMA && <>
           <span className="flex items-center gap-1.5">
-            <span className="w-5 h-0.5 bg-[#ffa502] inline-block rounded" /> SMA20
+            <span className="w-5 h-0.5 bg-[#00ff88] inline-block rounded" /> SMA20
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-5 h-0.5 bg-[#ff7f50] inline-block rounded" /> SMA50

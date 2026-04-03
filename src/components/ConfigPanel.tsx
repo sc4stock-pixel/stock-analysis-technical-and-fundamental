@@ -182,10 +182,12 @@ export default function ConfigPanel({ config, onChange }: Props) {
             <span className="text-[#6b85a0] font-bold block mb-1">CONFIRM BARS (US exchange):</span>
             STRONG_UPTREND → 0 (instant)<br />
             STRENGTHENING → 0 (instant)<br />
-            UPTREND → 1 bar<br />
-            WEAK_UPTREND → 1 bar<br />
-            RANGING / others → 2 bars<br />
+            UPTREND → 1 bar  ·  RANGING → 2 bars<br />
             <span className="text-[#ffa502]">Vol Surge 2x+ → FORCE ENTRY</span>
+            <div className="mt-1.5 text-[#00ff88]">
+              ★ Entry Threshold &amp; Confirm Bars directly control<br />
+              trade count — change preset → Run Analysis
+            </div>
           </InfoBox>
         </div>
 
@@ -239,6 +241,15 @@ export default function ConfigPanel({ config, onChange }: Props) {
               min={1} max={20} step={1} format={(v) => `${v}d`}
               onChange={(v) => update(["portfolioRisk", "coolingPeriodDays"], v)} />
           </div>
+          <InfoBox>
+            <span className="text-[#ffa502] font-bold block mb-1">⚠ Regime-Adaptive Overrides (V12.5.3):</span>
+            ATR Mult, Trailing ATR &amp; Max Hold are set per-trade<br />
+            by the regime at entry — not these sliders:<br />
+            <span className="text-[#6b85a0]">STRONG_UP: 60d · 2.0× · 2.0× trail</span><br />
+            <span className="text-[#6b85a0]">UPTREND: 30d · 2.2× · 1.5× trail</span><br />
+            <span className="text-[#6b85a0]">RANGING: 10d · 2.0× · 1.0× trail</span><br />
+            <span className="text-[#00d4ff]">★ Entry Threshold controls trade count directly</span>
+          </InfoBox>
         </div>
 
         {/* PORTFOLIO */}

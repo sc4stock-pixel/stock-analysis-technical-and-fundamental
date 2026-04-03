@@ -5,6 +5,9 @@ import { runPipeline, RawOHLCV } from "@/lib/pipeline";
 import { AppConfig } from "@/types";
 
 export const maxDuration = 30;
+// Force dynamic rendering — never cache the API response
+// This ensures config changes always trigger a full recompute
+export const dynamic = "force-dynamic";
 
 // ─── Fundamentals via Yahoo v7/finance/quote ──────────────────
 // v7/quote works from Vercel server-side (v10/quoteSummary is often blocked)
@@ -26,7 +29,8 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
   };
   try {
     // Yahoo v7/finance/quote — works from server-side on Vercel
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}&fields=trailingPE,forwardPE,trailingEps,forwardEps,epsCurrentYear,epsForward,earningsGrowth,targetMeanPrice,recommendationMean,recommendationKey`;
+    // No ?fields= restriction — let Yahoo return all available fields
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
     const res = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -41,11 +45,13 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
 
     const pe           = q.trailingPE          ?? null;
     const forwardPE    = q.forwardPE            ?? null;
-    const epsTrailing  = q.trailingEps          ?? null;
+    // v7 uses 'epsTrailingTwelveMonths'; v7 also sometimes has 'trailingEps'
+    const epsTrailing  = q.epsTrailingTwelveMonths ?? q.trailingEps ?? null;
     const epsForward   = q.epsForward ?? q.forwardEps ?? null;
     const analystTarget = q.targetMeanPrice     ?? null;
 
     // EPS growth: use earningsGrowth if available, else compute from eps
+    // earningsGrowth from v7 (may be null for HK stocks — computed from EPS as fallback)
     let epsGrowth: number | null = q.earningsGrowth ?? null;
     if (epsGrowth == null && epsTrailing != null && epsForward != null && epsTrailing !== 0) {
       epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
@@ -93,7 +99,7 @@ async function fetchYahooOHLCV(
 
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
-      next: { revalidate: 900 }, // 15-min cache
+      cache: "no-store", // always fetch fresh so config changes recompute correctly
     });
     if (!res.ok) return null;
 
