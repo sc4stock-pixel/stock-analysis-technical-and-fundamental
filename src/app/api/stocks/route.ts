@@ -28,150 +28,85 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
     analyst_target: null, analyst_rating: null,
   };
 
-  // ── Helper: extract a .raw numeric value from Yahoo quoteSummary objects ──
-  const raw = (obj: Record<string, unknown> | null | undefined, key: string): number | null => {
-    if (!obj) return null;
-    const v = obj[key];
-    if (v == null) return null;
-    if (typeof v === "number") return v;
-    if (typeof v === "object" && v !== null && "raw" in v) return (v as { raw: number }).raw;
-    return null;
-  };
+  // FMP requires an API key — set FMP_KEY in Vercel environment variables.
+  // Free tier: financialmodelingprep.com → 250 req/day, no credit card.
+  const apiKey = process.env.FMP_KEY;
+  if (!apiKey) return empty;  // no key → return empty (columns show dashes)
 
-  // ── Attempt 1: Yahoo v11/finance/quoteSummary (same as Python yfinance internally) ──
-  // This is the most complete source — matches ticker.info fields exactly.
-  // Try both query1 and query2 hosts; Vercel IPs sometimes get 401 on one but not both.
-  const v11Modules = "financialData,defaultKeyStatistics,summaryDetail";
-  const v11Hosts = ["query1", "query2"];
-  
-  for (const host of v11Hosts) {
-    try {
-      const url = `https://${host}.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${v11Modules}&crumbStore={}`;
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "application/json, text/plain, */*",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Referer": "https://finance.yahoo.com/",
-          "Origin": "https://finance.yahoo.com",
-        },
-        next: { revalidate: 3600 },
-      });
-      if (!res.ok) continue;
-      const json = await res.json();
-      const result = json?.quoteSummary?.result?.[0];
-      if (!result) continue;
+  const base = "https://financialmodelingprep.com/api/v3";
+  const headers = { "Accept": "application/json" };
 
-      const fin   = result.financialData       as Record<string, unknown> ?? {};
-      const stats = result.defaultKeyStatistics as Record<string, unknown> ?? {};
-      const summ  = result.summaryDetail        as Record<string, unknown> ?? {};
+  try {
+    // All 3 endpoints in parallel — 3 req per stock
+    const [profileRes, ratiosRes, targetRes] = await Promise.all([
+      fetch(`${base}/profile/${encodeURIComponent(symbol)}?apikey=${apiKey}`,         { headers, next: { revalidate: 3600 } }),
+      fetch(`${base}/ratios-ttm/${encodeURIComponent(symbol)}?apikey=${apiKey}`,       { headers, next: { revalidate: 3600 } }),
+      fetch(`${base}/price-target-consensus/${encodeURIComponent(symbol)}?apikey=${apiKey}`, { headers, next: { revalidate: 3600 } }),
+    ]);
 
-      // P/E: summaryDetail > defaultKeyStatistics
-      const pe        = raw(summ, "trailingPE") ?? raw(stats, "trailingPE") ?? null;
-      const forwardPE = raw(summ, "forwardPE")  ?? raw(stats, "forwardPEG") ?? null;
+    // ── Profile: pe, eps ─────────────────────────────────────
+    let pe: number | null          = null;
+    let epsTrailing: number | null = null;
 
-      // EPS
-      const epsTrailing = raw(stats, "trailingEps") ?? raw(fin, "trailingEps") ?? null;
-      const epsForward  = raw(stats, "forwardEps")  ?? raw(fin, "forwardEps")  ?? null;
-
-      // EPS growth: financialData.earningsGrowth preferred, else compute
-      let epsGrowth = raw(fin, "earningsGrowth") ?? null;
-      if (epsGrowth == null && epsTrailing != null && epsForward != null && epsTrailing !== 0) {
-        epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
+    if (profileRes.ok) {
+      const pd = await profileRes.json();
+      const p  = Array.isArray(pd) ? pd[0] : pd;
+      if (p && typeof p === "object") {
+        pe          = typeof p.pe  === "number" && p.pe  > 0 ? Math.round(p.pe  * 10) / 10 : null;
+        epsTrailing = typeof p.eps === "number"              ? Math.round(p.eps * 100) / 100 : null;
       }
+    }
 
-      const analystTarget = raw(fin, "targetMeanPrice") ?? null;
-      const recMean       = raw(fin, "recommendationMean") ?? null;
-      const recKey        = typeof fin.recommendationKey === "string"
-        ? fin.recommendationKey : null;
+    // ── Ratios TTM: peRatioTTM (more accurate), epsGrowthTTM ─
+    let peTTM: number | null      = null;
+    let epsGrowth: number | null  = null;
 
-      let analystRating: string | null = recKey
-        ? recKey.charAt(0).toUpperCase() + recKey.slice(1).toLowerCase()
-        : null;
-      if (!analystRating && recMean != null) {
-        if      (recMean <= 1.5) analystRating = "Strong Buy";
-        else if (recMean <= 2.5) analystRating = "Buy";
-        else if (recMean <= 3.5) analystRating = "Hold";
-        else if (recMean <= 4.5) analystRating = "Sell";
-        else                     analystRating = "Strong Sell";
+    if (ratiosRes.ok) {
+      const rd = await ratiosRes.json();
+      const r  = Array.isArray(rd) ? rd[0] : rd;
+      if (r && typeof r === "object") {
+        // peRatioTTM is more accurate than profile.pe
+        const rawPE = r.peRatioTTM ?? r.priceEarningsRatioTTM ?? null;
+        if (typeof rawPE === "number" && rawPE > 0 && rawPE < 5000) {
+          peTTM = Math.round(rawPE * 10) / 10;
+        }
+        // EPS growth: try multiple fields (decimal, e.g. 0.21 = 21%)
+        const rawGrowth = r.epsGrowthTTM ?? r.netIncomePerShareGrowthTTM ?? r.revenueGrowthTTM ?? null;
+        if (typeof rawGrowth === "number" && isFinite(rawGrowth)) {
+          // FMP returns as decimal (0.21 = 21%) — convert to %
+          epsGrowth = Math.round(rawGrowth * 1000) / 10;
+          // Sanity-check: cap at ±999%
+          if (Math.abs(epsGrowth) > 999) epsGrowth = null;
+        }
       }
+    }
 
-      // Only return if we got at least one useful field
-      if (pe != null || epsTrailing != null || analystTarget != null) {
-        return {
-          pe_ratio:       pe            != null ? Math.round(pe * 10) / 10            : null,
-          forward_pe:     forwardPE     != null ? Math.round(forwardPE * 10) / 10     : null,
-          eps_trailing:   epsTrailing,
-          eps_forward:    epsForward,
-          eps_growth:     epsGrowth     != null ? Math.round(epsGrowth * 1000) / 10   : null,
-          analyst_target: analystTarget != null ? Math.round(analystTarget * 100) / 100 : null,
-          analyst_rating: analystRating,
-        };
+    // ── Price target consensus ────────────────────────────────
+    let analystTarget: number | null = null;
+
+    if (targetRes.ok) {
+      const td = await targetRes.json();
+      const t  = Array.isArray(td) ? td[0] : td;
+      if (t && typeof t === "object") {
+        const tgt = t.targetConsensus ?? t.targetMedian ?? null;
+        if (typeof tgt === "number" && tgt > 0) {
+          analystTarget = Math.round(tgt * 100) / 100;
+        }
       }
-    } catch { /* try next host */ }
+    }
+
+    return {
+      pe_ratio:       peTTM ?? pe,   // prefer TTM over profile.pe
+      forward_pe:     null,           // FMP v3 free tier doesn't give forward PE reliably
+      eps_trailing:   epsTrailing,
+      eps_forward:    null,
+      eps_growth:     epsGrowth,
+      analyst_target: analystTarget,
+      analyst_rating: null,           // FMP consensus string needs paid tier
+    };
+  } catch {
+    return empty;
   }
-
-  // ── Attempt 2: Yahoo v7/finance/quote (lighter, no modules) ──
-  for (const host of ["query1", "query2"]) {
-    try {
-      const url = `https://${host}.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-          "Accept": "application/json",
-          "Referer": "https://finance.yahoo.com/",
-        },
-        next: { revalidate: 3600 },
-      });
-      if (!res.ok) continue;
-      const json = await res.json();
-      const q = json?.quoteResponse?.result?.[0] as Record<string, unknown> | undefined;
-      if (!q) continue;
-
-      const getNum = (k: string): number | null => {
-        const v = q[k];
-        return typeof v === "number" ? v : null;
-      };
-
-      const pe          = getNum("trailingPE")  ?? null;
-      const forwardPE   = getNum("forwardPE")   ?? null;
-      // v7 uses epsTrailingTwelveMonths, not trailingEps
-      const epsTrailing = getNum("epsTrailingTwelveMonths") ?? getNum("trailingEps") ?? null;
-      const epsForward  = getNum("epsForward")  ?? getNum("forwardEps") ?? null;
-      let   epsGrowth   = getNum("earningsGrowth") ?? null;
-      if (epsGrowth == null && epsTrailing != null && epsForward != null && epsTrailing !== 0) {
-        epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
-      }
-
-      const analystTarget = getNum("targetMeanPrice") ?? null;
-      const recMean       = getNum("recommendationMean") ?? null;
-      const recKey = typeof q.recommendationKey === "string" ? q.recommendationKey : null;
-      let analystRating: string | null = recKey
-        ? recKey.charAt(0).toUpperCase() + recKey.slice(1).toLowerCase()
-        : null;
-      if (!analystRating && recMean != null) {
-        if      (recMean <= 1.5) analystRating = "Strong Buy";
-        else if (recMean <= 2.5) analystRating = "Buy";
-        else if (recMean <= 3.5) analystRating = "Hold";
-        else if (recMean <= 4.5) analystRating = "Sell";
-        else                     analystRating = "Strong Sell";
-      }
-
-      if (pe != null || epsTrailing != null || analystTarget != null) {
-        return {
-          pe_ratio:       pe            != null ? Math.round(pe * 10) / 10            : null,
-          forward_pe:     forwardPE     != null ? Math.round(forwardPE * 10) / 10     : null,
-          eps_trailing:   epsTrailing,
-          eps_forward:    epsForward,
-          eps_growth:     epsGrowth     != null ? Math.round(epsGrowth * 1000) / 10   : null,
-          analyst_target: analystTarget != null ? Math.round(analystTarget * 100) / 100 : null,
-          analyst_rating: analystRating,
-        };
-      }
-    } catch { /* try next */ }
-  }
-
-  return empty;
 }
 
 

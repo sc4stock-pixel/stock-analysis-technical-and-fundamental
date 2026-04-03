@@ -56,6 +56,8 @@ function signalBadge(s: string) {
   return                   <span className="badge-hold px-1.5 py-0.5 rounded text-xs">HOLD</span>;
 }
 
+const n  = (v: number | null | undefined, d = 1, sfx = "") =>
+  v == null || isNaN(Number(v)) ? "—" : `${Number(v).toFixed(d)}${sfx}`;
 function ratingColor(r: string | null | undefined): string {
   if (!r) return "text-[#4a6080]";
   const l = r.toLowerCase();
@@ -65,8 +67,6 @@ function ratingColor(r: string | null | undefined): string {
   return "text-[#ff4757]";
 }
 
-const n  = (v: number | null | undefined, d = 1, sfx = "") =>
-  v == null || isNaN(Number(v)) ? "—" : `${Number(v).toFixed(d)}${sfx}`;
 const sn = (v: number | null | undefined, d = 1, sfx = "") =>
   v == null || isNaN(Number(v)) ? "—" : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${sfx}`;
 const numColor = (v: number | null | undefined, good = 0) =>
@@ -102,6 +102,7 @@ const COLS: ColDef[] = [
   { key: "eps_growth",    label: "EPS Grw",   align: "right",  sortVal: r => r.fundamentals?.eps_growth ?? -999 },
   { key: "pe",            label: "P/E",       align: "right",  sortVal: r => r.fundamentals?.pe_ratio ?? 9999 },
   { key: "analyst_target",label: "Analyst TP",align: "right",  sortVal: r => r.fundamentals?.analyst_target ?? 0 },
+
 ];
 
 export default function PortfolioSummaryBar({ results }: Props) {
@@ -178,8 +179,6 @@ export default function PortfolioSummaryBar({ results }: Props) {
               const rsi  = bt?.rsi ?? 50;
               const rsiC = rsi < 30 ? "text-[#00ff88]" : rsi > 70 ? "text-[#ff4757]" : "text-[#c8d8f0]";
               const chg  = r.change_pct ?? 0;
-
-              // Analyst upside vs current price
               const upside = fund?.analyst_target && r.current_price > 0
                 ? ((fund.analyst_target - r.current_price) / r.current_price) * 100
                 : null;
@@ -278,6 +277,7 @@ export default function PortfolioSummaryBar({ results }: Props) {
                       </div>
                     )}
                   </td>
+
                 </tr>
               );
             })}
