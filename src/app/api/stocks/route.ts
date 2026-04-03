@@ -1,18 +1,3 @@
-The issue is almost certainly that **Yahoo Finance is blocking the request** from Vercel's servers. Your logs likely show `401 Unauthorized` or `403 Forbidden`, causing the function to return the `empty` object (which renders as "—").
-
-This happens because:
-1.  **v11 Endpoint**: Requires a valid "Crumb" token/cookie pair, which is hard to manage on serverless.
-2.  **Headers**: `Origin` and `Referer` headers on the `v7` request can actually trigger stricter bot detection.
-
-### The Fix
-
-1.  **Prioritize `v7/quote`**: It is lighter and requires less strict authentication.
-2.  **Clean Headers**: Remove `Origin` and `Referer` for `v7`, as they expose the server-side nature of the request.
-3.  **Add Logging**: I added `console.error` so you can see exactly *why* it fails in your Vercel logs.
-
-Here is the corrected `src/app/api/stocks/route.ts`.
-
-```typescript
 // src/app/api/stocks/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_CONFIG } from "@/lib/config";
@@ -315,4 +300,3 @@ export async function GET(req: NextRequest) {
   const result = await analyzeStock(stock, DEFAULT_CONFIG);
   return NextResponse.json(result);
 }
-```
