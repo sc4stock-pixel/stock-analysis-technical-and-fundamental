@@ -28,17 +28,24 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
   };
 
   try {
-    // Vercel serves the public folder at the root of your domain
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/fundamentals.json`, { 
-      cache: 'no-store' 
+    // 1. Determine the base URL (works for both local dev and production)
+    const host = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000';
+
+    // 2. Fetch the JSON file you just uploaded to the public folder
+    const res = await fetch(`${host}/fundamentals.json`, { 
+      cache: 'no-store' // Critical: ensures you don't see old cached data
     });
     
     if (!res.ok) return empty;
-    const data = await res.json();
-    const stock = data[symbol];
+
+    const allData = await res.json();
+    const stock = allData[symbol];
 
     if (!stock) return empty;
 
+    // 3. Return the data in the format your dashboard expects
     return {
       pe_ratio: stock.pe_ratio,
       forward_pe: null,
@@ -49,6 +56,7 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
       analyst_rating: null,
     };
   } catch (e) {
+    console.error("Static data fetch error:", e);
     return empty;
   }
 }
