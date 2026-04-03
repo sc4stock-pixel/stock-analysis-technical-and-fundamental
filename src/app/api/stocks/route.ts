@@ -21,92 +21,14 @@ interface Fundamentals {
   analyst_rating: string | null;
 }
 
-async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
-  const empty: Fundamentals = {
+async function fetchFundamentals(_symbol: string): Promise<Fundamentals> {
+  // Fundamentals removed — Yahoo Finance endpoints are blocked from Vercel IPs
+  // Future: add FMP API key via NEXT_PUBLIC_FMP_KEY env var
+  return {
     pe_ratio: null, forward_pe: null,
     eps_trailing: null, eps_forward: null, eps_growth: null,
     analyst_target: null, analyst_rating: null,
   };
-
-  // FMP requires an API key — set FMP_KEY in Vercel environment variables.
-  // Free tier: financialmodelingprep.com → 250 req/day, no credit card.
-  const apiKey = process.env.FMP_KEY;
-  if (!apiKey) return empty;  // no key → return empty (columns show dashes)
-
-  const base = "https://financialmodelingprep.com/api/v3";
-  const headers = { "Accept": "application/json" };
-
-  try {
-    // All 3 endpoints in parallel — 3 req per stock
-    const [profileRes, ratiosRes, targetRes] = await Promise.all([
-      fetch(`${base}/profile/${encodeURIComponent(symbol)}?apikey=${apiKey}`,                  { headers }),
-      fetch(`${base}/ratios-ttm/${encodeURIComponent(symbol)}?apikey=${apiKey}`,               { headers }),
-      fetch(`${base}/price-target-consensus/${encodeURIComponent(symbol)}?apikey=${apiKey}`,   { headers }),
-    ]);
-
-    // ── Profile: pe, eps ─────────────────────────────────────
-    let pe: number | null          = null;
-    let epsTrailing: number | null = null;
-
-    if (profileRes.ok) {
-      const pd = await profileRes.json();
-      const p  = Array.isArray(pd) ? pd[0] : pd;
-      if (p && typeof p === "object") {
-        pe          = typeof p.pe  === "number" && p.pe  > 0 ? Math.round(p.pe  * 10) / 10 : null;
-        epsTrailing = typeof p.eps === "number"              ? Math.round(p.eps * 100) / 100 : null;
-      }
-    }
-
-    // ── Ratios TTM: peRatioTTM (more accurate), epsGrowthTTM ─
-    let peTTM: number | null      = null;
-    let epsGrowth: number | null  = null;
-
-    if (ratiosRes.ok) {
-      const rd = await ratiosRes.json();
-      const r  = Array.isArray(rd) ? rd[0] : rd;
-      if (r && typeof r === "object") {
-        // peRatioTTM is more accurate than profile.pe
-        const rawPE = r.peRatioTTM ?? r.priceEarningsRatioTTM ?? null;
-        if (typeof rawPE === "number" && rawPE > 0 && rawPE < 5000) {
-          peTTM = Math.round(rawPE * 10) / 10;
-        }
-        // EPS growth: try multiple fields (decimal, e.g. 0.21 = 21%)
-        const rawGrowth = r.epsGrowthTTM ?? r.netIncomePerShareGrowthTTM ?? r.revenueGrowthTTM ?? null;
-        if (typeof rawGrowth === "number" && isFinite(rawGrowth)) {
-          // FMP returns as decimal (0.21 = 21%) — convert to %
-          epsGrowth = Math.round(rawGrowth * 1000) / 10;
-          // Sanity-check: cap at ±999%
-          if (Math.abs(epsGrowth) > 999) epsGrowth = null;
-        }
-      }
-    }
-
-    // ── Price target consensus ────────────────────────────────
-    let analystTarget: number | null = null;
-
-    if (targetRes.ok) {
-      const td = await targetRes.json();
-      const t  = Array.isArray(td) ? td[0] : td;
-      if (t && typeof t === "object") {
-        const tgt = t.targetConsensus ?? t.targetMedian ?? null;
-        if (typeof tgt === "number" && tgt > 0) {
-          analystTarget = Math.round(tgt * 100) / 100;
-        }
-      }
-    }
-
-    return {
-      pe_ratio:       peTTM ?? pe,   // prefer TTM over profile.pe
-      forward_pe:     null,           // FMP v3 free tier doesn't give forward PE reliably
-      eps_trailing:   epsTrailing,
-      eps_forward:    null,
-      eps_growth:     epsGrowth,
-      analyst_target: analystTarget,
-      analyst_rating: null,           // FMP consensus string needs paid tier
-    };
-  } catch {
-    return empty;
-  }
 }
 
 
