@@ -5,9 +5,12 @@ import { runPipeline, RawOHLCV } from "@/lib/pipeline";
 import { AppConfig } from "@/types";
 
 export const maxDuration = 30;
+// Force dynamic rendering — never cache the API response
+// This ensures config changes always trigger a full recompute
 export const dynamic = "force-dynamic";
 
-// ─── Fundamentals Interface ─────────────────────────────────────
+// ─── Fundamentals via Yahoo v7/finance/quote ──────────────────
+// v7/quote works from Vercel server-side (v10/quoteSummary is often blocked)
 interface Fundamentals {
   pe_ratio: number | null;
   forward_pe: number | null;
@@ -18,141 +21,48 @@ interface Fundamentals {
   analyst_rating: string | null;
 }
 
-// ─── Main Fetch Function ────────────────────────────────────────
 async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
   const empty: Fundamentals = {
-    pe_ratio: null, forward_pe: null,
-    eps_trailing: null, eps_forward: null, eps_growth: null,
-    analyst_target: null, analyst_rating: null,
+    pe_ratio: null, forward_pe: null, eps_trailing: null,
+    eps_forward: null, eps_growth: null, analyst_target: null, analyst_rating: null,
   };
 
-  // Helper to extract number (handles {raw: val} or raw number)
-  const getNum = (obj: any, key: string): number | null => {
-    if (!obj) return null;
-    const v = obj[key];
-    if (v == null) return null;
-    if (typeof v === "number") return v;
-    if (typeof v === "object" && v.raw != null) return v.raw;
-    return null;
-  };
+  const API_KEY = process.env.tjyHEDDrVplwTcHdzB8FOPJPZdHBKGXV; // Add this to your Vercel Environment Variables
+  if (!API_KEY) return empty;
 
-  // ── STRATEGY 1: Yahoo v7/finance/quote (Most Reliable on Vercel) ──
-  // This endpoint is lightweight and often works where v11 fails.
-  const hosts = ["query2", "query1"]; // Try query2 first, often less loaded
-  
-  for (const host of hosts) {
-    try {
-      const url = `https://${host}.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
-      
-      // Minimal headers to look like a generic HTTP client
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-          "Accept": "*/*",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Connection": "keep-alive",
-        },
-        next: { revalidate: 3600 }, // Cache 1hr
-      });
+  try {
+    // 1. Fetch Ratios (for P/E)
+    const ratiosRes = await fetch(`https://financialmodelingprep.com/api/v3/ratios/${symbol}?limit=1&apikey=${API_KEY}`, { next: { revalidate: 3600 } });
+    const ratios = await ratiosRes.json();
 
-      if (!res.ok) {
-        // Log failure to Vercel logs
-        console.error(`[Fundamentals] ${host} v7 failed: ${res.status}`);
-        continue; 
-      }
+    // 2. Fetch Analyst Estimates (for Targets and Forward EPS)
+    const analystRes = await fetch(`https://financialmodelingprep.com/api/v3/analyst-estimates/${symbol}?limit=1&apikey=${API_KEY}`, { next: { revalidate: 3600 } });
+    const analyst = await analystRes.json();
 
-      const json = await res.json();
-      const quote = json?.quoteResponse?.result?.[0];
+    // 3. Fetch Income Statement (for Trailing EPS and Growth)
+    const incomeRes = await fetch(`https://financialmodelingprep.com/api/v3/income-statement/${symbol}?limit=2&apikey=${API_KEY}`, { next: { revalidate: 3600 } });
+    const income = await incomeRes.json();
 
-      if (quote) {
-        const pe = getNum(quote, "trailingPE");
-        const forwardPE = getNum(quote, "forwardPE");
-        const epsTrailing = getNum(quote, "epsTrailingTwelveMonths");
-        const epsForward = getNum(quote, "epsForward");
-        const analystTarget = getNum(quote, "targetMeanPrice");
-        
-        // Calculate Growth if possible
-        let epsGrowth = getNum(quote, "earningsGrowth"); // Sometimes present
-        if (epsGrowth == null && epsTrailing != null && epsForward != null && epsTrailing !== 0) {
-           epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
-        }
-
-        const recKey = typeof quote.recommendationKey === "string" ? quote.recommendationKey : null;
-        let analystRating: string | null = recKey 
-          ? (recKey.charAt(0).toUpperCase() + recKey.slice(1)) 
-          : null;
-
-        // If we got at least PE, we have valid data
-        if (pe != null) {
-          return {
-            pe_ratio: pe != null ? Math.round(pe * 10) / 10 : null,
-            forward_pe: forwardPE != null ? Math.round(forwardPE * 10) / 10 : null,
-            eps_trailing: epsTrailing,
-            eps_forward: epsForward,
-            eps_growth: epsGrowth != null ? Math.round(epsGrowth * 1000) / 10 : null,
-            analyst_target: analystTarget != null ? Math.round(analystTarget * 100) / 100 : null,
-            analyst_rating: analystRating,
-          };
-        }
-      }
-    } catch (e) {
-      console.error(`[Fundamentals] Network error ${host}:`, e);
+    let eps_growth = null;
+    if (income.length >= 2 && income[1].eps > 0) {
+        eps_growth = ((income[0].eps - income[1].eps) / income[1].eps) * 100;
     }
+
+    return {
+      pe_ratio: ratios[0]?.priceEarningsRatio ? Math.round(ratios[0].priceEarningsRatio * 10) / 10 : null,
+      forward_pe: null, // FMP requires premium for strict forward PE, but you can calculate it from price / estimatedEPS
+      eps_trailing: income[0]?.eps ?? null,
+      eps_forward: analyst[0]?.estimatedEpsConsensus ?? null,
+      eps_growth: eps_growth ? Math.round(eps_growth * 10) / 10 : null,
+      analyst_target: analyst[0]?.estimatedTargetConsensus ?? null,
+      analyst_rating: null, // Premium field in FMP, but target price is free
+    };
+
+  } catch (e) {
+    console.error(`FMP Fetch failed for ${symbol}:`, e);
+    return empty;
   }
-
-  // ── STRATEGY 2: Yahoo v11 (Fallback - Rarely works on Vercel without Crumb) ──
-  // Keeping this as backup in case v7 is deprecated for a specific symbol
-  for (const host of hosts) {
-    try {
-      const url = `https://${host}.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=financialData,defaultKeyStatistics,summaryDetail`;
-      const res = await fetch(url, {
-        headers: {
-           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-           "Accept": "*/*",
-        },
-        next: { revalidate: 3600 },
-      });
-      
-      if (!res.ok) continue;
-      
-      const json = await res.json();
-      const result = json?.quoteSummary?.result?.[0];
-      if (!result) continue;
-
-      const fin = result.financialData || {};
-      const stats = result.defaultKeyStatistics || {};
-      const summ = result.summaryDetail || {};
-
-      const pe = getNum(summ, "trailingPE") ?? getNum(stats, "trailingPE");
-      const forwardPE = getNum(summ, "forwardPE");
-      const epsTrailing = getNum(stats, "trailingEps");
-      const epsForward = getNum(fin, "forwardEps");
-      const analystTarget = getNum(fin, "targetMeanPrice");
-      
-      let epsGrowth = getNum(fin, "earningsGrowth");
-      if (epsGrowth == null && epsTrailing != null && epsForward != null && epsTrailing !== 0) {
-         epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
-      }
-
-      if (pe != null) {
-         return {
-            pe_ratio: pe != null ? Math.round(pe * 10) / 10 : null,
-            forward_pe: forwardPE != null ? Math.round(forwardPE * 10) / 10 : null,
-            eps_trailing: epsTrailing,
-            eps_forward: epsForward,
-            eps_growth: epsGrowth != null ? Math.round(epsGrowth * 1000) / 10 : null,
-            analyst_target: analystTarget != null ? Math.round(analystTarget * 100) / 100 : null,
-            analyst_rating: null, // Harder to get from v11 without extra parsing
-         };
-      }
-    } catch (e) {
-      console.error(`[Fundamentals] v11 error:`, e);
-    }
-  }
-
-  return empty;
 }
-
 
 // ─── OHLCV + current price ─────────────────────────────────────
 async function fetchYahooOHLCV(
@@ -167,7 +77,7 @@ async function fetchYahooOHLCV(
 
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
-      cache: "no-store", 
+      cache: "no-store", // always fetch fresh so config changes recompute correctly
     });
     if (!res.ok) return null;
 
@@ -195,21 +105,33 @@ async function fetchYahooOHLCV(
     }
     if (bars.length < 50) return null;
 
+    // ── Current price ──────────────────────────────────────────
+    // Use regularMarketPrice (live/delayed quote) if available; else last bar
     const lastBar     = bars[bars.length - 1];
     const secondLast  = bars[bars.length - 2];
     let currentPrice: number = meta.regularMarketPrice ?? lastBar.close;
     if (!currentPrice || currentPrice <= 0) currentPrice = lastBar.close;
 
+    // ── Change % ───────────────────────────────────────────────
+    // ROOT-CAUSE FIX: meta.chartPreviousClose = close BEFORE the chart's first
+    // bar (i.e. ~252 trading days ago), NOT yesterday's close.
+    // The only reliable source is bars[-2].close = prior trading day's close.
+    // We fall back to regularMarketChange if bar data is unavailable.
     let changePct = 0;
+
     if (secondLast && secondLast.close > 0 && currentPrice > 0) {
+      // Primary: (today's price − yesterday's bar close) / yesterday's bar close
+      // This uses the OHLCV series we already fetched — always correct.
       changePct = ((currentPrice - secondLast.close) / secondLast.close) * 100;
     } else if (meta.regularMarketChange != null && lastBar.close > 0) {
+      // Fallback: Yahoo's absolute dollar change ÷ implied prev close
       const impliedPrev = currentPrice - (meta.regularMarketChange as number);
       if (impliedPrev > 0) {
         changePct = ((meta.regularMarketChange as number) / impliedPrev) * 100;
       }
     }
 
+    // Clamp: no stock moves > 50% in a single day (catches any remaining bad data)
     if (Math.abs(changePct) > 50) changePct = 0;
 
     return { bars, currentPrice, changePct };
@@ -224,6 +146,7 @@ async function analyzeStock(
   config: AppConfig
 ) {
   try {
+    // Fetch OHLCV and fundamentals in parallel
     const [data, fundamentals] = await Promise.all([
       fetchYahooOHLCV(stock.symbol, config.backtest.lookbackDays),
       fetchFundamentals(stock.symbol),
@@ -246,6 +169,7 @@ async function analyzeStock(
     }
 
     const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct);
+    // Spread result (which includes chart_bars) + add fundamentals
     return { ...result, fundamentals };
   } catch (e) {
     return {
