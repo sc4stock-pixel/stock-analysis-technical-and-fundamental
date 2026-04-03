@@ -39,9 +39,9 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
   try {
     // All 3 endpoints in parallel — 3 req per stock
     const [profileRes, ratiosRes, targetRes] = await Promise.all([
-      fetch(`${base}/profile/${encodeURIComponent(symbol)}?apikey=${apiKey}`,         { headers, next: { revalidate: 3600 } }),
-      fetch(`${base}/ratios-ttm/${encodeURIComponent(symbol)}?apikey=${apiKey}`,       { headers, next: { revalidate: 3600 } }),
-      fetch(`${base}/price-target-consensus/${encodeURIComponent(symbol)}?apikey=${apiKey}`, { headers, next: { revalidate: 3600 } }),
+      fetch(`${base}/profile/${encodeURIComponent(symbol)}?apikey=${apiKey}`,                  { headers }),
+      fetch(`${base}/ratios-ttm/${encodeURIComponent(symbol)}?apikey=${apiKey}`,               { headers }),
+      fetch(`${base}/price-target-consensus/${encodeURIComponent(symbol)}?apikey=${apiKey}`,   { headers }),
     ]);
 
     // ── Profile: pe, eps ─────────────────────────────────────
