@@ -157,7 +157,13 @@ export default function ChartTab({ result }: Props) {
   const maxVol = Math.max(...chartData.map(d => d.Volume ?? 0));
 
   // ── X ticks — show ~8 labels ────────────────────────────────────
-  const tickEvery = Math.max(1, Math.floor(chartData.length / 8));
+  // Build sparse monthly tick positions for clean X-axis (avoids dense grid lines)
+  // Pick ~8-10 evenly spaced ticks regardless of range
+  const tickCount = Math.min(8, chartData.length);
+  const tickStep = Math.max(1, Math.floor(chartData.length / tickCount));
+  const sparseTicks = chartData
+    .filter((_, i) => i === 0 || i === chartData.length - 1 || i % tickStep === 0)
+    .map(d => d.dateShort);
 
   // ── Trades in view ───────────────────────────────────────────────
   const datesInView = new Set(sliced.map(b => b.date));
@@ -235,13 +241,13 @@ export default function ChartTab({ result }: Props) {
       <div style={{ height: priceH }}>
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="2 4" stroke="#1e2d4a" />
+            <CartesianGrid strokeDasharray="1 6" stroke="#1e2d4a" vertical={false} />
             <XAxis
               dataKey="dateShort"
               tick={{ fontSize: 9, fill: "#4a6080" }}
               tickLine={false}
-              tickFormatter={(v, i) => i % tickEvery === 0 ? v : ""}
-              interval={0}
+              axisLine={{ stroke: "#1e2d4a" }}
+              ticks={sparseTicks}
             />
             <YAxis
               domain={[yMin, yMax]}
@@ -343,7 +349,7 @@ export default function ChartTab({ result }: Props) {
             <ComposedChart data={chartData} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
               <XAxis dataKey="dateShort" hide />
               <YAxis domain={[0, 100]} tick={{ fontSize: 8, fill: "#4a6080" }} width={46} />
-              <CartesianGrid strokeDasharray="2 4" stroke="#1e2d4a" />
+              <CartesianGrid strokeDasharray="1 6" stroke="#1e2d4a" vertical={false} />
               <ReferenceLine y={70} stroke="#ff4757" strokeDasharray="3 3" strokeOpacity={0.5} />
               <ReferenceLine y={30} stroke="#00ff88" strokeDasharray="3 3" strokeOpacity={0.5} />
               <Line dataKey="RSI" name="RSI" stroke="#a78bfa" strokeWidth={1.5} dot={false} />
@@ -361,7 +367,7 @@ export default function ChartTab({ result }: Props) {
               <XAxis dataKey="dateShort" hide />
               <YAxis tick={{ fontSize: 8, fill: "#4a6080" }} width={46}
                 tickFormatter={(v: number) => v.toFixed(2)} />
-              <CartesianGrid strokeDasharray="2 4" stroke="#1e2d4a" />
+              <CartesianGrid strokeDasharray="1 6" stroke="#1e2d4a" vertical={false} />
               <ReferenceLine y={0} stroke="#4a6080" />
               <Bar dataKey="MACD H" name="MACD H"
                 fill="#34d399" opacity={0.8}
