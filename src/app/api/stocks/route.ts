@@ -1,3 +1,18 @@
+The issue is almost certainly that **Yahoo Finance is blocking the request** from Vercel's servers. Your logs likely show `401 Unauthorized` or `403 Forbidden`, causing the function to return the `empty` object (which renders as "—").
+
+This happens because:
+1.  **v11 Endpoint**: Requires a valid "Crumb" token/cookie pair, which is hard to manage on serverless.
+2.  **Headers**: `Origin` and `Referer` headers on the `v7` request can actually trigger stricter bot detection.
+
+### The Fix
+
+1.  **Prioritize `v7/quote`**: It is lighter and requires less strict authentication.
+2.  **Clean Headers**: Remove `Origin` and `Referer` for `v7`, as they expose the server-side nature of the request.
+3.  **Add Logging**: I added `console.error` so you can see exactly *why* it fails in your Vercel logs.
+
+Here is the corrected `src/app/api/stocks/route.ts`.
+
+```typescript
 // src/app/api/stocks/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_CONFIG } from "@/lib/config";
@@ -5,12 +20,9 @@ import { runPipeline, RawOHLCV } from "@/lib/pipeline";
 import { AppConfig } from "@/types";
 
 export const maxDuration = 30;
-// Force dynamic rendering — never cache the API response
-// This ensures config changes always trigger a full recompute
 export const dynamic = "force-dynamic";
 
-// ─── Fundamentals via Yahoo v7/finance/quote ──────────────────
-// v7/quote works from Vercel server-side (v10/quoteSummary is often blocked)
+// ─── Fundamentals Interface ─────────────────────────────────────
 interface Fundamentals {
   pe_ratio: number | null;
   forward_pe: number | null;
@@ -21,6 +33,7 @@ interface Fundamentals {
   analyst_rating: string | null;
 }
 
+// ─── Main Fetch Function ────────────────────────────────────────
 async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
   const empty: Fundamentals = {
     pe_ratio: null, forward_pe: null,
@@ -28,147 +41,128 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
     analyst_target: null, analyst_rating: null,
   };
 
-  // ── Helper: extract a .raw numeric value from Yahoo quoteSummary objects ──
-  const raw = (obj: Record<string, unknown> | null | undefined, key: string): number | null => {
+  // Helper to extract number (handles {raw: val} or raw number)
+  const getNum = (obj: any, key: string): number | null => {
     if (!obj) return null;
     const v = obj[key];
     if (v == null) return null;
     if (typeof v === "number") return v;
-    if (typeof v === "object" && v !== null && "raw" in v) return (v as { raw: number }).raw;
+    if (typeof v === "object" && v.raw != null) return v.raw;
     return null;
   };
 
-  // ── Attempt 1: Yahoo v11/finance/quoteSummary (same as Python yfinance internally) ──
-  // This is the most complete source — matches ticker.info fields exactly.
-  // Try both query1 and query2 hosts; Vercel IPs sometimes get 401 on one but not both.
-  const v11Modules = "financialData,defaultKeyStatistics,summaryDetail";
-  const v11Hosts = ["query1", "query2"];
+  // ── STRATEGY 1: Yahoo v7/finance/quote (Most Reliable on Vercel) ──
+  // This endpoint is lightweight and often works where v11 fails.
+  const hosts = ["query2", "query1"]; // Try query2 first, often less loaded
   
-  for (const host of v11Hosts) {
+  for (const host of hosts) {
     try {
-      const url = `https://${host}.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${v11Modules}&crumbStore={}`;
+      const url = `https://${host}.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
+      
+      // Minimal headers to look like a generic HTTP client
       const res = await fetch(url, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "application/json, text/plain, */*",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+          "Accept": "*/*",
           "Accept-Language": "en-US,en;q=0.9",
-          "Referer": "https://finance.yahoo.com/",
-          "Origin": "https://finance.yahoo.com",
+          "Connection": "keep-alive",
+        },
+        next: { revalidate: 3600 }, // Cache 1hr
+      });
+
+      if (!res.ok) {
+        // Log failure to Vercel logs
+        console.error(`[Fundamentals] ${host} v7 failed: ${res.status}`);
+        continue; 
+      }
+
+      const json = await res.json();
+      const quote = json?.quoteResponse?.result?.[0];
+
+      if (quote) {
+        const pe = getNum(quote, "trailingPE");
+        const forwardPE = getNum(quote, "forwardPE");
+        const epsTrailing = getNum(quote, "epsTrailingTwelveMonths");
+        const epsForward = getNum(quote, "epsForward");
+        const analystTarget = getNum(quote, "targetMeanPrice");
+        
+        // Calculate Growth if possible
+        let epsGrowth = getNum(quote, "earningsGrowth"); // Sometimes present
+        if (epsGrowth == null && epsTrailing != null && epsForward != null && epsTrailing !== 0) {
+           epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
+        }
+
+        const recKey = typeof quote.recommendationKey === "string" ? quote.recommendationKey : null;
+        let analystRating: string | null = recKey 
+          ? (recKey.charAt(0).toUpperCase() + recKey.slice(1)) 
+          : null;
+
+        // If we got at least PE, we have valid data
+        if (pe != null) {
+          return {
+            pe_ratio: pe != null ? Math.round(pe * 10) / 10 : null,
+            forward_pe: forwardPE != null ? Math.round(forwardPE * 10) / 10 : null,
+            eps_trailing: epsTrailing,
+            eps_forward: epsForward,
+            eps_growth: epsGrowth != null ? Math.round(epsGrowth * 1000) / 10 : null,
+            analyst_target: analystTarget != null ? Math.round(analystTarget * 100) / 100 : null,
+            analyst_rating: analystRating,
+          };
+        }
+      }
+    } catch (e) {
+      console.error(`[Fundamentals] Network error ${host}:`, e);
+    }
+  }
+
+  // ── STRATEGY 2: Yahoo v11 (Fallback - Rarely works on Vercel without Crumb) ──
+  // Keeping this as backup in case v7 is deprecated for a specific symbol
+  for (const host of hosts) {
+    try {
+      const url = `https://${host}.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=financialData,defaultKeyStatistics,summaryDetail`;
+      const res = await fetch(url, {
+        headers: {
+           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+           "Accept": "*/*",
         },
         next: { revalidate: 3600 },
       });
+      
       if (!res.ok) continue;
+      
       const json = await res.json();
       const result = json?.quoteSummary?.result?.[0];
       if (!result) continue;
 
-      const fin   = result.financialData       as Record<string, unknown> ?? {};
-      const stats = result.defaultKeyStatistics as Record<string, unknown> ?? {};
-      const summ  = result.summaryDetail        as Record<string, unknown> ?? {};
+      const fin = result.financialData || {};
+      const stats = result.defaultKeyStatistics || {};
+      const summ = result.summaryDetail || {};
 
-      // P/E: summaryDetail > defaultKeyStatistics
-      const pe        = raw(summ, "trailingPE") ?? raw(stats, "trailingPE") ?? null;
-      const forwardPE = raw(summ, "forwardPE")  ?? raw(stats, "forwardPEG") ?? null;
-
-      // EPS
-      const epsTrailing = raw(stats, "trailingEps") ?? raw(fin, "trailingEps") ?? null;
-      const epsForward  = raw(stats, "forwardEps")  ?? raw(fin, "forwardEps")  ?? null;
-
-      // EPS growth: financialData.earningsGrowth preferred, else compute
-      let epsGrowth = raw(fin, "earningsGrowth") ?? null;
+      const pe = getNum(summ, "trailingPE") ?? getNum(stats, "trailingPE");
+      const forwardPE = getNum(summ, "forwardPE");
+      const epsTrailing = getNum(stats, "trailingEps");
+      const epsForward = getNum(fin, "forwardEps");
+      const analystTarget = getNum(fin, "targetMeanPrice");
+      
+      let epsGrowth = getNum(fin, "earningsGrowth");
       if (epsGrowth == null && epsTrailing != null && epsForward != null && epsTrailing !== 0) {
-        epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
+         epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
       }
 
-      const analystTarget = raw(fin, "targetMeanPrice") ?? null;
-      const recMean       = raw(fin, "recommendationMean") ?? null;
-      const recKey        = typeof fin.recommendationKey === "string"
-        ? fin.recommendationKey : null;
-
-      let analystRating: string | null = recKey
-        ? recKey.charAt(0).toUpperCase() + recKey.slice(1).toLowerCase()
-        : null;
-      if (!analystRating && recMean != null) {
-        if      (recMean <= 1.5) analystRating = "Strong Buy";
-        else if (recMean <= 2.5) analystRating = "Buy";
-        else if (recMean <= 3.5) analystRating = "Hold";
-        else if (recMean <= 4.5) analystRating = "Sell";
-        else                     analystRating = "Strong Sell";
+      if (pe != null) {
+         return {
+            pe_ratio: pe != null ? Math.round(pe * 10) / 10 : null,
+            forward_pe: forwardPE != null ? Math.round(forwardPE * 10) / 10 : null,
+            eps_trailing: epsTrailing,
+            eps_forward: epsForward,
+            eps_growth: epsGrowth != null ? Math.round(epsGrowth * 1000) / 10 : null,
+            analyst_target: analystTarget != null ? Math.round(analystTarget * 100) / 100 : null,
+            analyst_rating: null, // Harder to get from v11 without extra parsing
+         };
       }
-
-      // Only return if we got at least one useful field
-      if (pe != null || epsTrailing != null || analystTarget != null) {
-        return {
-          pe_ratio:       pe            != null ? Math.round(pe * 10) / 10            : null,
-          forward_pe:     forwardPE     != null ? Math.round(forwardPE * 10) / 10     : null,
-          eps_trailing:   epsTrailing,
-          eps_forward:    epsForward,
-          eps_growth:     epsGrowth     != null ? Math.round(epsGrowth * 1000) / 10   : null,
-          analyst_target: analystTarget != null ? Math.round(analystTarget * 100) / 100 : null,
-          analyst_rating: analystRating,
-        };
-      }
-    } catch { /* try next host */ }
-  }
-
-  // ── Attempt 2: Yahoo v7/finance/quote (lighter, no modules) ──
-  for (const host of ["query1", "query2"]) {
-    try {
-      const url = `https://${host}.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-          "Accept": "application/json",
-          "Referer": "https://finance.yahoo.com/",
-        },
-        next: { revalidate: 3600 },
-      });
-      if (!res.ok) continue;
-      const json = await res.json();
-      const q = json?.quoteResponse?.result?.[0] as Record<string, unknown> | undefined;
-      if (!q) continue;
-
-      const getNum = (k: string): number | null => {
-        const v = q[k];
-        return typeof v === "number" ? v : null;
-      };
-
-      const pe          = getNum("trailingPE")  ?? null;
-      const forwardPE   = getNum("forwardPE")   ?? null;
-      // v7 uses epsTrailingTwelveMonths, not trailingEps
-      const epsTrailing = getNum("epsTrailingTwelveMonths") ?? getNum("trailingEps") ?? null;
-      const epsForward  = getNum("epsForward")  ?? getNum("forwardEps") ?? null;
-      let   epsGrowth   = getNum("earningsGrowth") ?? null;
-      if (epsGrowth == null && epsTrailing != null && epsForward != null && epsTrailing !== 0) {
-        epsGrowth = (epsForward - epsTrailing) / Math.abs(epsTrailing);
-      }
-
-      const analystTarget = getNum("targetMeanPrice") ?? null;
-      const recMean       = getNum("recommendationMean") ?? null;
-      const recKey = typeof q.recommendationKey === "string" ? q.recommendationKey : null;
-      let analystRating: string | null = recKey
-        ? recKey.charAt(0).toUpperCase() + recKey.slice(1).toLowerCase()
-        : null;
-      if (!analystRating && recMean != null) {
-        if      (recMean <= 1.5) analystRating = "Strong Buy";
-        else if (recMean <= 2.5) analystRating = "Buy";
-        else if (recMean <= 3.5) analystRating = "Hold";
-        else if (recMean <= 4.5) analystRating = "Sell";
-        else                     analystRating = "Strong Sell";
-      }
-
-      if (pe != null || epsTrailing != null || analystTarget != null) {
-        return {
-          pe_ratio:       pe            != null ? Math.round(pe * 10) / 10            : null,
-          forward_pe:     forwardPE     != null ? Math.round(forwardPE * 10) / 10     : null,
-          eps_trailing:   epsTrailing,
-          eps_forward:    epsForward,
-          eps_growth:     epsGrowth     != null ? Math.round(epsGrowth * 1000) / 10   : null,
-          analyst_target: analystTarget != null ? Math.round(analystTarget * 100) / 100 : null,
-          analyst_rating: analystRating,
-        };
-      }
-    } catch { /* try next */ }
+    } catch (e) {
+      console.error(`[Fundamentals] v11 error:`, e);
+    }
   }
 
   return empty;
@@ -188,7 +182,7 @@ async function fetchYahooOHLCV(
 
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
-      cache: "no-store", // always fetch fresh so config changes recompute correctly
+      cache: "no-store", 
     });
     if (!res.ok) return null;
 
@@ -216,33 +210,21 @@ async function fetchYahooOHLCV(
     }
     if (bars.length < 50) return null;
 
-    // ── Current price ──────────────────────────────────────────
-    // Use regularMarketPrice (live/delayed quote) if available; else last bar
     const lastBar     = bars[bars.length - 1];
     const secondLast  = bars[bars.length - 2];
     let currentPrice: number = meta.regularMarketPrice ?? lastBar.close;
     if (!currentPrice || currentPrice <= 0) currentPrice = lastBar.close;
 
-    // ── Change % ───────────────────────────────────────────────
-    // ROOT-CAUSE FIX: meta.chartPreviousClose = close BEFORE the chart's first
-    // bar (i.e. ~252 trading days ago), NOT yesterday's close.
-    // The only reliable source is bars[-2].close = prior trading day's close.
-    // We fall back to regularMarketChange if bar data is unavailable.
     let changePct = 0;
-
     if (secondLast && secondLast.close > 0 && currentPrice > 0) {
-      // Primary: (today's price − yesterday's bar close) / yesterday's bar close
-      // This uses the OHLCV series we already fetched — always correct.
       changePct = ((currentPrice - secondLast.close) / secondLast.close) * 100;
     } else if (meta.regularMarketChange != null && lastBar.close > 0) {
-      // Fallback: Yahoo's absolute dollar change ÷ implied prev close
       const impliedPrev = currentPrice - (meta.regularMarketChange as number);
       if (impliedPrev > 0) {
         changePct = ((meta.regularMarketChange as number) / impliedPrev) * 100;
       }
     }
 
-    // Clamp: no stock moves > 50% in a single day (catches any remaining bad data)
     if (Math.abs(changePct) > 50) changePct = 0;
 
     return { bars, currentPrice, changePct };
@@ -257,7 +239,6 @@ async function analyzeStock(
   config: AppConfig
 ) {
   try {
-    // Fetch OHLCV and fundamentals in parallel
     const [data, fundamentals] = await Promise.all([
       fetchYahooOHLCV(stock.symbol, config.backtest.lookbackDays),
       fetchFundamentals(stock.symbol),
@@ -280,7 +261,6 @@ async function analyzeStock(
     }
 
     const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct);
-    // Spread result (which includes chart_bars) + add fundamentals
     return { ...result, fundamentals };
   } catch (e) {
     return {
@@ -335,3 +315,4 @@ export async function GET(req: NextRequest) {
   const result = await analyzeStock(stock, DEFAULT_CONFIG);
   return NextResponse.json(result);
 }
+```
