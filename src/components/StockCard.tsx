@@ -5,7 +5,6 @@ import { regimeColor } from "@/lib/regime";
 import OverviewTab    from "./tabs/OverviewTab";
 import BacktestTab   from "./tabs/BacktestTab";
 import MonteCarloTab from "./tabs/MonteCarloTab";
-import TradesTab     from "./tabs/TradesTab";
 import TradingPlanTab from "./tabs/TradingPlanTab";
 import ChartTab      from "./tabs/ChartTab";
 
@@ -14,7 +13,8 @@ interface Props {
   config: AppConfig;
 }
 
-const TABS = ["OVERVIEW", "CHART", "BACKTEST", "MONTE CARLO", "TRADES", "PLAN"] as const;
+// TRADES tab removed — trade list is already shown inside the CHART tab
+const TABS = ["OVERVIEW", "CHART", "BACKTEST", "MONTE CARLO", "PLAN"] as const;
 type Tab = (typeof TABS)[number];
 
 function signalBadge(signal: string) {
@@ -46,7 +46,6 @@ export default function StockCard({ result, config }: Props) {
     return result.exchange === "HK" ? `HK$${p.toFixed(2)}` : `$${p.toFixed(2)}`;
   };
 
-  // change_pct is already a true percentage from the API (e.g. +2.9 means +2.9%)
   const chg = result.change_pct ?? 0;
 
   return (
@@ -131,7 +130,6 @@ export default function StockCard({ result, config }: Props) {
             {tab === "OVERVIEW"    && <OverviewTab    result={result} />}
             {tab === "BACKTEST"    && <BacktestTab    result={result} />}
             {tab === "MONTE CARLO" && <MonteCarloTab  result={result} />}
-            {tab === "TRADES"      && <TradesTab      result={result} />}
             {tab === "PLAN"        && <TradingPlanTab result={result} />}
           </>
         )}
