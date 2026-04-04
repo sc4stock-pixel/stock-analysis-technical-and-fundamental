@@ -223,10 +223,12 @@ export default function MonteCarloTab({ result }: Props) {
                 <CartesianGrid strokeDasharray="1 6" stroke="#1e2d4a" vertical={false} />
                 <XAxis
                   dataKey="t"
+                  type="number"
+                  domain={[0, sim.n]}
                   tick={{ fontSize: 8, fill: "#4a6080" }}
                   tickLine={false}
                   axisLine={{ stroke: "#1e2d4a" }}
-                  tickFormatter={v => v === 0 ? "Start" : `D${v}`}
+                  tickFormatter={(v: number) => v === 0 ? "Start" : `D${v}`}
                   ticks={[0, Math.floor(sim.n * 0.25), Math.floor(sim.n * 0.5), Math.floor(sim.n * 0.75), sim.n]}
                 />
                 <YAxis
