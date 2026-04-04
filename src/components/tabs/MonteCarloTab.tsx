@@ -205,8 +205,14 @@ export default function MonteCarloTab({ result }: Props) {
         </div>
       </div>
 
-      {/* ── FAN CHART (left) + HISTOGRAM (right) ── */}
-      {sim ? (
+      {/* ── FAN CHART (left) + HISTOGRAM (right) — shared Y axis ── */}
+      {sim ? (() => {
+        // Shared Y domain across both charts for perfect alignment
+        const allVals = [sim.p5 * 0.97, sim.p95 * 1.03,
+          ...sim.histData.map(d => d.midpoint)];
+        const yMin = Math.min(...allVals);
+        const yMax = Math.max(...allVals);
+        return (
         <div className="flex gap-2" style={{ height: 260 }}>
 
           {/* LEFT: Fan Chart — equity path simulation */}
@@ -229,7 +235,7 @@ export default function MonteCarloTab({ result }: Props) {
                   axisLine={{ stroke: "#1e2d4a" }}
                   width={46}
                   tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
-                  domain={["auto", "auto"]}
+                  domain={[yMin, yMax]}
                 />
                 <Tooltip content={<FanTooltip initial={initial} />} />
 
@@ -332,29 +338,25 @@ export default function MonteCarloTab({ result }: Props) {
                   label={{ value: "Count", position: "insideBottom", offset: -2, fontSize: 7, fill: "#4a6080" }}
                 />
                 <YAxis
-                  type="category"
+                  type="number"
                   dataKey="midpoint"
                   tick={{ fontSize: 7, fill: "#4a6080" }}
                   tickLine={false}
                   axisLine={{ stroke: "#1e2d4a" }}
                   width={44}
+                  domain={[yMin, yMax]}
                   tickFormatter={v => `$${Number(v) >= 1000 ? `${(Number(v)/1000).toFixed(1)}k` : v}`}
                 />
                 <Tooltip
-                contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
-                // We use "any" for the item to bypass the strict Recharts internal type mismatch
-                formatter={(v: number, _: string, item: any) => {
+                  contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  formatter={(v: number, _: string, item: any) => {
                     const midpoint = item?.payload?.midpoint;
                     if (midpoint === undefined) return [`${v} paths`, ""];
-                    
                     const pct = ((midpoint - initial) / initial * 100).toFixed(1);
                     const sign = midpoint >= initial ? "+" : "";
-                    
-                    return [
-                    `${v} paths`,
-                    `${sign}${pct}%`
-                    ];
-                }}
+                    return [`${v} paths`, `${sign}${pct}%`];
+                  }}
                 />
                 <Bar dataKey="count" radius={[0, 2, 2, 0]}>
                   {sim.histData.map((entry, i) => (
@@ -376,7 +378,8 @@ export default function MonteCarloTab({ result }: Props) {
             </ResponsiveContainer>
           </div>
         </div>
-      ) : (
+        );
+      })() : (
         // Fallback if equity curve too short for client MC
         <div className="text-[#4a6080] text-xs p-2">
           Simulation paths unavailable (insufficient trade data)
