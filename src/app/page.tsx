@@ -94,7 +94,18 @@ export default function Dashboard() {
            fundamentals and all backtest metrics in one sortable view. ── */}
       {results.length > 0 && (
         <div className="border-b border-[#1e2d4a]">
-          <PortfolioSummaryBar results={results} />
+          <PortfolioSummaryBar
+            results={results}
+            onSymbolClick={(symbol) => {
+              const el = document.getElementById(`card-${symbol}`);
+              if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "start" });
+                // Brief highlight flash
+                el.classList.add("ring-2", "ring-[#00d4ff]", "ring-opacity-60", "rounded-lg");
+                setTimeout(() => el.classList.remove("ring-2", "ring-[#00d4ff]", "ring-opacity-60", "rounded-lg"), 1500);
+              }
+            }}
+          />
         </div>
       )}
 
@@ -124,7 +135,9 @@ export default function Dashboard() {
         {results.length > 0 && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {results.map((result) => (
-              <StockCard key={result.symbol} result={result} config={config} />
+              <div id={`card-${result.symbol}`} className="scroll-mt-16">
+                <StockCard key={result.symbol} result={result} config={config} />
+              </div>
             ))}
             {/* Skeleton placeholders for stocks still loading */}
             {loading && config.stocks.PORTFOLIO

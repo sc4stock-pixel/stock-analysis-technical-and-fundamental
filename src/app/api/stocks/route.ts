@@ -1,179 +1,272 @@
-"use client";
-import { useState, useCallback } from "react";
+// src/app/api/stocks/route.ts
+import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_CONFIG } from "@/lib/config";
-import { AppConfig, StockAnalysisResult } from "@/types";
-import ConfigPanel from "@/components/ConfigPanel";
-import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
-import StockCard from "@/components/StockCard";
+import { runPipeline, RawOHLCV } from "@/lib/pipeline";
+import { AppConfig } from "@/types";
 
-export default function Dashboard() {
-  const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
-  const [results, setResults] = useState<StockAnalysisResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [progressSymbol, setProgressSymbol] = useState("");
-  const [showConfig, setShowConfig] = useState(false);
+export const maxDuration = 30;
+// Force dynamic rendering — never cache the API response
+// This ensures config changes always trigger a full recompute
+export const dynamic = "force-dynamic";
 
-  const runAnalysis = useCallback(async () => {
-    setLoading(true);
-    setProgress(0);
-    setProgressSymbol("");
-    setResults([]);
+// ─── Fundamentals via Yahoo v7/finance/quote ──────────────────
+// v7/quote works from Vercel server-side (v10/quoteSummary is often blocked)
+interface Fundamentals {
+  pe_ratio: number | null;
+  forward_pe: number | null;
+  eps_trailing: number | null;
+  eps_forward: number | null;
+  eps_growth: number | null;
+  analyst_target: number | null;
+  analyst_rating: string | null;
+}
 
-    const portfolio = config.stocks.PORTFOLIO;
-    const allResults: StockAnalysisResult[] = [];
+async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
+  const empty: Fundamentals = {
+    pe_ratio: null, forward_pe: null,
+    eps_trailing: null, eps_forward: null, eps_growth: null,
+    analyst_target: null, analyst_rating: null,
+  };
 
-    for (let i = 0; i < portfolio.length; i++) {
-      const stock = portfolio[i];
-      setProgressSymbol(stock.symbol);
-      try {
-        const res = await fetch("/api/stocks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ symbol: stock.symbol, config }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          allResults.push(data);
-          setResults([...allResults]);
-        }
-      } catch (e) {
-        console.error(`Error fetching ${stock.symbol}:`, e);
+  // FMP requires an API key — set FMP_KEY in Vercel environment variables.
+  // Free tier: financialmodelingprep.com → 250 req/day, no credit card.
+  const apiKey = process.env.FMP_KEY;
+  if (!apiKey) return empty;  // no key → return empty (columns show dashes)
+
+  const base = "https://financialmodelingprep.com/api/v3";
+  const headers = { "Accept": "application/json" };
+
+  try {
+    // All 3 endpoints in parallel — 3 req per stock
+    const [profileRes, ratiosRes, targetRes] = await Promise.all([
+      fetch(`${base}/profile/${encodeURIComponent(symbol)}?apikey=${apiKey}`,                  { headers }),
+      fetch(`${base}/ratios-ttm/${encodeURIComponent(symbol)}?apikey=${apiKey}`,               { headers }),
+      fetch(`${base}/price-target-consensus/${encodeURIComponent(symbol)}?apikey=${apiKey}`,   { headers }),
+    ]);
+
+    // ── Profile: pe, eps ─────────────────────────────────────
+    let pe: number | null          = null;
+    let epsTrailing: number | null = null;
+
+    if (profileRes.ok) {
+      const pd = await profileRes.json();
+      const p  = Array.isArray(pd) ? pd[0] : pd;
+      if (p && typeof p === "object") {
+        pe          = typeof p.pe  === "number" && p.pe  > 0 ? Math.round(p.pe  * 10) / 10 : null;
+        epsTrailing = typeof p.eps === "number"              ? Math.round(p.eps * 100) / 100 : null;
       }
-      setProgress(Math.round(((i + 1) / portfolio.length) * 100));
     }
 
-    setLastUpdated(new Date().toLocaleTimeString());
-    setProgressSymbol("");
-    setLoading(false);
-  }, [config]);
+    // ── Ratios TTM: peRatioTTM (more accurate), epsGrowthTTM ─
+    let peTTM: number | null      = null;
+    let epsGrowth: number | null  = null;
 
-  return (
-    <div className="min-h-screen bg-[#0a0e1a]">
+    if (ratiosRes.ok) {
+      const rd = await ratiosRes.json();
+      const r  = Array.isArray(rd) ? rd[0] : rd;
+      if (r && typeof r === "object") {
+        // peRatioTTM is more accurate than profile.pe
+        const rawPE = r.peRatioTTM ?? r.priceEarningsRatioTTM ?? null;
+        if (typeof rawPE === "number" && rawPE > 0 && rawPE < 5000) {
+          peTTM = Math.round(rawPE * 10) / 10;
+        }
+        // EPS growth: try multiple fields (decimal, e.g. 0.21 = 21%)
+        const rawGrowth = r.epsGrowthTTM ?? r.netIncomePerShareGrowthTTM ?? r.revenueGrowthTTM ?? null;
+        if (typeof rawGrowth === "number" && isFinite(rawGrowth)) {
+          // FMP returns as decimal (0.21 = 21%) — convert to %
+          epsGrowth = Math.round(rawGrowth * 1000) / 10;
+          // Sanity-check: cap at ±999%
+          if (Math.abs(epsGrowth) > 999) epsGrowth = null;
+        }
+      }
+    }
 
-      {/* ── TOP BAR ── */}
-      <header className="border-b border-[#1e2d4a] bg-[#0f1629] px-4 py-2.5 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <span className="text-[#00d4ff] font-bold text-sm tracking-widest">▶ TA DASHBOARD</span>
-          <span className="text-[#4a6080] text-xs">V12.5.6</span>
-          {lastUpdated && <span className="text-[#4a6080] text-xs">· Updated {lastUpdated}</span>}
-          {loading && (
-            <span className="text-[#ffa502] text-xs blink">
-              · {progressSymbol ? `Scanning ${progressSymbol}…` : `Scanning…`} {progress}%
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowConfig(!showConfig)}
-            className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#6b85a0] hover:border-[#00d4ff] hover:text-[#00d4ff] rounded transition-all"
-          >
-            {showConfig ? "▲ HIDE CONFIG" : "▼ CONFIG"}
-          </button>
-          <button
-            onClick={runAnalysis}
-            disabled={loading}
-            className="px-4 py-1.5 text-xs font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all"
-          >
-            {loading ? `SCANNING… ${progress}%` : "▶ RUN ANALYSIS"}
-          </button>
-        </div>
-      </header>
+    // ── Price target consensus ────────────────────────────────
+    let analystTarget: number | null = null;
 
-      {/* ── CONFIG PANEL ── */}
-      {showConfig && (
-        <div className="border-b border-[#1e2d4a] bg-[#0a0e1a]">
-          <ConfigPanel config={config} onChange={setConfig} />
-        </div>
-      )}
+    if (targetRes.ok) {
+      const td = await targetRes.json();
+      const t  = Array.isArray(td) ? td[0] : td;
+      if (t && typeof t === "object") {
+        const tgt = t.targetConsensus ?? t.targetMedian ?? null;
+        if (typeof tgt === "number" && tgt > 0) {
+          analystTarget = Math.round(tgt * 100) / 100;
+        }
+      }
+    }
 
-      {/* ── PORTFOLIO SUMMARY + SORTABLE TABLE ──
-           Renders as soon as the first stock completes.
-           The table IS the summary — it shows signals, regime, score,
-           fundamentals and all backtest metrics in one sortable view. ── */}
-      {results.length > 0 && (
-        <div className="border-b border-[#1e2d4a]">
-          <PortfolioSummaryBar
-            results={results}
-            onSymbolClick={(symbol) => {
-              const el = document.getElementById(`card-${symbol}`);
-              if (el) {
-                el.scrollIntoView({ behavior: "smooth", block: "start" });
-                // Brief highlight flash
-                el.classList.add("ring-2", "ring-[#00d4ff]", "ring-opacity-60", "rounded-lg");
-                setTimeout(() => el.classList.remove("ring-2", "ring-[#00d4ff]", "ring-opacity-60", "rounded-lg"), 1500);
-              }
-            }}
-          />
-        </div>
-      )}
+    return {
+      pe_ratio:       peTTM ?? pe,   // prefer TTM over profile.pe
+      forward_pe:     null,           // FMP v3 free tier doesn't give forward PE reliably
+      eps_trailing:   epsTrailing,
+      eps_forward:    null,
+      eps_growth:     epsGrowth,
+      analyst_target: analystTarget,
+      analyst_rating: null,           // FMP consensus string needs paid tier
+    };
+  } catch {
+    return empty;
+  }
+}
 
-      {/* ── STOCK CARDS ── */}
-      <main className="p-4">
 
-        {/* Skeleton while loading and no results yet */}
-        {loading && results.length === 0 && (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {config.stocks.PORTFOLIO.map((s) => (
-              <div key={s.symbol} className="card p-4 h-48 animate-pulse">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="h-4 w-16 bg-[#1e2d4a] rounded" />
-                  <div className="h-4 w-24 bg-[#1e2d4a] rounded" />
-                </div>
-                <div className="space-y-2">
-                  <div className="h-3 w-full bg-[#1e2d4a] rounded" />
-                  <div className="h-3 w-3/4 bg-[#1e2d4a] rounded" />
-                  <div className="h-3 w-1/2 bg-[#1e2d4a] rounded" />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+// ─── OHLCV + current price ─────────────────────────────────────
+async function fetchYahooOHLCV(
+  symbol: string,
+  lookbackDays: number
+): Promise<{ bars: RawOHLCV[]; currentPrice: number; changePct: number } | null> {
+  try {
+    const calendarDays = Math.floor(lookbackDays * 7 / 5) + 15;
+    const end   = Math.floor(Date.now() / 1000);
+    const start = end - calendarDays * 86400;
+    const url   = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${start}&period2=${end}&interval=1d&events=div,splits`;
 
-        {/* Live results grid — streams in stock-by-stock */}
-        {results.length > 0 && (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {results.map((result) => (
-              <div id={`card-${result.symbol}`} className="scroll-mt-16">
-                <StockCard key={result.symbol} result={result} config={config} />
-              </div>
-            ))}
-            {/* Skeleton placeholders for stocks still loading */}
-            {loading && config.stocks.PORTFOLIO
-              .filter(s => !results.some(r => r.symbol === s.symbol))
-              .map(s => (
-                <div key={s.symbol} className="card p-4 h-48 animate-pulse">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="h-4 w-16 bg-[#1e2d4a] rounded" />
-                    <span className="text-[#4a6080] text-xs">{s.symbol}</span>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="h-3 w-full bg-[#1e2d4a] rounded" />
-                    <div className="h-3 w-2/3 bg-[#1e2d4a] rounded" />
-                  </div>
-                  <div className="text-[#ffa502] text-xs mt-3 blink">scanning…</div>
-                </div>
-              ))
-            }
-          </div>
-        )}
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      cache: "no-store", // always fetch fresh so config changes recompute correctly
+    });
+    if (!res.ok) return null;
 
-        {/* Empty state */}
-        {!loading && results.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-96 text-[#4a6080]">
-            <div className="text-4xl mb-4 opacity-20">◈</div>
-            <div className="text-sm mb-1">No analysis running</div>
-            <div className="text-xs mb-4">Click ▶ RUN ANALYSIS to scan your portfolio</div>
-            <button
-              onClick={runAnalysis}
-              className="px-6 py-2 text-sm font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 rounded transition-all"
-            >
-              ▶ RUN ANALYSIS
-            </button>
-          </div>
-        )}
-      </main>
-    </div>
-  );
+    const json   = await res.json();
+    const result = json?.chart?.result?.[0];
+    if (!result) return null;
+
+    const timestamps: number[]  = result.timestamp ?? [];
+    const ohlcv                 = result.indicators?.quote?.[0];
+    const meta                  = result.meta ?? {};
+    if (!ohlcv || timestamps.length === 0) return null;
+
+    const bars: RawOHLCV[] = [];
+    for (let i = 0; i < timestamps.length; i++) {
+      const o = ohlcv.open?.[i];
+      const h = ohlcv.high?.[i];
+      const l = ohlcv.low?.[i];
+      const c = ohlcv.close?.[i];
+      const v = ohlcv.volume?.[i];
+      if (o == null || h == null || l == null || c == null || c <= 0) continue;
+      bars.push({
+        date:   new Date(timestamps[i] * 1000).toISOString().split("T")[0],
+        open: o, high: h, low: l, close: c, volume: v ?? 0,
+      });
+    }
+    if (bars.length < 50) return null;
+
+    // ── Current price ──────────────────────────────────────────
+    // Use regularMarketPrice (live/delayed quote) if available; else last bar
+    const lastBar     = bars[bars.length - 1];
+    const secondLast  = bars[bars.length - 2];
+    let currentPrice: number = meta.regularMarketPrice ?? lastBar.close;
+    if (!currentPrice || currentPrice <= 0) currentPrice = lastBar.close;
+
+    // ── Change % ───────────────────────────────────────────────
+    // ROOT-CAUSE FIX: meta.chartPreviousClose = close BEFORE the chart's first
+    // bar (i.e. ~252 trading days ago), NOT yesterday's close.
+    // The only reliable source is bars[-2].close = prior trading day's close.
+    // We fall back to regularMarketChange if bar data is unavailable.
+    let changePct = 0;
+
+    if (secondLast && secondLast.close > 0 && currentPrice > 0) {
+      // Primary: (today's price − yesterday's bar close) / yesterday's bar close
+      // This uses the OHLCV series we already fetched — always correct.
+      changePct = ((currentPrice - secondLast.close) / secondLast.close) * 100;
+    } else if (meta.regularMarketChange != null && lastBar.close > 0) {
+      // Fallback: Yahoo's absolute dollar change ÷ implied prev close
+      const impliedPrev = currentPrice - (meta.regularMarketChange as number);
+      if (impliedPrev > 0) {
+        changePct = ((meta.regularMarketChange as number) / impliedPrev) * 100;
+      }
+    }
+
+    // Clamp: no stock moves > 50% in a single day (catches any remaining bad data)
+    if (Math.abs(changePct) > 50) changePct = 0;
+
+    return { bars, currentPrice, changePct };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Single stock analysis ─────────────────────────────────────
+async function analyzeStock(
+  stock: { symbol: string; name: string; exchange: string },
+  config: AppConfig
+) {
+  try {
+    // Fetch OHLCV and fundamentals in parallel
+    const [data, fundamentals] = await Promise.all([
+      fetchYahooOHLCV(stock.symbol, config.backtest.lookbackDays),
+      fetchFundamentals(stock.symbol),
+    ]);
+
+    if (!data) {
+      return {
+        symbol: stock.symbol, name: stock.name, exchange: stock.exchange,
+        signal: "ERROR", score: 0, confidence: 0,
+        regime: "UNKNOWN",
+        regime_info: {
+          regime: "UNKNOWN", atr_ratio: 1, adx_slope: 0,
+          bullish_count: 0, is_high_volatility: false, is_extreme_dislocation: false,
+        },
+        current_price: 0, change_pct: 0,
+        fundamentals,
+        backtest: null, monte_carlo: null, walk_forward: null, kelly: null,
+        error: "Insufficient data",
+      };
+    }
+
+    const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct);
+    // Spread result (which includes chart_bars) + add fundamentals
+    return { ...result, fundamentals };
+  } catch (e) {
+    return {
+      symbol: stock.symbol, name: stock.name, exchange: stock.exchange,
+      signal: "ERROR", score: 0, confidence: 0,
+      regime: "ERROR",
+      regime_info: {
+        regime: "ERROR", atr_ratio: 1, adx_slope: 0,
+        bullish_count: 0, is_high_volatility: false, is_extreme_dislocation: false,
+      },
+      current_price: 0, change_pct: 0,
+      fundamentals: {
+        pe_ratio: null, forward_pe: null, eps_trailing: null,
+        eps_forward: null, eps_growth: null, analyst_target: null, analyst_rating: null,
+      },
+      backtest: null, monte_carlo: null, walk_forward: null, kelly: null,
+      error: String(e),
+    };
+  }
+}
+
+// ─── POST handler ──────────────────────────────────────────────
+export async function POST(req: NextRequest) {
+  try {
+    const body   = await req.json().catch(() => ({}));
+    const config: AppConfig = body.config ?? DEFAULT_CONFIG;
+
+    if (body.symbol) {
+      const stock = config.stocks.PORTFOLIO.find((s) => s.symbol === body.symbol)
+        ?? { symbol: body.symbol, name: body.symbol, exchange: "US" };
+      const result = await analyzeStock(stock, config);
+      return NextResponse.json(result);
+    }
+
+    const portfolio = config.stocks.PORTFOLIO;
+    const results = [];
+    for (const stock of portfolio) {
+      results.push(await analyzeStock(stock, config));
+    }
+    return NextResponse.json({ results, timestamp: new Date().toISOString(), config });
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 });
+  }
+}
+
+// ─── GET handler ───────────────────────────────────────────────
+export async function GET(req: NextRequest) {
+  const symbol = req.nextUrl.searchParams.get("symbol");
+  if (!symbol) return NextResponse.json({ error: "symbol required" }, { status: 400 });
+  const stock = DEFAULT_CONFIG.stocks.PORTFOLIO.find((s) => s.symbol === symbol)
+    ?? { symbol, name: symbol, exchange: "US" };
+  const result = await analyzeStock(stock, DEFAULT_CONFIG);
+  return NextResponse.json(result);
 }
