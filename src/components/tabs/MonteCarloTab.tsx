@@ -341,12 +341,20 @@ export default function MonteCarloTab({ result }: Props) {
                   tickFormatter={v => `$${Number(v) >= 1000 ? `${(Number(v)/1000).toFixed(1)}k` : v}`}
                 />
                 <Tooltip
-                  contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
-                  formatter={(v: number, _: string, entry: { payload: { midpoint: number } }) => [
+                contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
+                // We use "any" for the item to bypass the strict Recharts internal type mismatch
+                formatter={(v: number, _: string, item: any) => {
+                    const midpoint = item?.payload?.midpoint;
+                    if (midpoint === undefined) return [`${v} paths`, ""];
+                    
+                    const pct = ((midpoint - initial) / initial * 100).toFixed(1);
+                    const sign = midpoint >= initial ? "+" : "";
+                    
+                    return [
                     `${v} paths`,
-                    `${entry.payload.midpoint >= initial
-                      ? "+" : ""}${((entry.payload.midpoint - initial) / initial * 100).toFixed(1)}%`,
-                  ]}
+                    `${sign}${pct}%`
+                    ];
+                }}
                 />
                 <Bar dataKey="count" radius={[0, 2, 2, 0]}>
                   {sim.histData.map((entry, i) => (
