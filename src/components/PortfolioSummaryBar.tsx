@@ -2,7 +2,10 @@
 import { useState, useCallback } from "react";
 import { StockAnalysisResult } from "@/types";
 
-interface Props { results: StockAnalysisResult[]; }
+interface Props {
+  results: StockAnalysisResult[];
+  onSymbolClick?: (symbol: string) => void;
+}
 
 // ── Grade: A+=8+  A=7+  B=6+  C=5+  D=4+  F=below
 function grade(score: number): { label: string; color: string } {
@@ -58,6 +61,15 @@ function signalBadge(s: string) {
 
 const n  = (v: number | null | undefined, d = 1, sfx = "") =>
   v == null || isNaN(Number(v)) ? "—" : `${Number(v).toFixed(d)}${sfx}`;
+function ratingColor(r: string | null | undefined): string {
+  if (!r) return "text-[#4a6080]";
+  const l = r.toLowerCase();
+  if (l.includes("strong buy")) return "text-[#00ff88] font-bold";
+  if (l.includes("buy"))        return "text-[#00d4ff]";
+  if (l.includes("hold"))       return "text-[#ffa502]";
+  return "text-[#ff4757]";
+}
+
 const sn = (v: number | null | undefined, d = 1, sfx = "") =>
   v == null || isNaN(Number(v)) ? "—" : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${sfx}`;
 const numColor = (v: number | null | undefined, good = 0) =>
@@ -67,7 +79,7 @@ const numColor = (v: number | null | undefined, good = 0) =>
 type ColKey =
   | "symbol" | "price" | "change_pct" | "regime" | "grade" | "score"
   | "signal" | "rsi" | "macd_hist" | "sharpe" | "alpha" | "win_rate"
-  | "calmar" ;
+  | "calmar" | "eps_growth" | "pe" | "analyst_target";
 
 interface ColDef {
   key: ColKey;
@@ -90,10 +102,13 @@ const COLS: ColDef[] = [
   { key: "alpha",         label: "Alpha",     align: "right",  sortVal: r => r.backtest?.alpha ?? 0 },
   { key: "win_rate",      label: "Win%",      align: "right",  sortVal: r => r.backtest?.win_rate ?? 0 },
   { key: "calmar",        label: "Calmar",    align: "right",  sortVal: r => r.backtest?.calmar_ratio ?? 0 },
+  { key: "eps_growth",    label: "EPS Grw",   align: "right",  sortVal: r => r.fundamentals?.eps_growth ?? -999 },
+  { key: "pe",            label: "P/E",       align: "right",  sortVal: r => r.fundamentals?.pe_ratio ?? 9999 },
+  { key: "analyst_target",label: "Analyst TP",align: "right",  sortVal: r => r.fundamentals?.analyst_target ?? 0 },
 
 ];
 
-export default function PortfolioSummaryBar({ results }: Props) {
+export default function PortfolioSummaryBar({ results, onSymbolClick }: Props) {
   const [sortKey, setSortKey] = useState<ColKey>("signal");
   const [sortDir, setSortDir] = useState<1 | -1>(-1); // -1 = desc
 
@@ -147,12 +162,12 @@ export default function PortfolioSummaryBar({ results }: Props) {
         <span className="text-[#4a6080]">Sharpe <span className={numColor(avgSharpe,0.5)}>{avgSharpe.toFixed(2)}</span></span>
         <span className="text-[#4a6080]">Win% <span className={numColor(avgWinRate,50)}>{avgWinRate.toFixed(0)}%</span></span>
         <span className="text-[#4a6080]">α <span className={numColor(avgAlpha,0)}>{sn(avgAlpha,1,"%")}</span></span>
-        <span className="text-[#4a6080] text-[0.65rem]">Click column header to sort</span>
+        <span className="text-[#4a6080] text-[0.65rem]">Click column header to sort · Click row to jump to stock card</span>
       </div>
 
       {/* ── Table ── */}
       <div className="overflow-x-auto rounded border border-[#1e2d4a]">
-        <table className="w-full text-xs min-w-[800px]">
+        <table className="w-full text-xs min-w-[1100px]">
           <thead>
             <tr className="bg-[#0f1629] border-b border-[#1e2d4a] uppercase tracking-wider">
               {COLS.map(c => <SortTh key={c.key} col={c} />)}
@@ -161,15 +176,21 @@ export default function PortfolioSummaryBar({ results }: Props) {
           <tbody>
             {sorted.map((r, idx) => {
               const bt   = r.backtest;
+              const fund = r.fundamentals;
               const rl   = regimeCell(r.regime);
               const g    = grade(r.score ?? 0);
               const rsi  = bt?.rsi ?? 50;
               const rsiC = rsi < 30 ? "text-[#00ff88]" : rsi > 70 ? "text-[#ff4757]" : "text-[#c8d8f0]";
               const chg  = r.change_pct ?? 0;
+              const upside = fund?.analyst_target && r.current_price > 0
+                ? ((fund.analyst_target - r.current_price) / r.current_price) * 100
+                : null;
 
               return (
                 <tr key={r.symbol}
-                  className={`border-b border-[#1e2d4a]/40 hover:bg-[#00d4ff]/5 transition-colors
+                  onClick={() => onSymbolClick?.(r.symbol)}
+                  className={`border-b border-[#1e2d4a]/40 transition-colors
+                    ${onSymbolClick ? "cursor-pointer hover:bg-[#00d4ff]/10 active:bg-[#00d4ff]/20" : "hover:bg-[#00d4ff]/5"}
                     ${idx % 2 === 0 ? "bg-[#0a0e1a]" : "bg-[#0f1629]"}`}>
 
                   {/* Ticker */}
@@ -231,6 +252,35 @@ export default function PortfolioSummaryBar({ results }: Props) {
                   {/* Calmar */}
                   <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.calmar_ratio, 0)}`}>
                     {n(bt?.calmar_ratio, 2)}
+                  </td>
+
+                  {/* EPS Growth */}
+                  <td className={`px-2 py-1.5 text-right font-mono ${numColor(fund?.eps_growth, 0)}`}>
+                    {fund?.eps_growth != null ? sn(fund.eps_growth, 1, "%") : "—"}
+                  </td>
+
+                  {/* P/E */}
+                  <td className="px-2 py-1.5 text-right font-mono text-[#c8d8f0]">
+                    {fund?.pe_ratio != null ? n(fund.pe_ratio, 1) : "—"}
+                  </td>
+
+                  {/* Analyst Target */}
+                  <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">
+                    {fund?.analyst_target != null ? (
+                      <span>
+                        <span className="text-[#c8d8f0]">{fund.analyst_target.toFixed(2)}</span>
+                        {upside != null && (
+                          <span className={`ml-1 text-[0.65rem] ${numColor(upside, 0)}`}>
+                            {sn(upside, 0, "%")}
+                          </span>
+                        )}
+                      </span>
+                    ) : "—"}
+                    {fund?.analyst_rating && (
+                      <div className={`text-[0.6rem] ${ratingColor(fund.analyst_rating)}`}>
+                        {fund.analyst_rating}
+                      </div>
+                    )}
                   </td>
 
                 </tr>
