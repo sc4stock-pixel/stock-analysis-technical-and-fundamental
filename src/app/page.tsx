@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import { AppConfig, StockAnalysisResult } from "@/types";
 import ConfigPanel from "@/components/ConfigPanel";
@@ -7,21 +7,25 @@ import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
 import StockCard from "@/components/StockCard";
 
 export default function Dashboard() {
-  const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
-  const [results, setResults] = useState<StockAnalysisResult[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [config, setConfig]           = useState<AppConfig>(DEFAULT_CONFIG);
+  const [results, setResults]         = useState<StockAnalysisResult[]>([]);
+  const [loading, setLoading]         = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
+  const [progress, setProgress]       = useState(0);
   const [progressSymbol, setProgressSymbol] = useState("");
-  const [showConfig, setShowConfig] = useState(false);
+  const [showConfig, setShowConfig]   = useState(false);
+  // Track which card is highlighted after jump
+  const [highlightedSymbol, setHighlightedSymbol] = useState<string | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
     setProgress(0);
     setProgressSymbol("");
     setResults([]);
+    setHighlightedSymbol(null);
 
-    const portfolio = config.stocks.PORTFOLIO;
+    const portfolio  = config.stocks.PORTFOLIO;
     const allResults: StockAnalysisResult[] = [];
 
     for (let i = 0; i < portfolio.length; i++) {
@@ -29,9 +33,9 @@ export default function Dashboard() {
       setProgressSymbol(stock.symbol);
       try {
         const res = await fetch("/api/stocks", {
-          method: "POST",
+          method:  "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ symbol: stock.symbol, config }),
+          body:    JSON.stringify({ symbol: stock.symbol, config }),
         });
         if (res.ok) {
           const data = await res.json();
@@ -49,6 +53,24 @@ export default function Dashboard() {
     setLoading(false);
   }, [config]);
 
+  // ── Scroll to a stock card by symbol ───────────────────────────
+  // Each StockCard renders with id="card-{SYMBOL}" (dots replaced with dashes)
+  const scrollToCard = useCallback((symbol: string) => {
+    const id  = `card-${symbol.replace(/\./g, "-")}`;
+    const el  = document.getElementById(id);
+    if (!el) return;
+
+    // Smooth scroll with offset for sticky header (~52px) + summary bar
+    const yOffset = -64;
+    const y = el.getBoundingClientRect().top + window.scrollY + yOffset;
+    window.scrollTo({ top: y, behavior: "smooth" });
+
+    // Highlight the card briefly
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    setHighlightedSymbol(symbol);
+    highlightTimer.current = setTimeout(() => setHighlightedSymbol(null), 2000);
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#0a0e1a]">
 
@@ -60,7 +82,7 @@ export default function Dashboard() {
           {lastUpdated && <span className="text-[#4a6080] text-xs">· Updated {lastUpdated}</span>}
           {loading && (
             <span className="text-[#ffa502] text-xs blink">
-              · {progressSymbol ? `Scanning ${progressSymbol}…` : `Scanning…`} {progress}%
+              · {progressSymbol ? `Scanning ${progressSymbol}…` : "Scanning…"} {progress}%
             </span>
           )}
         </div>
@@ -88,23 +110,12 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── PORTFOLIO SUMMARY + SORTABLE TABLE ──
-           Renders as soon as the first stock completes.
-           The table IS the summary — it shows signals, regime, score,
-           fundamentals and all backtest metrics in one sortable view. ── */}
+      {/* ── PORTFOLIO SUMMARY TABLE ── */}
       {results.length > 0 && (
         <div className="border-b border-[#1e2d4a]">
           <PortfolioSummaryBar
             results={results}
-            onSymbolClick={(symbol) => {
-              const el = document.getElementById(`card-${symbol}`);
-              if (el) {
-                el.scrollIntoView({ behavior: "smooth", block: "start" });
-                // Brief highlight flash
-                el.classList.add("ring-2", "ring-[#00d4ff]", "ring-opacity-60", "rounded-lg");
-                setTimeout(() => el.classList.remove("ring-2", "ring-[#00d4ff]", "ring-opacity-60", "rounded-lg"), 1500);
-              }
-            }}
+            onRowClick={scrollToCard}
           />
         </div>
       )}
@@ -112,7 +123,7 @@ export default function Dashboard() {
       {/* ── STOCK CARDS ── */}
       <main className="p-4">
 
-        {/* Skeleton while loading and no results yet */}
+        {/* Skeleton while loading with no results yet */}
         {loading && results.length === 0 && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {config.stocks.PORTFOLIO.map((s) => (
@@ -131,14 +142,27 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Live results grid — streams in stock-by-stock */}
+        {/* Live results grid */}
         {results.length > 0 && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {results.map((result) => (
-              <div id={`card-${result.symbol}`} className="scroll-mt-16">
-                <StockCard key={result.symbol} result={result} config={config} />
-              </div>
-            ))}
+            {results.map((result) => {
+              const cardId = `card-${result.symbol.replace(/\./g, "-")}`;
+              const isHighlighted = highlightedSymbol === result.symbol;
+              return (
+                <div
+                  key={result.symbol}
+                  id={cardId}
+                  className={`rounded-md transition-all duration-300 ${
+                    isHighlighted
+                      ? "ring-2 ring-[#00d4ff] ring-offset-2 ring-offset-[#0a0e1a] shadow-[0_0_20px_rgba(0,212,255,0.25)]"
+                      : ""
+                  }`}
+                >
+                  <StockCard result={result} config={config} />
+                </div>
+              );
+            })}
+
             {/* Skeleton placeholders for stocks still loading */}
             {loading && config.stocks.PORTFOLIO
               .filter(s => !results.some(r => r.symbol === s.symbol))

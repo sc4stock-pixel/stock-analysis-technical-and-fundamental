@@ -4,10 +4,10 @@ import { StockAnalysisResult } from "@/types";
 
 interface Props {
   results: StockAnalysisResult[];
-  onSymbolClick?: (symbol: string) => void;
+  onRowClick: (symbol: string) => void; // scrolls to that stock card
 }
 
-// ── Grade: A+=8+  A=7+  B=6+  C=5+  D=4+  F=below
+// ── Grade ──────────────────────────────────────────────────────
 function grade(score: number): { label: string; color: string } {
   if (score >= 8.0) return { label: "A+", color: "text-[#00ff88] font-bold" };
   if (score >= 7.0) return { label: "A",  color: "text-[#00ff88] font-bold" };
@@ -17,7 +17,7 @@ function grade(score: number): { label: string; color: string } {
   return { label: "F", color: "text-[#ff4757]" };
 }
 
-// ── Regime: icon + short label + colour class
+// ── Regime cell ────────────────────────────────────────────────
 function regimeCell(regime: string): { icon: string; short: string; color: string } {
   const r = regime ?? "UNKNOWN";
   const G = "text-[#00ff88]", R = "text-[#ff4757]", A = "text-[#ffa502]",
@@ -59,27 +59,18 @@ function signalBadge(s: string) {
   return                   <span className="badge-hold px-1.5 py-0.5 rounded text-xs">HOLD</span>;
 }
 
+// ── Formatters ─────────────────────────────────────────────────
 const n  = (v: number | null | undefined, d = 1, sfx = "") =>
   v == null || isNaN(Number(v)) ? "—" : `${Number(v).toFixed(d)}${sfx}`;
-function ratingColor(r: string | null | undefined): string {
-  if (!r) return "text-[#4a6080]";
-  const l = r.toLowerCase();
-  if (l.includes("strong buy")) return "text-[#00ff88] font-bold";
-  if (l.includes("buy"))        return "text-[#00d4ff]";
-  if (l.includes("hold"))       return "text-[#ffa502]";
-  return "text-[#ff4757]";
-}
-
 const sn = (v: number | null | undefined, d = 1, sfx = "") =>
   v == null || isNaN(Number(v)) ? "—" : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${sfx}`;
 const numColor = (v: number | null | undefined, good = 0) =>
   v == null || isNaN(Number(v)) ? "text-[#4a6080]" : Number(v) >= good ? "text-[#00ff88]" : "text-[#ff4757]";
 
-// ── Column definitions ─────────────────────────────────────────
+// ── Column definitions (13 cols — no EPS/PE/Analyst) ──────────
 type ColKey =
   | "symbol" | "price" | "change_pct" | "regime" | "grade" | "score"
-  | "signal" | "rsi" | "macd_hist" | "sharpe" | "alpha" | "win_rate"
-  | "calmar" | "eps_growth" | "pe" | "analyst_target";
+  | "signal" | "rsi" | "macd_hist" | "sharpe" | "alpha" | "win_rate" | "calmar";
 
 interface ColDef {
   key: ColKey;
@@ -89,43 +80,48 @@ interface ColDef {
 }
 
 const COLS: ColDef[] = [
-  { key: "symbol",        label: "Ticker",    align: "left",   sortVal: r => r.symbol.charCodeAt(0) },
-  { key: "price",         label: "Price",     align: "right",  sortVal: r => r.current_price },
-  { key: "change_pct",    label: "Chg%",      align: "right",  sortVal: r => r.change_pct ?? 0 },
-  { key: "regime",        label: "Regime",    align: "left",   sortVal: r => r.regime?.charCodeAt(0) ?? 0 },
-  { key: "grade",         label: "Grd",       align: "center", sortVal: r => r.score ?? 0 },
-  { key: "score",         label: "Score",     align: "right",  sortVal: r => r.score ?? 0 },
-  { key: "signal",        label: "Signal",    align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
-  { key: "rsi",           label: "RSI",       align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
-  { key: "macd_hist",     label: "MACD H",    align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
-  { key: "sharpe",        label: "Sharpe",    align: "right",  sortVal: r => r.backtest?.sharpe ?? 0 },
-  { key: "alpha",         label: "Alpha",     align: "right",  sortVal: r => r.backtest?.alpha ?? 0 },
-  { key: "win_rate",      label: "Win%",      align: "right",  sortVal: r => r.backtest?.win_rate ?? 0 },
-  { key: "calmar",        label: "Calmar",    align: "right",  sortVal: r => r.backtest?.calmar_ratio ?? 0 },
-  { key: "eps_growth",    label: "EPS Grw",   align: "right",  sortVal: r => r.fundamentals?.eps_growth ?? -999 },
-  { key: "pe",            label: "P/E",       align: "right",  sortVal: r => r.fundamentals?.pe_ratio ?? 9999 },
-  { key: "analyst_target",label: "Analyst TP",align: "right",  sortVal: r => r.fundamentals?.analyst_target ?? 0 },
-
+  { key: "symbol",     label: "Ticker",  align: "left",   sortVal: r => r.symbol.charCodeAt(0) },
+  { key: "price",      label: "Price",   align: "right",  sortVal: r => r.current_price },
+  { key: "change_pct", label: "Chg%",   align: "right",  sortVal: r => r.change_pct ?? 0 },
+  { key: "regime",     label: "Regime",  align: "left",   sortVal: r => r.regime?.charCodeAt(0) ?? 0 },
+  { key: "grade",      label: "Grd",     align: "center", sortVal: r => r.score ?? 0 },
+  { key: "score",      label: "Score",   align: "right",  sortVal: r => r.score ?? 0 },
+  { key: "signal",     label: "Signal",  align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
+  { key: "rsi",        label: "RSI",     align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
+  { key: "macd_hist",  label: "MACD H",  align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
+  { key: "sharpe",     label: "Sharpe",  align: "right",  sortVal: r => r.backtest?.sharpe ?? 0 },
+  { key: "alpha",      label: "Alpha",   align: "right",  sortVal: r => r.backtest?.alpha ?? 0 },
+  { key: "win_rate",   label: "Win%",    align: "right",  sortVal: r => r.backtest?.win_rate ?? 0 },
+  { key: "calmar",     label: "Calmar",  align: "right",  sortVal: r => r.backtest?.calmar_ratio ?? 0 },
 ];
 
-export default function PortfolioSummaryBar({ results, onSymbolClick }: Props) {
+// ── Main component ─────────────────────────────────────────────
+export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
   const [sortKey, setSortKey] = useState<ColKey>("signal");
-  const [sortDir, setSortDir] = useState<1 | -1>(-1); // -1 = desc
+  const [sortDir, setSortDir] = useState<1 | -1>(-1);
+  const [flashSymbol, setFlashSymbol] = useState<string | null>(null);
 
   const handleSort = useCallback((key: ColKey) => {
     if (sortKey === key) setSortDir(d => (d === -1 ? 1 : -1));
     else { setSortKey(key); setSortDir(-1); }
   }, [sortKey]);
 
+  const handleRowClick = useCallback((symbol: string) => {
+    // Flash the row briefly for visual feedback
+    setFlashSymbol(symbol);
+    setTimeout(() => setFlashSymbol(null), 600);
+    onRowClick(symbol);
+  }, [onRowClick]);
+
   if (results.length === 0) return null;
 
-  const col = COLS.find(c => c.key === sortKey)!;
+  const col    = COLS.find(c => c.key === sortKey)!;
   const sorted = [...results].sort((a, b) => sortDir * (col.sortVal(b) - col.sortVal(a)));
 
-  const buy  = results.filter(r => r.signal === "BUY").length;
-  const sell = results.filter(r => r.signal === "SELL").length;
-  const hold = results.filter(r => r.signal === "HOLD").length;
-  const withBt = results.filter(r => (r.backtest?.num_trades ?? 0) > 0);
+  const buy      = results.filter(r => r.signal === "BUY").length;
+  const sell     = results.filter(r => r.signal === "SELL").length;
+  const hold     = results.filter(r => r.signal === "HOLD").length;
+  const withBt   = results.filter(r => (r.backtest?.num_trades ?? 0) > 0);
   const avgSharpe  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.sharpe ?? 0), 0) / withBt.length : 0;
   const avgWinRate = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.win_rate ?? 0), 0) / withBt.length : 0;
   const avgAlpha   = results.length ? results.reduce((a, r) => a + (r.backtest?.alpha ?? 0), 0) / results.length : 0;
@@ -136,7 +132,7 @@ export default function PortfolioSummaryBar({ results, onSymbolClick }: Props) {
       <th
         onClick={() => handleSort(c.key)}
         className={`px-2 py-1.5 font-mono font-normal whitespace-nowrap cursor-pointer select-none
-          text-${c.align === "center" ? "center" : c.align}
+          ${c.align === "center" ? "text-center" : c.align === "right" ? "text-right" : "text-left"}
           transition-colors hover:text-[#00d4ff]
           ${active ? "text-[#00d4ff]" : "text-[#4a6080]"}`}
       >
@@ -150,7 +146,7 @@ export default function PortfolioSummaryBar({ results, onSymbolClick }: Props) {
 
   return (
     <div className="mx-4 my-3">
-      {/* ── Strip ── */}
+      {/* ── Header strip ── */}
       <div className="flex items-center gap-4 mb-2 text-xs flex-wrap">
         <span className="text-[#00d4ff] font-bold tracking-widest">◈ PORTFOLIO SUMMARY</span>
         <span>
@@ -159,15 +155,17 @@ export default function PortfolioSummaryBar({ results, onSymbolClick }: Props) {
           {hold > 0 && <span className="text-[#ffa502]">◆{hold} HOLD</span>}
         </span>
         <span className="text-[#1e2d4a]">|</span>
-        <span className="text-[#4a6080]">Sharpe <span className={numColor(avgSharpe,0.5)}>{avgSharpe.toFixed(2)}</span></span>
-        <span className="text-[#4a6080]">Win% <span className={numColor(avgWinRate,50)}>{avgWinRate.toFixed(0)}%</span></span>
-        <span className="text-[#4a6080]">α <span className={numColor(avgAlpha,0)}>{sn(avgAlpha,1,"%")}</span></span>
-        <span className="text-[#4a6080] text-[0.65rem]">Click column header to sort · Click row to jump to stock card</span>
+        <span className="text-[#4a6080]">Sharpe <span className={numColor(avgSharpe, 0.5)}>{avgSharpe.toFixed(2)}</span></span>
+        <span className="text-[#4a6080]">Win% <span className={numColor(avgWinRate, 50)}>{avgWinRate.toFixed(0)}%</span></span>
+        <span className="text-[#4a6080]">α <span className={numColor(avgAlpha, 0)}>{sn(avgAlpha, 1, "%")}</span></span>
+        <span className="text-[#4a6080] text-[0.65rem]">
+          ↕ Click header to sort &nbsp;·&nbsp; ↵ Click row to jump to stock card
+        </span>
       </div>
 
       {/* ── Table ── */}
       <div className="overflow-x-auto rounded border border-[#1e2d4a]">
-        <table className="w-full text-xs min-w-[1100px]">
+        <table className="w-full text-xs min-w-[800px]">
           <thead>
             <tr className="bg-[#0f1629] border-b border-[#1e2d4a] uppercase tracking-wider">
               {COLS.map(c => <SortTh key={c.key} col={c} />)}
@@ -175,27 +173,34 @@ export default function PortfolioSummaryBar({ results, onSymbolClick }: Props) {
           </thead>
           <tbody>
             {sorted.map((r, idx) => {
-              const bt   = r.backtest;
-              const fund = r.fundamentals;
-              const rl   = regimeCell(r.regime);
-              const g    = grade(r.score ?? 0);
-              const rsi  = bt?.rsi ?? 50;
+              const bt  = r.backtest;
+              const rl  = regimeCell(r.regime);
+              const g   = grade(r.score ?? 0);
+              const rsi = bt?.rsi ?? 50;
               const rsiC = rsi < 30 ? "text-[#00ff88]" : rsi > 70 ? "text-[#ff4757]" : "text-[#c8d8f0]";
-              const chg  = r.change_pct ?? 0;
-              const upside = fund?.analyst_target && r.current_price > 0
-                ? ((fund.analyst_target - r.current_price) / r.current_price) * 100
-                : null;
+              const chg = r.change_pct ?? 0;
+              const isFlashing = flashSymbol === r.symbol;
 
               return (
-                <tr key={r.symbol}
-                  onClick={() => onSymbolClick?.(r.symbol)}
-                  className={`border-b border-[#1e2d4a]/40 transition-colors
-                    ${onSymbolClick ? "cursor-pointer hover:bg-[#00d4ff]/10 active:bg-[#00d4ff]/20" : "hover:bg-[#00d4ff]/5"}
-                    ${idx % 2 === 0 ? "bg-[#0a0e1a]" : "bg-[#0f1629]"}`}>
-
-                  {/* Ticker */}
+                <tr
+                  key={r.symbol}
+                  onClick={() => handleRowClick(r.symbol)}
+                  title={`Click to jump to ${r.symbol} card`}
+                  className={`border-b border-[#1e2d4a]/40 cursor-pointer select-none transition-all
+                    ${isFlashing
+                      ? "bg-[#00d4ff]/20 border-[#00d4ff]/40"
+                      : idx % 2 === 0
+                        ? "bg-[#0a0e1a] hover:bg-[#00d4ff]/8 active:bg-[#00d4ff]/20"
+                        : "bg-[#0f1629] hover:bg-[#00d4ff]/8 active:bg-[#00d4ff]/20"
+                    }`}
+                >
+                  {/* Ticker + name */}
                   <td className="px-2 py-1.5">
-                    <div className="text-[#00d4ff] font-bold leading-tight">{r.symbol}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[#00d4ff] font-bold leading-tight">{r.symbol}</span>
+                      {/* Jump indicator */}
+                      <span className="text-[#1e2d4a] text-[0.55rem] group-hover:text-[#00d4ff]">↵</span>
+                    </div>
                     <div className="text-[#4a6080] text-[0.6rem] leading-tight truncate max-w-[80px]">{r.name}</div>
                   </td>
 
@@ -219,7 +224,8 @@ export default function PortfolioSummaryBar({ results, onSymbolClick }: Props) {
 
                   {/* Score */}
                   <td className={`px-2 py-1.5 text-right font-mono font-bold ${
-                    (r.score??0)>=6.5?"text-[#00ff88]":(r.score??0)>=5.5?"text-[#ffa502]":"text-[#ff4757]"}`}>
+                    (r.score ?? 0) >= 6.5 ? "text-[#00ff88]" :
+                    (r.score ?? 0) >= 5.5 ? "text-[#ffa502]" : "text-[#ff4757]"}`}>
                     {r.score?.toFixed(1) ?? "—"}
                   </td>
 
@@ -253,36 +259,6 @@ export default function PortfolioSummaryBar({ results, onSymbolClick }: Props) {
                   <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.calmar_ratio, 0)}`}>
                     {n(bt?.calmar_ratio, 2)}
                   </td>
-
-                  {/* EPS Growth */}
-                  <td className={`px-2 py-1.5 text-right font-mono ${numColor(fund?.eps_growth, 0)}`}>
-                    {fund?.eps_growth != null ? sn(fund.eps_growth, 1, "%") : "—"}
-                  </td>
-
-                  {/* P/E */}
-                  <td className="px-2 py-1.5 text-right font-mono text-[#c8d8f0]">
-                    {fund?.pe_ratio != null ? n(fund.pe_ratio, 1) : "—"}
-                  </td>
-
-                  {/* Analyst Target */}
-                  <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">
-                    {fund?.analyst_target != null ? (
-                      <span>
-                        <span className="text-[#c8d8f0]">{fund.analyst_target.toFixed(2)}</span>
-                        {upside != null && (
-                          <span className={`ml-1 text-[0.65rem] ${numColor(upside, 0)}`}>
-                            {sn(upside, 0, "%")}
-                          </span>
-                        )}
-                      </span>
-                    ) : "—"}
-                    {fund?.analyst_rating && (
-                      <div className={`text-[0.6rem] ${ratingColor(fund.analyst_rating)}`}>
-                        {fund.analyst_rating}
-                      </div>
-                    )}
-                  </td>
-
                 </tr>
               );
             })}
