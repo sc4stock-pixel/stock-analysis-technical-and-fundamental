@@ -280,41 +280,36 @@ export default function MonteCarloTab({ result }: Props) {
           </ResponsiveContainer>
         </div>
 
-        {/* RIGHT: Histogram — type="number" YAxis is the key fix */}
+        {/* RIGHT: Histogram — standard vertical columns (X=equity bins, Y=count) */}
         <div style={{ flex: "1" }}>
           <div className="text-[#4a6080] text-[0.6rem] mb-0.5 font-bold tracking-widest">
             FINAL EQUITY DIST.
           </div>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart
-              layout="vertical"
-              data={[...sim.histData].sort((a, b) => b.midpoint - a.midpoint)}
-              margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
-              barCategoryGap="2%"
+              data={[...sim.histData].sort((a, b) => a.midpoint - b.midpoint)}
+              margin={{ top: 4, right: 4, left: 0, bottom: 16 }}
+              barCategoryGap="4%"
             >
-              {/* X-axis = path count (hidden label) */}
+              <CartesianGrid strokeDasharray="1 6" stroke="#1e2d4a" vertical={false} />
+
+              {/* X-axis = equity value bins */}
               <XAxis
-                type="number"
+                dataKey="midpoint"
                 tick={{ fontSize: 7, fill: "#4a6080" }}
                 tickLine={false}
                 axisLine={{ stroke: "#1e2d4a" }}
+                tickFormatter={yFmt}
+                label={{ value: "Final Equity", position: "insideBottom",
+                         offset: -10, fontSize: 7, fill: "#4a6080" }}
               />
 
-              {/* KEY FIX: type="number" treats midpoint as a continuous coordinate.
-                  With this, Recharts places bars at their actual equity value on
-                  the Y scale — low values at bottom, high at top.
-                  orientation="right" + same domain as fan chart = perfect alignment. */}
+              {/* Y-axis = count of paths */}
               <YAxis
-                type="number"
-                dataKey="midpoint"
-                domain={[yMin, yMax]}
-                ticks={yTicks}
-                orientation="right"
-                tickFormatter={yFmt}
                 tick={{ fontSize: 7, fill: "#4a6080" }}
                 tickLine={false}
-                axisLine={false}
-                width={46}
+                axisLine={{ stroke: "#1e2d4a" }}
+                width={22}
               />
 
               <Tooltip
@@ -330,8 +325,18 @@ export default function MonteCarloTab({ result }: Props) {
                 }}
               />
 
-              <Bar dataKey="count" radius={[0, 2, 2, 0]}>
-                {[...sim.histData].sort((a, b) => b.midpoint - a.midpoint).map((entry, i) => (
+              {/* Break-even vertical reference */}
+              <ReferenceLine
+                x={initial}
+                stroke="#c8d8f0"
+                strokeDasharray="3 3"
+                strokeOpacity={0.5}
+                label={{ value: "B/E", position: "top",
+                         fontSize: 7, fill: "#6b85a0" }}
+              />
+
+              <Bar dataKey="count" radius={[2, 2, 0, 0]}>
+                {[...sim.histData].sort((a, b) => a.midpoint - b.midpoint).map((entry, i) => (
                   <Cell
                     key={i}
                     fill={entry.profit ? "#00ff88" : "#ff4757"}
@@ -339,15 +344,6 @@ export default function MonteCarloTab({ result }: Props) {
                   />
                 ))}
               </Bar>
-
-              <ReferenceLine
-                y={initial}
-                stroke="#c8d8f0"
-                strokeDasharray="3 3"
-                strokeOpacity={0.5}
-                label={{ value: "Break-even", position: "insideTopRight",
-                         fontSize: 7, fill: "#6b85a0" }}
-              />
             </BarChart>
           </ResponsiveContainer>
         </div>
