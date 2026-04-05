@@ -207,182 +207,190 @@ export default function MonteCarloTab({ result }: Props) {
 
       {/* ── FAN CHART (left) + HISTOGRAM (right) — shared Y axis ── */}
       {sim ? (() => {
-        // Shared Y domain across both charts for perfect alignment
-        const allVals = [sim.p5 * 0.97, sim.p95 * 1.03,
-          ...sim.histData.map(d => d.midpoint)];
-        const yMin = Math.min(...allVals);
-        const yMax = Math.max(...allVals);
+        // Shared Y domain: same scale on both charts for visual alignment
+        // yMin = slightly below 5th pct, yMax = slightly above 95th pct
+        const yMin = Math.round(sim.p5  * 0.97);
+        const yMax = Math.round(sim.p95 * 1.03);
+        const yFmt = (v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`;
+
         return (
         <div className="flex gap-2" style={{ height: 260 }}>
 
-          {/* LEFT: Fan Chart — equity path simulation */}
-          <div style={{ flex: "0 0 68%" }}>
-            <div className="text-[#4a6080] text-[0.6rem] mb-0.5 font-bold tracking-widest">SIMULATION PATHS (200)</div>
+          {/* ── LEFT: Fan Chart — equity path simulation ── */}
+          <div style={{ flex: "0 0 62%" }}>
+            <div className="text-[#4a6080] text-[0.6rem] mb-0.5 font-bold tracking-widest">
+              SIMULATION PATHS ({sim.sampleCount * 3})
+            </div>
             <ResponsiveContainer width="100%" height={240}>
-              <ComposedChart data={sim.timeData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+              <ComposedChart
+                data={sim.timeData}
+                margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
+              >
                 <CartesianGrid strokeDasharray="1 6" stroke="#1e2d4a" vertical={false} />
+
+                {/* X-axis: numeric type + explicit domain stops the repeated-axis bug */}
                 <XAxis
                   dataKey="t"
                   type="number"
                   domain={[0, sim.n]}
+                  scale="linear"
                   tick={{ fontSize: 8, fill: "#4a6080" }}
                   tickLine={false}
                   axisLine={{ stroke: "#1e2d4a" }}
                   tickFormatter={(v: number) => v === 0 ? "Start" : `D${v}`}
-                  ticks={[0, Math.floor(sim.n * 0.25), Math.floor(sim.n * 0.5), Math.floor(sim.n * 0.75), sim.n]}
+                  ticks={[0,
+                    Math.floor(sim.n * 0.25),
+                    Math.floor(sim.n * 0.5),
+                    Math.floor(sim.n * 0.75),
+                    sim.n]}
+                  allowDataOverflow={false}
                 />
+
+                {/* Y-axis: same domain as histogram for alignment */}
                 <YAxis
                   tick={{ fontSize: 8, fill: "#4a6080" }}
                   tickLine={false}
                   axisLine={{ stroke: "#1e2d4a" }}
                   width={46}
-                  tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
                   domain={[yMin, yMax]}
+                  tickFormatter={yFmt}
                 />
+
                 <Tooltip content={<FanTooltip initial={initial} />} />
 
-                {/* Individual spaghetti paths — very low opacity */}
-                {Array.from({ length: sim.sampleCount }).map((_, i) => (
-                  <Line
-                    key={`path${i}`}
-                    dataKey={`path${i}`}
-                    stroke={sim.timeData[sim.timeData.length - 1]?.[`path${i}`] >= initial
-                      ? "#00ff88" : "#ff4757"}
-                    strokeWidth={0.6}
-                    dot={false}
-                    opacity={0.12}
-                    isAnimationActive={false}
-                    legendType="none"
-                  />
-                ))}
+                {/* Spaghetti paths — individual bootstrap simulations */}
+                {Array.from({ length: sim.sampleCount }).map((_, i) => {
+                  const lastVal = sim.timeData[sim.timeData.length - 1]?.[`path${i}`] as number | undefined;
+                  return (
+                    <Line
+                      key={`path${i}`}
+                      dataKey={`path${i}`}
+                      stroke={lastVal != null && lastVal >= initial ? "#00ff88" : "#ff4757"}
+                      strokeWidth={0.5}
+                      dot={false}
+                      opacity={0.10}
+                      isAnimationActive={false}
+                      legendType="none"
+                      connectNulls={false}
+                    />
+                  );
+                })}
 
-                {/* 90% confidence cone (5th–95th) — outer shaded area */}
-                <Area
-                  dataKey="p95"
-                  data={sim.timeData}
-                  fill="#00ff88"
-                  fillOpacity={0.06}
-                  stroke="none"
-                  isAnimationActive={false}
-                  legendType="none"
-                  name="p95"
-                />
-                <Area
-                  dataKey="p5"
-                  data={sim.timeData}
-                  fill="#ff4757"
-                  fillOpacity={0.08}
-                  stroke="none"
-                  isAnimationActive={false}
-                  legendType="none"
-                  name="p5"
-                />
+                {/* 90% confidence cone — outer area (p5 to p95) */}
+                <Area dataKey="p95" stroke="none" fill="#00ff88" fillOpacity={0.06}
+                  isAnimationActive={false} legendType="none" name="p95_area" />
+                <Area dataKey="p5"  stroke="none" fill="#ff4757" fillOpacity={0.08}
+                  isAnimationActive={false} legendType="none" name="p5_area" />
 
-                {/* 50% IQR cone (25th–75th) — inner shaded area */}
-                <Area
-                  dataKey="p75"
-                  data={sim.timeData}
-                  fill="#ffa502"
-                  fillOpacity={0.10}
-                  stroke="none"
-                  isAnimationActive={false}
-                  legendType="none"
-                  name="p75"
-                />
-                <Area
-                  dataKey="p25"
-                  data={sim.timeData}
-                  fill="#ffa502"
-                  fillOpacity={0.10}
-                  stroke="none"
-                  isAnimationActive={false}
-                  legendType="none"
-                  name="p25"
-                />
+                {/* 50% IQR cone — inner area (p25 to p75) */}
+                <Area dataKey="p75" stroke="none" fill="#ffa502" fillOpacity={0.10}
+                  isAnimationActive={false} legendType="none" name="p75_area" />
+                <Area dataKey="p25" stroke="none" fill="#ffa502" fillOpacity={0.10}
+                  isAnimationActive={false} legendType="none" name="p25_area" />
 
                 {/* Percentile boundary lines */}
                 <Line dataKey="p95" stroke="#00ff88" strokeWidth={1.2} dot={false}
-                  strokeDasharray="4 3" opacity={0.7} isAnimationActive={false} legendType="none" name="p95" />
+                  strokeDasharray="4 3" opacity={0.7} isAnimationActive={false}
+                  legendType="none" name="p95" />
                 <Line dataKey="p75" stroke="#ffa502" strokeWidth={0.8} dot={false}
                   opacity={0.5} isAnimationActive={false} legendType="none" name="p75" />
                 <Line dataKey="p25" stroke="#ffa502" strokeWidth={0.8} dot={false}
                   opacity={0.5} isAnimationActive={false} legendType="none" name="p25" />
                 <Line dataKey="p5"  stroke="#ff4757" strokeWidth={1.2} dot={false}
-                  strokeDasharray="4 3" opacity={0.7} isAnimationActive={false} legendType="none" name="p5" />
+                  strokeDasharray="4 3" opacity={0.7} isAnimationActive={false}
+                  legendType="none" name="p5" />
 
-                {/* Median — bold central line */}
+                {/* Median — bold gold central line */}
                 <Line dataKey="p50" stroke="#ffa502" strokeWidth={2.5} dot={false}
                   isAnimationActive={false} legendType="none" name="p50" />
 
-                {/* Break-even reference */}
-                <ReferenceLine y={initial} stroke="#c8d8f0" strokeDasharray="3 3" strokeOpacity={0.4}
-                  label={{ value: "Break-even", position: "insideTopRight", fontSize: 8, fill: "#6b85a0" }} />
+                {/* Break-even reference line */}
+                <ReferenceLine y={initial} stroke="#c8d8f0" strokeDasharray="3 3"
+                  strokeOpacity={0.4}
+                  label={{ value: "Break-even", position: "insideTopRight",
+                           fontSize: 8, fill: "#6b85a0" }} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
 
-          {/* RIGHT: Horizontal histogram of final outcomes */}
-          <div style={{ flex: "0 0 32%" }}>
-            <div className="text-[#4a6080] text-[0.6rem] mb-0.5 font-bold tracking-widest">FINAL EQUITY DIST.</div>
+          {/* ── RIGHT: Horizontal histogram of final equity distribution ── */}
+          {/* Y-axis matches fan chart: low equity (red/loss) at bottom,
+              high equity (green/profit) at top. domain=[yMin,yMax] ascending. */}
+          <div style={{ flex: "0 0 38%" }}>
+            <div className="text-[#4a6080] text-[0.6rem] mb-0.5 font-bold tracking-widest">
+              FINAL EQUITY DIST.
+            </div>
             <ResponsiveContainer width="100%" height={240}>
               <BarChart
-                data={sim.histData}
+                data={[...sim.histData].sort((a, b) => a.midpoint - b.midpoint)}
                 layout="vertical"
                 margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
                 barCategoryGap="2%"
               >
+                {/* X-axis = bar length (count of paths) */}
                 <XAxis
                   type="number"
                   tick={{ fontSize: 7, fill: "#4a6080" }}
                   tickLine={false}
                   axisLine={{ stroke: "#1e2d4a" }}
-                  tickFormatter={v => `${v}`}
-                  label={{ value: "Count", position: "insideBottom", offset: -2, fontSize: 7, fill: "#4a6080" }}
+                  label={{ value: "Count", position: "insideBottom",
+                           offset: -2, fontSize: 7, fill: "#4a6080" }}
                 />
+
+                {/* Y-axis = equity value — ascending: low at bottom, high at top
+                    Same [yMin, yMax] as fan chart for perfect alignment */}
                 <YAxis
                   type="number"
                   dataKey="midpoint"
+                  domain={[yMin, yMax]}
                   tick={{ fontSize: 7, fill: "#4a6080" }}
                   tickLine={false}
                   axisLine={{ stroke: "#1e2d4a" }}
                   width={44}
-                  domain={[yMin, yMax]}
-                  tickFormatter={v => `$${Number(v) >= 1000 ? `${(Number(v)/1000).toFixed(1)}k` : v}`}
+                  tickFormatter={yFmt}
                 />
+
                 <Tooltip
-                  contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
+                  contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a",
+                                  fontSize: 10 }}
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   formatter={(v: number, _: string, item: any) => {
-                    const midpoint = item?.payload?.midpoint;
-                    if (midpoint === undefined) return [`${v} paths`, ""];
-                    const pct = ((midpoint - initial) / initial * 100).toFixed(1);
-                    const sign = midpoint >= initial ? "+" : "";
-                    return [`${v} paths`, `${sign}${pct}%`];
+                    const mid = item?.payload?.midpoint as number | undefined;
+                    if (mid == null) return [`${v} paths`, ""];
+                    const pct = ((mid - initial) / initial * 100).toFixed(1);
+                    return [`${v} paths`, `${mid >= initial ? "+" : ""}${pct}%`];
                   }}
                 />
+
+                {/* Horizontal bars — green above break-even, red below */}
                 <Bar dataKey="count" radius={[0, 2, 2, 0]}>
-                  {sim.histData.map((entry, i) => (
-                    <Cell
-                      key={i}
-                      fill={entry.profit ? "#00ff88" : "#ff4757"}
-                      fillOpacity={entry.profit ? 0.75 : 0.65}
-                    />
-                  ))}
+                  {[...sim.histData]
+                    .sort((a, b) => a.midpoint - b.midpoint)
+                    .map((entry, i) => (
+                      <Cell
+                        key={i}
+                        fill={entry.profit ? "#00ff88" : "#ff4757"}
+                        fillOpacity={entry.profit ? 0.75 : 0.65}
+                      />
+                    ))}
                 </Bar>
-                {/* Break-even line */}
+
+                {/* Break-even reference — aligns with fan chart */}
                 <ReferenceLine
                   y={initial}
                   stroke="#c8d8f0"
                   strokeDasharray="3 3"
                   strokeOpacity={0.5}
+                  label={{ value: "Break-even", position: "insideTopRight",
+                           fontSize: 7, fill: "#6b85a0" }}
                 />
               </BarChart>
             </ResponsiveContainer>
           </div>
+
         </div>
         );
       })() : (
-        // Fallback if equity curve too short for client MC
         <div className="text-[#4a6080] text-xs p-2">
           Simulation paths unavailable (insufficient trade data)
         </div>
