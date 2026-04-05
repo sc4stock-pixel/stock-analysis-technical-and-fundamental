@@ -288,7 +288,7 @@ export default function MonteCarloTab({ result }: Props) {
           <ResponsiveContainer width="100%" height={260}>
             <BarChart
               layout="vertical"
-              data={sim.histData}
+              data={[...sim.histData].sort((a, b) => b.midpoint - a.midpoint)}
               margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
               barCategoryGap="2%"
             >
@@ -331,7 +331,7 @@ export default function MonteCarloTab({ result }: Props) {
               />
 
               <Bar dataKey="count" radius={[0, 2, 2, 0]}>
-                {sim.histData.map((entry, i) => (
+                {[...sim.histData].sort((a, b) => b.midpoint - a.midpoint).map((entry, i) => (
                   <Cell
                     key={i}
                     fill={entry.profit ? "#00ff88" : "#ff4757"}
