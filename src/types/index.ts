@@ -42,6 +42,7 @@ export interface AppConfig {
     commissionRate: number;
     slippageRate: number;
     use_van_tharp: boolean;
+    signal_mode: "score" | "supertrend" | "both";
   };
   risk: {
     riskPerTrade: number;
@@ -68,6 +69,11 @@ export interface AppConfig {
     trainRatio: number;
     maxDegradation: number;
     reoptimizeDays: number;
+  };
+  supertrend: {
+    atrPeriod: number;
+    multiplier: number;
+    filter_mode: "ema_only" | "full";
   };
 }
 
@@ -216,6 +222,24 @@ export interface RegimeInfo {
   is_extreme_dislocation: boolean;
 }
 
+export interface StrategyMetrics {
+  total_return: number;
+  win_rate: number;
+  num_trades: number;
+  profit_factor: number;
+  max_drawdown: number;
+  sharpe: number;
+  alpha: number;
+  trades: Trade[];
+}
+
+export interface StrategyComparison {
+  score: StrategyMetrics;
+  supertrend: StrategyMetrics;
+  winner: "score" | "supertrend" | "tie";
+  winner_margin: number; // alpha difference
+}
+
 export interface StockAnalysisResult {
   symbol: string;
   name: string;
@@ -234,6 +258,12 @@ export interface StockAnalysisResult {
   fundamentals?: Fundamentals;
   error?: string;
   chart_bars?: ChartBar[];
+  // SuperTrend additions
+  st_direction: number;         // 1 = bullish, -1 = bearish
+  st_value: number;             // current SuperTrend line value
+  st_stop_distance_pct: number; // distance from price to ST line (%)
+  st_open_return_pct: number | null; // open position return (%) or null
+  comparison: StrategyComparison | null;
 }
 
 
@@ -290,6 +320,12 @@ export interface OHLCVBar {
   signalConfirmed: string;
   entrySignal: string;
   forceEntry: number;
+  // SuperTrend fields
+  supertrend: number;
+  supertrendDir: number;    // 1 = uptrend, -1 = downtrend
+  supertrendSignal: string; // 'BUY' | 'SELL' | 'HOLD'
+  stEntrySignal: string;    // shifted for backtest entry
+  ema50: number;
 }
 
 // Lightweight price bar for chart rendering (returned in API response)
@@ -330,6 +366,8 @@ export interface ChartBar {
   adx: number;
   pdi: number;
   mdi: number;
+  supertrend: number;
+  supertrendDir: number;
 }
 
 // Regime icon/label metadata

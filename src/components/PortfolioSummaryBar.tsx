@@ -67,10 +67,10 @@ const sn = (v: number | null | undefined, d = 1, sfx = "") =>
 const numColor = (v: number | null | undefined, good = 0) =>
   v == null || isNaN(Number(v)) ? "text-[#4a6080]" : Number(v) >= good ? "text-[#00ff88]" : "text-[#ff4757]";
 
-// ── Column definitions (13 cols — no EPS/PE/Analyst) ──────────
+// ── Column definitions (14 cols) ──────────────────────────────
 type ColKey =
   | "symbol" | "price" | "change_pct" | "regime" | "grade" | "score"
-  | "signal" | "rsi" | "macd_hist" | "sharpe" | "alpha" | "win_rate" | "calmar";
+  | "signal" | "st_status" | "rsi" | "macd_hist" | "sharpe" | "alpha" | "win_rate" | "calmar";
 
 interface ColDef {
   key: ColKey;
@@ -87,6 +87,7 @@ const COLS: ColDef[] = [
   { key: "grade",      label: "Grd",     align: "center", sortVal: r => r.score ?? 0 },
   { key: "score",      label: "Score",   align: "right",  sortVal: r => r.score ?? 0 },
   { key: "signal",     label: "Signal",  align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
+  { key: "st_status",  label: "ST",      align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
   { key: "rsi",        label: "RSI",     align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
   { key: "macd_hist",  label: "MACD H",  align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
   { key: "sharpe",     label: "Sharpe",  align: "right",  sortVal: r => r.backtest?.sharpe ?? 0 },
@@ -231,6 +232,37 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
 
                   {/* Signal */}
                   <td className="px-2 py-1.5 text-center">{signalBadge(r.signal)}</td>
+
+                  {/* ST Status — 3 states per spec */}
+                  <td className="px-2 py-1.5 text-center font-mono text-xs whitespace-nowrap">
+                    {(() => {
+                      const dir = r.st_direction ?? -1;
+                      const dist = r.st_stop_distance_pct ?? 0;
+                      const openRet = r.st_open_return_pct;
+                      if (dir !== 1) {
+                        return <span className="text-[#ff4757]">🔴</span>;
+                      }
+                      if (openRet !== null && openRet !== undefined) {
+                        // BULLISH with open position
+                        const retColor = openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]";
+                        return (
+                          <span>
+                            <span className="text-[#00ff88]">🟢 </span>
+                            <span className={retColor}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span>
+                            <span className="text-[#4a6080]"> · </span>
+                            <span className="text-[#c8d8f0]">{dist.toFixed(1)}%</span>
+                          </span>
+                        );
+                      }
+                      // BULLISH no position
+                      return (
+                        <span>
+                          <span className="text-[#00ff88]">🟢 </span>
+                          <span className="text-[#c8d8f0]">{dist.toFixed(1)}%</span>
+                        </span>
+                      );
+                    })()}
+                  </td>
 
                   {/* RSI */}
                   <td className={`px-2 py-1.5 text-right font-mono ${rsiC}`}>{n(rsi, 0)}</td>

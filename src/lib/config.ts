@@ -7,17 +7,14 @@ export const DEFAULT_CONFIG: AppConfig = {
       { symbol: "0700.HK", name: "Tencent", exchange: "HK" },
       { symbol: "1211.HK", name: "BYD", exchange: "HK" },
       { symbol: "1810.HK", name: "Xiaomi", exchange: "HK" },
-      { symbol: "0175.HK", name: "Geely", exchange: "HK" },
       { symbol: "3033.HK", name: "HSTech ETF", exchange: "HK" },
-      { symbol: "SPY", name: "SPY", exchange: "US" },
-      { symbol: "QQQ", name: "QQQ", exchange: "US" },
       { symbol: "AAPL", name: "Apple", exchange: "US" },
       { symbol: "MSFT", name: "Microsoft", exchange: "US" },
-      { symbol: "NVDA", name: "NVIDIA", exchange: "US" },
       { symbol: "GOOGL", name: "Alphabet", exchange: "US" },
       { symbol: "META", name: "Meta", exchange: "US" },
-      { symbol: "TSM", name: "TSMC", exchange: "US" },
       { symbol: "AMD", name: "AMD", exchange: "US" },
+      { symbol: "NVDA", name: "NVIDIA", exchange: "US" },
+      { symbol: "TSM", name: "TSMC", exchange: "US" },
     ],
   },
   analysis: {
@@ -50,6 +47,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     commissionRate: 0.001,
     slippageRate: 0.0005,
     use_van_tharp: false,
+    signal_mode: "both" as const,
   },
   risk: {
     riskPerTrade: 0.0075,
@@ -76,5 +74,10 @@ export const DEFAULT_CONFIG: AppConfig = {
     trainRatio: 0.7,
     maxDegradation: 0.3,
     reoptimizeDays: 63,
+  },
+  supertrend: {
+    atrPeriod: 10,
+    multiplier: 3.0,
+    filter_mode: "ema_only" as const,
   },
 };

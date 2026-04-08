@@ -15,10 +15,31 @@ function Row({ label, value, color }: { label: string; value: string | number; c
   );
 }
 
+function MetricCol({ label, score, st, higherIsBetter = true }: {
+  label: string; score: number | string; st: number | string; higherIsBetter?: boolean;
+}) {
+  const sVal = typeof score === "number" ? score : 0;
+  const stVal = typeof st === "number" ? st : 0;
+  const scoreWins = higherIsBetter ? sVal >= stVal : sVal <= stVal;
+  const tied = Math.abs(sVal - stVal) < 0.01;
+  return (
+    <div className="flex justify-between py-1 border-b border-[#1e2d4a]/30 text-xs">
+      <span className="text-[#4a6080] w-24 flex-shrink-0">{label}</span>
+      <span className={`font-mono w-16 text-right ${!tied && scoreWins ? "text-[#00ff88]" : "text-[#c8d8f0]"}`}>
+        {typeof score === "number" ? score.toFixed(1) : score}
+      </span>
+      <span className={`font-mono w-16 text-right ${!tied && !scoreWins ? "text-[#00ff88]" : "text-[#c8d8f0]"}`}>
+        {typeof st === "number" ? st.toFixed(1) : st}
+      </span>
+    </div>
+  );
+}
+
 export default function BacktestTab({ result }: Props) {
   const bt = result.backtest;
   const wf = result.walk_forward;
   const kelly = result.kelly;
+  const cmp = result.comparison;
   if (!bt) return <div className="p-4 text-[#4a6080] text-xs">No backtest data</div>;
 
   // Equity curve chart
@@ -37,10 +58,48 @@ export default function BacktestTab({ result }: Props) {
 
   return (
     <div className="p-3 space-y-3">
+
+      {/* ── STRATEGY COMPARISON BOX ─────────────────────────── */}
+      {cmp && (
+        <div className="border border-[#1e2d4a] rounded bg-[#080d1a] p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[#00d4ff] text-xs font-bold tracking-wider">STRATEGY COMPARISON</div>
+            <div className={`text-xs px-2 py-0.5 rounded border font-mono ${
+              cmp.winner === "score"
+                ? "border-[#00ff88] text-[#00ff88] bg-[#00ff88]/10"
+                : cmp.winner === "supertrend"
+                ? "border-[#ffa502] text-[#ffa502] bg-[#ffa502]/10"
+                : "border-[#4a6080] text-[#4a6080]"
+            }`}>
+              {cmp.winner === "tie" ? "TIE" : `${cmp.winner === "score" ? "SCORE" : "ST"} WINS +${cmp.winner_margin.toFixed(1)}%`}
+            </div>
+          </div>
+
+          {/* Column headers */}
+          <div className="flex justify-between text-xs mb-1 pb-1 border-b border-[#1e2d4a]">
+            <span className="text-[#4a6080] w-24">METRIC</span>
+            <span className="text-[#00d4ff] w-16 text-right font-mono">SCORE</span>
+            <span className="text-[#ffa502] w-16 text-right font-mono">ST</span>
+          </div>
+
+          <MetricCol label="Return %" score={cmp.score.total_return} st={cmp.supertrend.total_return} />
+          <MetricCol label="Alpha %" score={cmp.score.alpha} st={cmp.supertrend.alpha} />
+          <MetricCol label="Sharpe" score={cmp.score.sharpe} st={cmp.supertrend.sharpe} />
+          <MetricCol label="Win %" score={cmp.score.win_rate} st={cmp.supertrend.win_rate} />
+          <MetricCol label="Prft Factor" score={cmp.score.profit_factor} st={cmp.supertrend.profit_factor} />
+          <MetricCol label="Max DD %" score={cmp.score.max_drawdown} st={cmp.supertrend.max_drawdown} higherIsBetter={false} />
+          <div className="flex justify-between py-1 text-xs">
+            <span className="text-[#4a6080] w-24">Trades</span>
+            <span className="text-[#c8d8f0] font-mono w-16 text-right">{cmp.score.num_trades}</span>
+            <span className="text-[#c8d8f0] font-mono w-16 text-right">{cmp.supertrend.num_trades}</span>
+          </div>
+        </div>
+      )}
+
       {/* Equity curve */}
       {eqData.length > 2 && (
         <div>
-          <div className="text-[#4a6080] text-xs mb-1">EQUITY CURVE</div>
+          <div className="text-[#4a6080] text-xs mb-1">EQUITY CURVE (SCORE STRATEGY)</div>
           <div className="h-28">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={eqData}>
@@ -59,7 +118,7 @@ export default function BacktestTab({ result }: Props) {
       {/* Trade waterfall */}
       {waterfallData.length > 0 && (
         <div>
-          <div className="text-[#4a6080] text-xs mb-1">TRADE RETURNS (last {waterfallData.length})</div>
+          <div className="text-[#4a6080] text-xs mb-1">SCORE TRADE RETURNS (last {waterfallData.length})</div>
           <div className="h-20">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={waterfallData} barSize={12}>
@@ -179,3 +238,4 @@ export default function BacktestTab({ result }: Props) {
     </div>
   );
 }
+

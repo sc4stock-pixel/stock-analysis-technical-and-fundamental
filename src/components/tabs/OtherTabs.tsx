@@ -14,50 +14,68 @@ function Row({ label, value, color }: { label: string; value: string | number; c
 
 // ─── TRADES TAB ───────────────────────────────────────────────
 export function TradesTab({ result }: Props) {
-  const trades = result.backtest?.trades ?? [];
+  const scoreTrades = result.backtest?.trades ?? [];
+  const stTrades = result.comparison?.supertrend?.trades ?? [];
 
-  if (trades.length === 0) {
-    return <div className="p-4 text-[#4a6080] text-xs">No trades in backtest period</div>;
+  function TradeTable({ trades, label, color }: { trades: typeof scoreTrades; label: string; color: string }) {
+    if (trades.length === 0) {
+      return (
+        <div className="mb-4">
+          <div className={`text-xs font-bold mb-2 ${color}`}>{label}</div>
+          <div className="text-[#4a6080] text-xs p-2 border border-[#1e2d4a] rounded">No trades in backtest period</div>
+        </div>
+      );
+    }
+    const recent = [...trades].reverse().slice(0, 20);
+    return (
+      <div className="mb-4">
+        <div className={`text-xs font-bold mb-1 ${color}`}>{label}</div>
+        <div className="text-[#4a6080] text-xs mb-2">{recent.length} of {trades.length} shown</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[#4a6080] border-b border-[#1e2d4a]">
+                <th className="text-left py-1 pr-2">#</th>
+                <th className="text-left py-1 pr-2">ENTRY</th>
+                <th className="text-left py-1 pr-2">EXIT</th>
+                <th className="text-right py-1 pr-2">RET%</th>
+                <th className="text-right py-1 pr-2">R</th>
+                <th className="text-left py-1 pr-2">BARS</th>
+                <th className="text-left py-1">REASON</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recent.map((t) => (
+                <tr key={t.trade_num} className="border-b border-[#1e2d4a]/30 hover:bg-[#1e2d4a]/10">
+                  <td className="py-1 pr-2 text-[#4a6080]">{t.trade_num}</td>
+                  <td className="py-1 pr-2 text-[#6b85a0]">{t.entry_date?.slice(5)}</td>
+                  <td className="py-1 pr-2 text-[#6b85a0]">{t.exit_date?.slice(5)}</td>
+                  <td className={`py-1 pr-2 text-right font-mono ${t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+                    {(t.return * 100).toFixed(1)}%
+                  </td>
+                  <td className={`py-1 pr-2 text-right font-mono ${t.r_multiple > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+                    {t.r_multiple.toFixed(2)}R
+                  </td>
+                  <td className="py-1 pr-2 text-[#c8d8f0]">{t.bars_held}</td>
+                  <td className="py-1 text-[#6b85a0] truncate max-w-20">{t.exit_reason}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   }
-
-  const recent = [...trades].reverse().slice(0, 30);
 
   return (
     <div className="p-3">
-      <div className="text-[#4a6080] text-xs mb-2">RECENT TRADES (last {recent.length} of {trades.length})</div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-[#4a6080] border-b border-[#1e2d4a]">
-              <th className="text-left py-1 pr-2">#</th>
-              <th className="text-left py-1 pr-2">ENTRY</th>
-              <th className="text-left py-1 pr-2">EXIT</th>
-              <th className="text-right py-1 pr-2">RET%</th>
-              <th className="text-right py-1 pr-2">R</th>
-              <th className="text-left py-1 pr-2">BARS</th>
-              <th className="text-left py-1 pr-2">REASON</th>
-              <th className="text-left py-1">REGIME</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recent.map((t) => (
-              <tr key={t.trade_num} className="border-b border-[#1e2d4a]/30 hover:bg-[#1e2d4a]/10">
-                <td className="py-1 pr-2 text-[#4a6080]">{t.trade_num}</td>
-                <td className="py-1 pr-2 text-[#6b85a0]">{t.entry_date?.slice(5)}</td>
-                <td className="py-1 pr-2 text-[#6b85a0]">{t.exit_date?.slice(5)}</td>
-                <td className={`py-1 pr-2 text-right font-mono ${t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-                  {(t.return * 100).toFixed(1)}%
-                </td>
-                <td className={`py-1 pr-2 text-right font-mono ${t.r_multiple > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-                  {t.r_multiple.toFixed(2)}R
-                </td>
-                <td className="py-1 pr-2 text-[#c8d8f0]">{t.bars_held}</td>
-                <td className="py-1 pr-2 text-[#6b85a0] truncate max-w-20">{t.exit_reason}</td>
-                <td className="py-1 text-[#4a6080] text-xs truncate max-w-24">{t.entry_regime?.replace(/_/g, " ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <TradeTable trades={scoreTrades} label="◈ SCORE STRATEGY TRADES" color="text-[#00d4ff]" />
+      <div className="border-t border-[#1e2d4a] my-3" />
+      <TradeTable trades={stTrades} label="◈ SUPERTREND STRATEGY TRADES" color="text-[#ffa502]" />
+      {/* Legend */}
+      <div className="mt-3 border border-[#1e2d4a]/50 rounded p-2 text-xs text-[#4a6080]">
+        <span className="text-[#00d4ff]">SCORE</span>: multi-indicator scoring exits (ATR stop / target / trailing / signal) ·{" "}
+        <span className="text-[#ffa502]">ST</span>: SuperTrend reversal exits only (trend IS the stop)
       </div>
     </div>
   );

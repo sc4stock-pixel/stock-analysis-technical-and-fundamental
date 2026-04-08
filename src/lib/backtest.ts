@@ -558,3 +558,271 @@ function buildEmptyResults(
     candlestick_patterns: detectCandlestickPatterns(bars, 5),
   };
 }
+
+// ============================================================
+// SUPERTREND BACKTEST — exits ONLY on trend reversal
+// NO ATR stop, NO profit target, NO max days, NO trailing stop
+// The SuperTrend line IS the trailing stop (trend reversal = exit)
+// ============================================================
+export function runSupertrendBacktest(
+  bars: OHLCVBar[],
+  symbol: string,
+  config: AppConfig
+): BacktestResult {
+  const btConfig = config.backtest;
+  const initialCapital = btConfig.initialCapital;
+  const commission = btConfig.commissionRate;
+  const slippage = btConfig.slippageRate;
+  const useVanTharp = btConfig.use_van_tharp;
+  const riskConfig = config.risk;
+
+  const trades: Trade[] = [];
+  let position: Record<string, number | string | boolean | null> | null = null;
+  const equityCurve: number[] = [initialCapital];
+  const equityDates: string[] = [bars[0].date];
+
+  let runningEquity = initialCapital;
+  let tradeNum = 0;
+  const firstPrice = bars[0].close;
+  const buyHoldShares = initialCapital / firstPrice;
+  const drawdownHistory: number[] = [];
+  let portfolioPeak = initialCapital;
+
+  for (let i = 1; i < bars.length; i++) {
+    const cur = bars[i];
+    const prev = bars[i - 1];
+    const currentEquity = equityCurve[equityCurve.length - 1];
+    if (currentEquity > portfolioPeak) portfolioPeak = currentEquity;
+    const portfolioDrawdown = portfolioPeak > 0 ? (portfolioPeak - currentEquity) / portfolioPeak : 0;
+    drawdownHistory.push(portfolioDrawdown);
+
+    // ── ENTRY: stEntrySignal was set by pipeline (shifted BUY) ──
+    if (position === null && prev.stEntrySignal === "BUY") {
+      const entryPrice = cur.open * (1 + slippage);
+      const entryAtr = cur.atr;
+
+      let shares: number;
+      if (useVanTharp) {
+        const riskAmount = runningEquity * riskConfig.riskPerTrade;
+        // Use 2×ATR as risk distance for sizing (ST doesn't have fixed stop)
+        const riskDist = 2 * entryAtr;
+        shares = riskDist > 0 ? riskAmount / riskDist : 1;
+      } else {
+        shares = Math.floor((runningEquity * 0.998) / entryPrice);
+      }
+
+      const entryCostPerShare = entryPrice * (1 + commission);
+
+      position = {
+        entry_date: cur.date,
+        entry_price: entryPrice,
+        entry_cost_per_share: entryCostPerShare,
+        shares,
+        entry_equity: runningEquity,
+        bars_held: 0,
+        highest_price: entryPrice,
+        mae: 0,
+        mfe: 0,
+        mae_pct: 0,
+        mfe_pct: 0,
+        entry_idx: i,
+      };
+    }
+
+    // ── MANAGE / EXIT ────────────────────────────────────────────
+    else if (position !== null) {
+      (position.bars_held as number)++;
+      if (cur.high > (position.highest_price as number)) position.highest_price = cur.high;
+
+      const adverse = (position.entry_price as number) - cur.low;
+      if (adverse > (position.mae as number)) {
+        position.mae = adverse;
+        position.mae_pct = adverse / (position.entry_price as number);
+      }
+      const favorable = cur.high - (position.entry_price as number);
+      if (favorable > (position.mfe as number)) {
+        position.mfe = favorable;
+        position.mfe_pct = favorable / (position.entry_price as number);
+      }
+
+      // ST exit: direction flips to BEARISH (supertrendDir === -1)
+      // Use prev bar's direction (signal already shifted)
+      const stReversed = cur.supertrendDir === -1 && prev.supertrendDir === 1;
+
+      if (stReversed) {
+        // Exit at ST line value (the price where trend flipped) or open, whichever is more conservative
+        const exitPrice = Math.min(cur.open, cur.supertrend) * (1 - slippage);
+        const exitProceedsPerShare = exitPrice * (1 - commission);
+        const perSharePnl = exitProceedsPerShare - (position.entry_cost_per_share as number);
+        const totalPnl = perSharePnl * (position.shares as number);
+        const returnPct = (exitPrice - (position.entry_price as number)) / (position.entry_price as number);
+
+        runningEquity = (position.entry_equity as number) + totalPnl;
+
+        // R-multiple: use 2×ATR as risk proxy
+        const approxRisk = 2 * bars[position.entry_idx as number].atr;
+        const rMultiple = approxRisk > 0 ? (exitPrice - (position.entry_price as number)) / approxRisk : 0;
+
+        tradeNum++;
+        trades.push({
+          trade_num: tradeNum,
+          entry_date: position.entry_date as string,
+          exit_date: cur.date,
+          entry_idx: position.entry_idx as number,
+          exit_idx: i,
+          entry_price: position.entry_price as number,
+          exit_price: exitPrice,
+          return: returnPct,
+          pnl: totalPnl,
+          shares: position.shares as number,
+          bars_held: position.bars_held as number,
+          r_multiple: rMultiple,
+          exit_reason: "ST Reversal",
+          atr_stop_price: cur.supertrend,
+          trailing_stop: null,
+          mae_pct: (position.mae_pct as number) * 100,
+          mfe_pct: (position.mfe_pct as number) * 100,
+          actual_risk_pct: approxRisk > 0 ? (approxRisk / (position.entry_price as number)) * 100 : 2,
+          entry_regime: bars[position.entry_idx as number].regime,
+          atr_mult: 2,
+          trail_mult: 0,
+          max_hold_days: 9999,
+        });
+        position = null;
+      }
+    }
+
+    // Equity mark-to-market
+    let curValue: number;
+    if (position !== null) {
+      const unrealizedPnl = (cur.close - (position.entry_price as number)) * (position.shares as number);
+      curValue = (position.entry_equity as number) + unrealizedPnl;
+    } else {
+      curValue = runningEquity;
+    }
+    equityCurve.push(curValue);
+    equityDates.push(cur.date);
+  }
+
+  // ── Close open position at end (mark-to-market) ─────────────
+  // (leave open positions unclosed — same as score backtest)
+
+  if (trades.length === 0) {
+    return buildEmptyResults(symbol, bars, config, false, equityCurve, equityDates);
+  }
+
+  // ── Metrics (same calculation as score backtest) ─────────────
+  const winners = trades.filter((t) => t.return > 0);
+  const losers = trades.filter((t) => t.return <= 0);
+  const winRate = winners.length / trades.length;
+  const avgWin = winners.length > 0 ? mean(winners.map((t) => t.return)) : 0;
+  const avgLoss = losers.length > 0 ? mean(losers.map((t) => t.return)) : 0;
+  const expectancy = winRate * avgWin + (1 - winRate) * avgLoss;
+
+  const dailyReturns: number[] = [];
+  for (let i = 1; i < equityCurve.length; i++) {
+    const prev = equityCurve[i - 1];
+    dailyReturns.push(prev > 0 ? (equityCurve[i] - prev) / prev : 0);
+  }
+  const drMean = mean(dailyReturns);
+  const drStd = Math.sqrt(mean(dailyReturns.map((r) => (r - drMean) ** 2)));
+  const sharpe = drStd > 0 ? (drMean * 252) / (drStd * Math.sqrt(252)) : 0;
+
+  const downsideReturns = dailyReturns.filter((r) => r < 0);
+  const drDownStd = downsideReturns.length > 0 ? Math.sqrt(mean(downsideReturns.map((r) => r ** 2))) : 0;
+  const sortino = drDownStd > 0 ? (drMean * 252) / (drDownStd * Math.sqrt(252)) : 0;
+
+  let peak = equityCurve[0];
+  let maxDrawdown = 0;
+  for (const v of equityCurve) {
+    if (v > peak) peak = v;
+    const dd = peak > 0 ? (peak - v) / peak : 0;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+  }
+
+  const grossProfit = winners.reduce((a, t) => a + t.pnl, 0);
+  const grossLoss = Math.abs(losers.reduce((a, t) => a + t.pnl, 0));
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 0;
+
+  const totalReturn = (runningEquity - initialCapital) / initialCapital;
+  const buyHoldReturn = (bars[bars.length - 1].close * buyHoldShares - initialCapital) / initialCapital;
+  const alpha = totalReturn - buyHoldReturn;
+  const annualizedReturn = totalReturn * (252 / bars.length);
+  const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
+
+  const squaredDDs = drawdownHistory.map((d) => d ** 2);
+  const ulcerIndex = Math.sqrt(mean(squaredDDs)) * 100;
+  const gains = dailyReturns.filter((r) => r > 0).reduce((a, b) => a + b, 0);
+  const losses2 = Math.abs(dailyReturns.filter((r) => r <= 0).reduce((a, b) => a + b, 0));
+  const omegaRatio = losses2 > 0 ? gains / losses2 : 0;
+
+  const holdingPeriods = trades.map((t) => t.bars_held);
+  const winnerDurations = winners.map((t) => t.bars_held);
+  const loserDurations = losers.map((t) => t.bars_held);
+
+  const last = bars[bars.length - 1];
+  const week52High = bars.length >= 252 ? Math.max(...bars.slice(-252).map((b) => b.high)) : Math.max(...bars.map((b) => b.high));
+  const week52Low = bars.length >= 252 ? Math.min(...bars.slice(-252).map((b) => b.low)) : Math.min(...bars.map((b) => b.low));
+  const volMean20 = mean(bars.slice(-21, -1).map((b) => b.volume));
+  const volRatioLatest = volMean20 > 0 ? last.volume / volMean20 : 1;
+
+  return {
+    symbol,
+    trades,
+    num_trades: trades.length,
+    win_rate: winRate * 100,
+    expectancy: expectancy * 100,
+    total_return: totalReturn * 100,
+    sharpe,
+    sortino,
+    max_drawdown: maxDrawdown * 100,
+    profit_factor: profitFactor,
+    avg_win: avgWin * 100,
+    avg_loss: avgLoss * 100,
+    r_multiples: trades.map((t) => t.r_multiple),
+    equity_curve: equityCurve,
+    equity_dates: equityDates,
+    signal_bars: 0,
+    buy_hold_return: buyHoldReturn * 100,
+    alpha: alpha * 100,
+    alpha_status: alpha > 0 ? "ADDING VALUE" : "DESTROYING VALUE",
+    calmar_ratio: calmarRatio,
+    ulcer_index: ulcerIndex,
+    omega_ratio: omegaRatio,
+    exit_reasons: { "ST Reversal": trades.length },
+    avg_mae: mean(trades.map((t) => t.mae_pct)),
+    avg_mfe: mean(trades.map((t) => t.mfe_pct)),
+    winner_mae: winners.length > 0 ? mean(winners.map((t) => t.mae_pct)) : 0,
+    loser_mae: losers.length > 0 ? mean(losers.map((t) => t.mae_pct)) : 0,
+    winner_mfe: winners.length > 0 ? mean(winners.map((t) => t.mfe_pct)) : 0,
+    kill_switch_triggered: false,
+    latest_atr: last.atr,
+    latest_price: last.close,
+    rsi_divergence: last.rsiDivergence,
+    rsi_divergence_type: last.rsiDivergenceType,
+    avg_duration: mean(holdingPeriods),
+    median_duration: median(holdingPeriods),
+    min_duration: holdingPeriods.length > 0 ? Math.min(...holdingPeriods) : 0,
+    max_duration: holdingPeriods.length > 0 ? Math.max(...holdingPeriods) : 0,
+    avg_winner_duration: mean(winnerDurations),
+    avg_loser_duration: mean(loserDurations),
+    median_winner_duration: median(winnerDurations),
+    median_loser_duration: median(loserDurations),
+    score_history: bars.slice(-20).map((b) => b.score),
+    rsi: last.rsi,
+    macd_hist: last.macdHist,
+    adx: last.adx,
+    atr_pct: last.close > 0 ? (last.atr / last.close) * 100 : null,
+    vol_ratio: volRatioLatest,
+    bb_position: last.bbPosition,
+    support_level: calcSupport(bars),
+    resistance_level: calcResistance(bars),
+    stop_loss_price: last.supertrend, // ST line IS the stop
+    fib_targets: calcFibTargets(bars),
+    week_52_high: week52High,
+    week_52_low: week52Low,
+    sma_20: last.sma20,
+    sma_50: last.sma50,
+    candlestick_patterns: [],
+  };
+}

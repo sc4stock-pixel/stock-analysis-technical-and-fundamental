@@ -59,6 +59,8 @@ const PriceTooltip = ({ active, payload, label }: {
   const close = p("Close");
   const sma20 = p("SMA20");
   const sma50 = p("SMA50");
+  const stBull = p("ST_Bull");
+  const stBear = p("ST_Bear");
   const vol = p("Volume");
   const rsi = p("RSI");
   const macdH = p("MACD H");
@@ -70,6 +72,8 @@ const PriceTooltip = ({ active, payload, label }: {
       {close != null && <div className="text-[#c8d8f0]">Close: <span className="text-[#00d4ff] font-bold">{close.toFixed(2)}</span></div>}
       {sma20 != null && <div className="text-[#00ff88]">SMA20: {sma20.toFixed(2)}</div>}
       {sma50 != null && <div className="text-[#ff7f50]">SMA50: {sma50.toFixed(2)}</div>}
+      {stBull != null && <div className="text-[#00ff88]">ST 🟢: {stBull.toFixed(2)} (support)</div>}
+      {stBear != null && <div className="text-[#ff4757]">ST 🔴: {stBear.toFixed(2)} (resistance)</div>}
       {rsi != null && <div className="text-[#a78bfa]">RSI: {rsi.toFixed(1)}</div>}
       {macdH != null && (
         <div className={macdH >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>
@@ -87,6 +91,7 @@ export default function ChartTab({ result }: Props) {
   const [range, setRange] = useState<Range>("1Y");
   const [showSMA, setShowSMA]       = useState(true);
   const [showBB, setShowBB]         = useState(true);
+  const [showST, setShowST]         = useState(true);
   const [showVol, setShowVol]       = useState(true);
   const [showRSI, setShowRSI]       = useState(false);
   const [showMACD, setShowMACD]     = useState(false);
@@ -123,6 +128,7 @@ export default function ChartTab({ result }: Props) {
   const chartData = sliced.map((b) => {
     const entry = entryMap[b.date] ?? null;
     const exit  = exitMap[b.date]  ?? null;
+    const stVal = (!b.supertrend || isNaN(b.supertrend)) ? null : b.supertrend;
     return {
       date: b.date,
       dateShort: b.date.slice(5), // MM-DD
@@ -131,6 +137,9 @@ export default function ChartTab({ result }: Props) {
       SMA50: isNaN(b.sma50)   ? null : b.sma50,
       BBU:   isNaN(b.bbUpper) ? null : b.bbUpper,
       BBL:   isNaN(b.bbLower) ? null : b.bbLower,
+      // ST line: split into two keys so we can color by direction
+      ST_Bull: stVal !== null && b.supertrendDir === 1  ? stVal : null,
+      ST_Bear: stVal !== null && b.supertrendDir === -1 ? stVal : null,
       Volume: b.volume,
       RSI:    b.rsi,
       "MACD H": b.macdHist,
@@ -145,6 +154,7 @@ export default function ChartTab({ result }: Props) {
   const extras = [
     ...(showBB ? chartData.map(d => d.BBU).filter(Boolean) as number[] : []),
     ...(showBB ? chartData.map(d => d.BBL).filter(Boolean) as number[] : []),
+    ...(showST ? chartData.map(d => d.ST_Bull ?? d.ST_Bear).filter(Boolean) as number[] : []),
     ...(showTrades ? chartData.filter(d => d.Entry).map(d => d.Entry!) : []),
     ...(showTrades ? chartData.filter(d => d.Exit).map(d => d.Exit!) : []),
   ];
@@ -220,6 +230,8 @@ export default function ChartTab({ result }: Props) {
           activeClass="border-[#ffa502]/60 text-[#ffa502] bg-[#ffa502]/10" />
         <Tog label="BB"    active={showBB}     onClick={() => setShowBB(v => !v)}
           activeClass="border-[#00d4ff]/50 text-[#00d4ff] bg-[#00d4ff]/08" />
+        <Tog label="ST"    active={showST}     onClick={() => setShowST(v => !v)}
+          activeClass="border-[#f97316]/60 text-[#f97316] bg-[#f97316]/10" />
         <div className="h-3 w-px bg-[#1e2d4a]" />
         {/* Sub-charts */}
         <Tog label="Vol"   active={showVol}    onClick={() => setShowVol(v => !v)}
@@ -275,6 +287,34 @@ export default function ChartTab({ result }: Props) {
                   name="SMA20" strokeOpacity={0.85} legendType="none" />
                 <Line dataKey="SMA50" stroke="#ff7f50" strokeWidth={1.5} dot={false}
                   name="SMA50" strokeOpacity={0.85} legendType="none" />
+              </>
+            )}
+
+            {/* SuperTrend lines — green when bullish (support), red when bearish (resistance) */}
+            {showST && (
+              <>
+                <Line
+                  dataKey="ST_Bull"
+                  stroke="#00ff88"
+                  strokeWidth={2}
+                  dot={false}
+                  name="ST_Bull"
+                  strokeOpacity={0.9}
+                  strokeDasharray="5 2"
+                  legendType="none"
+                  connectNulls={false}
+                />
+                <Line
+                  dataKey="ST_Bear"
+                  stroke="#ff4757"
+                  strokeWidth={2}
+                  dot={false}
+                  name="ST_Bear"
+                  strokeOpacity={0.9}
+                  strokeDasharray="5 2"
+                  legendType="none"
+                  connectNulls={false}
+                />
               </>
             )}
 
@@ -399,6 +439,14 @@ export default function ChartTab({ result }: Props) {
             BB(20,2)
           </span>
         )}
+        {showST && <>
+          <span className="flex items-center gap-1.5">
+            <span className="w-5 inline-block" style={{ borderTop: "2px dashed #00ff88" }} /> ST Bull
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-5 inline-block" style={{ borderTop: "2px dashed #ff4757" }} /> ST Bear
+          </span>
+        </>}
         {showTrades && <>
           <span className="flex items-center gap-1.5">
             <span className="text-[#00ff88] text-sm leading-none">▲</span> Entry
@@ -408,6 +456,43 @@ export default function ChartTab({ result }: Props) {
           </span>
         </>}
       </div>
+
+      {/* ── ST Status strip ── */}
+      {(() => {
+        const dir = result.st_direction ?? -1;
+        const dist = result.st_stop_distance_pct ?? 0;
+        const openRet = result.st_open_return_pct;
+        const stVal = result.st_value;
+        return (
+          <div className={`flex items-center gap-3 px-2 py-1 rounded border text-xs font-mono ${
+            dir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"
+          }`}>
+            <span className={dir === 1 ? "text-[#00ff88] font-bold" : "text-[#ff4757] font-bold"}>
+              {dir === 1 ? "🟢 ST BULLISH" : "🔴 ST BEARISH"}
+            </span>
+            {stVal > 0 && (
+              <span className="text-[#4a6080]">
+                line: <span className="text-[#c8d8f0]">{stVal.toFixed(2)}</span>
+              </span>
+            )}
+            {dir === 1 && (
+              <span className="text-[#4a6080]">
+                dist: <span className="text-[#c8d8f0]">{dist.toFixed(1)}%</span>
+              </span>
+            )}
+            {dir === 1 && openRet !== null && openRet !== undefined && (
+              <span className="text-[#4a6080]">
+                open: <span className={openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>
+                  {openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%
+                </span>
+              </span>
+            )}
+            {dir === -1 && (
+              <span className="text-[#4a6080]">wait for flip to bullish before entry</span>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Trades in view table ── */}
       {showTrades && tradesInView.length > 0 && (

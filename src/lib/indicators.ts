@@ -191,3 +191,86 @@ export function volumeRatio(volumes: number[], period = 20): number[] {
     return mean > 0 ? v / mean : 1.0;
   });
 }
+
+/**
+ * SuperTrend Indicator — ATR-based trend detection.
+ * atrPeriod=10, multiplier=3.0 (industry standard)
+ *
+ * Returns arrays of:
+ *   supertrendArr: SuperTrend line value (support in uptrend, resistance in downtrend)
+ *   directionArr:  1 = uptrend, -1 = downtrend
+ *   signalArr:     'BUY' on flip to uptrend, 'SELL' on flip to downtrend, 'HOLD' otherwise
+ */
+export function supertrend(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  atrPeriod = 10,
+  multiplier = 3.0
+): [number[], number[], string[]] {
+  const n = closes.length;
+  const atrArr = atr(highs, lows, closes, atrPeriod);
+
+  const supertrendArr = new Array(n).fill(NaN);
+  const directionArr = new Array(n).fill(1);
+  const signalArr = new Array(n).fill("HOLD");
+
+  // Band arrays
+  const upperBand = new Array(n).fill(NaN);
+  const lowerBand = new Array(n).fill(NaN);
+
+  for (let i = 0; i < n; i++) {
+    const hl2 = (highs[i] + lows[i]) / 2;
+    const a = atrArr[i];
+    if (isNaN(a)) continue;
+    upperBand[i] = hl2 + multiplier * a;
+    lowerBand[i] = hl2 - multiplier * a;
+  }
+
+  // SuperTrend logic — iterate from first valid ATR bar
+  for (let i = 1; i < n; i++) {
+    if (isNaN(upperBand[i]) || isNaN(lowerBand[i])) {
+      directionArr[i] = directionArr[i - 1];
+      supertrendArr[i] = supertrendArr[i - 1];
+      continue;
+    }
+
+    // Final upper band: can only tighten (decrease) if previous close was below previous upper
+    const prevUpper = isNaN(supertrendArr[i - 1]) ? upperBand[i] : (
+      directionArr[i - 1] === -1 ? supertrendArr[i - 1] : upperBand[i - 1]
+    );
+    const finalUpperBand = (upperBand[i] < prevUpper || closes[i - 1] > prevUpper)
+      ? upperBand[i]
+      : prevUpper;
+
+    // Final lower band: can only widen (increase) if previous close was above previous lower
+    const prevLower = isNaN(supertrendArr[i - 1]) ? lowerBand[i] : (
+      directionArr[i - 1] === 1 ? supertrendArr[i - 1] : lowerBand[i - 1]
+    );
+    const finalLowerBand = (lowerBand[i] > prevLower || closes[i - 1] < prevLower)
+      ? lowerBand[i]
+      : prevLower;
+
+    // Direction flip logic
+    const prevDir = directionArr[i - 1];
+    let curDir: number;
+
+    if (prevDir === -1) {
+      // Was downtrend: flip to uptrend if price closes above upper band
+      curDir = closes[i] > finalUpperBand ? 1 : -1;
+    } else {
+      // Was uptrend: flip to downtrend if price closes below lower band
+      curDir = closes[i] < finalLowerBand ? -1 : 1;
+    }
+
+    directionArr[i] = curDir;
+    supertrendArr[i] = curDir === 1 ? finalLowerBand : finalUpperBand;
+
+    // Signal: only on flip
+    if (prevDir !== curDir) {
+      signalArr[i] = curDir === 1 ? "BUY" : "SELL";
+    }
+  }
+
+  return [supertrendArr, directionArr, signalArr];
+}

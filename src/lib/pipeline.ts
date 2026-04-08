@@ -3,11 +3,11 @@
 // Mirrors Python's main analysis flow per stock
 // ============================================================
 import { AppConfig, StockAnalysisResult, KellyResult, WalkForwardResult, OHLCVBar, ChartBar } from "@/types";
-import { rsi, macd, adx, atr, bollingerBands, sma, volumeRatio } from "./indicators";
+import { rsi, macd, adx, atr, bollingerBands, sma, volumeRatio, supertrend } from "./indicators";
 import { calculateRegimePerBar, detectRegime } from "./regime";
 import { calculateScores, detectRsiDivergence } from "./scoring";
 import { generateSignals } from "./signals";
-import { runBacktest } from "./backtest";
+import { runBacktest, runSupertrendBacktest } from "./backtest";
 import { runMonteCarlo } from "./montecarlo";
 
 export interface RawOHLCV {
@@ -39,8 +39,13 @@ export function runPipeline(
   const atrArr = atr(highs, lows, closes, config.analysis.atrPeriod);
   const sma20Arr = sma(closes, config.analysis.smaShort);
   const sma50Arr = sma(closes, config.analysis.smaLong);
+  const ema50Arr = sma(closes, 50); // EMA-50 proxy (SMA-50 for filter)
   const [bbUpper, bbMid, bbLower] = bollingerBands(closes);
   const volRatioArr = volumeRatio(volumes, config.analysis.volumePeriod);
+
+  // SuperTrend
+  const stConfig = config.supertrend ?? { atrPeriod: 10, multiplier: 3.0, filter_mode: "ema_only" };
+  const [stArr, stDirArr, stSigArr] = supertrend(highs, lows, closes, stConfig.atrPeriod, stConfig.multiplier);
 
   // ADX slope (3-bar for scoring, 4-bar for regime)
   const adxSlope3 = adxArr.map((v, i) => (i < 3 ? 0 : v - adxArr[i - 3]));
@@ -128,13 +133,34 @@ export function runPipeline(
     signalConfirmed: "HOLD",
     entrySignal: "HOLD",
     forceEntry: 0,
+    // SuperTrend fields
+    supertrend: stArr[i] ?? NaN,
+    supertrendDir: stDirArr[i] ?? 1,
+    supertrendSignal: stSigArr[i] ?? "HOLD",
+    stEntrySignal: "HOLD", // filled below after filter
+    ema50: ema50Arr[i] ?? 0,
   }));
+
+  // ── SuperTrend entry signal with EMA filter (ema_only mode) ─
+  // Entry: ST flips BULLISH AND price > EMA50 (no look-ahead: use same bar's close/ema50)
+  // Shift by 1: stEntrySignal[i] = filtered signal from bar[i-1] (enter on next open)
+  for (let i = 1; i < bars.length; i++) {
+    const prev = bars[i - 1];
+    const stFlipBullish = prev.supertrendSignal === "BUY";
+    const emaFilter = stConfig.filter_mode === "ema_only"
+      ? prev.close > prev.ema50
+      : prev.close > prev.ema50 && prev.adx > 20; // 'full' mode adds ADX
+    bars[i].stEntrySignal = stFlipBullish && emaFilter ? "BUY"
+      : prev.supertrendSignal === "SELL" ? "SELL"
+      : "HOLD";
+  }
 
   // ── Generate Signals ─────────────────────────────────────────
   generateSignals(bars, config, stockConfig.exchange);
 
-  // ── Backtest ─────────────────────────────────────────────────
+  // ── Dual Backtest ─────────────────────────────────────────────
   const backtestResult = runBacktest(bars, stockConfig.symbol, config, stockConfig.exchange);
+  const stBacktestResult = runSupertrendBacktest(bars, stockConfig.symbol, config);
 
   // ── Monte Carlo ───────────────────────────────────────────────
   const mcResult = config.monteCarlo.enabled && backtestResult.equity_curve.length >= 30
@@ -185,7 +211,60 @@ export function runPipeline(
     adx: b.adx,
     pdi: b.plusDI,
     mdi: b.minusDI,
+    supertrend: b.supertrend,
+    supertrendDir: b.supertrendDir,
   }));
+
+  // ── SuperTrend status for current bar ────────────────────────
+  const stDirection = lastBar.supertrendDir;
+  const stValue = lastBar.supertrend;
+  const stStopDistPct = stValue > 0 && currentPrice > 0
+    ? ((currentPrice - stValue) / currentPrice) * 100
+    : 0;
+
+  // Detect open ST position: find last ST BUY entry that hasn't been exited
+  let stOpenReturnPct: number | null = null;
+  {
+    let inPosition = false;
+    let entryPrice = 0;
+    for (const b of bars) {
+      if (b.stEntrySignal === "BUY" && !inPosition) {
+        inPosition = true;
+        entryPrice = b.close; // approximate entry at close of signal bar
+      } else if (b.supertrendDir === -1 && inPosition) {
+        inPosition = false;
+      }
+    }
+    if (inPosition && entryPrice > 0) {
+      stOpenReturnPct = ((currentPrice - entryPrice) / entryPrice) * 100;
+    }
+  }
+
+  // ── Strategy comparison ───────────────────────────────────────
+  function toMetrics(bt: typeof backtestResult) {
+    return {
+      total_return: bt.total_return,
+      win_rate: bt.win_rate,
+      num_trades: bt.num_trades,
+      profit_factor: bt.profit_factor,
+      max_drawdown: bt.max_drawdown,
+      sharpe: bt.sharpe,
+      alpha: bt.alpha,
+      trades: bt.trades,
+    };
+  }
+  const scoreAlpha = backtestResult.alpha;
+  const stAlpha = stBacktestResult.alpha;
+  const winner: "score" | "supertrend" | "tie" =
+    Math.abs(scoreAlpha - stAlpha) < 0.5 ? "tie"
+    : scoreAlpha > stAlpha ? "score" : "supertrend";
+
+  const comparison = {
+    score: toMetrics(backtestResult),
+    supertrend: toMetrics(stBacktestResult),
+    winner,
+    winner_margin: Math.abs(scoreAlpha - stAlpha),
+  };
 
   return {
     symbol: stockConfig.symbol,
@@ -203,6 +282,11 @@ export function runPipeline(
     walk_forward: walkForward,
     kelly,
     chart_bars: chartBars,
+    st_direction: stDirection,
+    st_value: stValue,
+    st_stop_distance_pct: stStopDistPct,
+    st_open_return_pct: stOpenReturnPct,
+    comparison,
   };
 }
 
