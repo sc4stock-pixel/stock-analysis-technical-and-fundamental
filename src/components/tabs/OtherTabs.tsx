@@ -86,6 +86,9 @@ export function TradingPlanTab({ result }: Props) {
   const bt = result.backtest;
   if (!bt) return <div className="p-4 text-[#4a6080] text-xs">No data</div>;
 
+  const isSTMode = bt.signal_bars === 0 && (result.comparison?.supertrend.num_trades ?? 0) > 0;
+  const stDir = result.st_direction ?? -1;
+
   const price = result.current_price;
   const stop = bt.stop_loss_price;
   const fib = bt.fib_targets;
@@ -106,14 +109,26 @@ export function TradingPlanTab({ result }: Props) {
     <div className="p-3 space-y-4">
       {/* Entry zone */}
       <div>
-        <div className="text-[#00d4ff] text-xs font-bold mb-2 tracking-widest">◈ TRADING PLAN</div>
+        <div className={`text-xs font-bold mb-2 tracking-widest ${isSTMode ? "text-[#ffa502]" : "text-[#00d4ff]"}`}>
+          ◈ {isSTMode ? "ST TRADING PLAN" : "TRADING PLAN"}
+        </div>
 
         <div className="bg-[#0a0e1a] border border-[#1e2d4a] rounded p-3 space-y-2">
           <div className="flex justify-between items-center">
-            <span className="text-[#6b85a0] text-xs">Signal</span>
-            <span className={`text-xs font-bold px-2 py-0.5 rounded border ${
-              result.signal === "BUY" ? "badge-buy" : result.signal === "SELL" ? "badge-sell" : "badge-hold"
-            }`}>{result.signal}</span>
+            <span className="text-[#6b85a0] text-xs">{isSTMode ? "ST Signal" : "Signal"}</span>
+            {isSTMode ? (
+              <span className={`text-xs font-bold px-2 py-0.5 rounded border font-mono ${
+                stDir === 1
+                  ? "border-[#00ff88]/50 text-[#00ff88] bg-[#00ff88]/10"
+                  : "border-[#ff4757]/50 text-[#ff4757] bg-[#ff4757]/10"
+              }`}>
+                {stDir === 1 ? "🟢 BULLISH" : "🔴 BEARISH"}
+              </span>
+            ) : (
+              <span className={`text-xs font-bold px-2 py-0.5 rounded border ${
+                result.signal === "BUY" ? "badge-buy" : result.signal === "SELL" ? "badge-sell" : "badge-hold"
+              }`}>{result.signal}</span>
+            )}
           </div>
 
           <div className="flex justify-between">
@@ -124,12 +139,27 @@ export function TradingPlanTab({ result }: Props) {
           <div className="border-t border-[#1e2d4a] my-1" />
 
           <div className="flex justify-between">
-            <span className="text-[#ff4757] text-xs">Stop Loss</span>
+            <span className="text-[#ff4757] text-xs">{isSTMode ? "ST Stop Line" : "Stop Loss"}</span>
             <span className="text-[#ff4757] text-xs font-mono">
               {stop ? stop.toFixed(2) : "—"}
               {risk && price > 0 ? ` (${((risk / price) * 100).toFixed(1)}%)` : ""}
             </span>
           </div>
+
+          {isSTMode && stDir === 1 && result.st_open_return_pct !== null && result.st_open_return_pct !== undefined && (
+            <div className="flex justify-between">
+              <span className="text-[#6b85a0] text-xs">Open P&L</span>
+              <span className={`text-xs font-mono font-bold ${result.st_open_return_pct >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}`}>
+                {result.st_open_return_pct >= 0 ? "+" : ""}{result.st_open_return_pct.toFixed(2)}%
+              </span>
+            </div>
+          )}
+
+          {isSTMode && (
+            <div className="mt-1 pt-2 border-t border-[#1e2d4a]/50 text-[0.6rem] text-[#4a6080] leading-relaxed">
+              ST exits on trend reversal only · No ATR stop · No profit target · No max hold days
+            </div>
+          )}
         </div>
       </div>
 
@@ -177,7 +207,8 @@ export function TradingPlanTab({ result }: Props) {
         <Row label="Resistance" value={bt.resistance_level?.toFixed(2) ?? "—"} color="text-[#ff4757]" />
         <Row label="Current" value={price > 0 ? price.toFixed(2) : "—"} color="text-[#00d4ff]" />
         <Row label="Support" value={bt.support_level?.toFixed(2) ?? "—"} color="text-[#00ff88]" />
-        <Row label="Stop Loss" value={bt.stop_loss_price?.toFixed(2) ?? "—"} color="text-[#ff4757]" />
+        <Row label={isSTMode ? "ST Stop Line" : "Stop Loss"}
+          value={bt.stop_loss_price?.toFixed(2) ?? "—"} color="text-[#ff4757]" />
         <Row label="52W High" value={bt.week_52_high?.toFixed(2) ?? "—"} />
         <Row label="52W Low" value={bt.week_52_low?.toFixed(2) ?? "—"} />
         {fib?.swing_low && <Row label="Swing Low (base)" value={fib.swing_low.toFixed(2)} />}
@@ -190,6 +221,7 @@ export function TradingPlanTab({ result }: Props) {
           {result.regime?.replace(/_/g, " ")} — Score {result.score?.toFixed(1)} / 10
           {result.regime_info?.is_high_volatility && " · ⚠ HIGH VOLATILITY"}
           {result.regime_info?.is_extreme_dislocation && " · ⚠⚠ EXTREME DISLOCATION"}
+          {isSTMode && ` · ST ${stDir === 1 ? "🟢 Bullish" : "🔴 Bearish"}`}
         </div>
       </div>
     </div>

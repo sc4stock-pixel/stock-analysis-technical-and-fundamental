@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { StockAnalysisResult, AppConfig, CandlestickPattern } from "@/types";
+import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult } from "@/types";
 import { regimeColor } from "@/lib/regime";
 import OverviewTab    from "./tabs/OverviewTab";
 import BacktestTab   from "./tabs/BacktestTab";
@@ -13,7 +13,7 @@ interface Props {
   config: AppConfig;
 }
 
-// TRADES tab removed — trade list is already shown inside the CHART tab
+type Strategy = "score" | "supertrend";
 const TABS = ["OVERVIEW", "CHART", "BACKTEST", "MONTE CARLO", "PLAN"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -36,10 +36,104 @@ function patternBadge(p: CandlestickPattern) {
   );
 }
 
+/**
+ * Build a "SuperTrend view" of the result by splicing the ST backtest metrics
+ * into the result object so all existing tabs render ST data transparently.
+ * Only backtest metrics change — price, regime, chart_bars, etc. stay the same.
+ */
+function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
+  const cmp = result.comparison;
+  if (!cmp) return result;
+
+  const stMetrics = cmp.supertrend;
+  const scoreBt = result.backtest;
+  if (!scoreBt) return result;
+
+  // Reconstruct a simplified ST equity curve from trade PnLs
+  // Start at same initialCapital, step through trades in order
+  const initialCapital = scoreBt.equity_curve[0] ?? 10000;
+  const stEquityCurve: number[] = [initialCapital];
+  const stEquityDates: string[] = [scoreBt.equity_dates[0] ?? ""];
+  let runningEq = initialCapital;
+  // Sort trades by entry index
+  const sortedTrades = [...stMetrics.trades].sort((a, b) => a.entry_idx - b.entry_idx);
+  for (const t of sortedTrades) {
+    // Flat equity during pre-entry period
+    const barsBefore = Math.max(0, t.entry_idx - stEquityCurve.length + 1);
+    for (let b = 0; b < barsBefore; b++) stEquityCurve.push(runningEq);
+    // Approximate linear equity during trade
+    const pnl = t.pnl;
+    const barsHeld = Math.max(1, t.bars_held);
+    for (let b = 0; b < barsHeld; b++) {
+      stEquityCurve.push(runningEq + (pnl * (b + 1)) / barsHeld);
+    }
+    runningEq += pnl;
+  }
+  // Pad to match score equity length with final equity
+  while (stEquityCurve.length < scoreBt.equity_curve.length) {
+    stEquityCurve.push(runningEq);
+  }
+
+  const winners = stMetrics.trades.filter(t => t.return > 0);
+  const losers  = stMetrics.trades.filter(t => t.return <= 0);
+  const fn = (arr: typeof stMetrics.trades, key: keyof typeof stMetrics.trades[0]) =>
+    arr.length > 0 ? arr.reduce((a, t) => a + (t[key] as number), 0) / arr.length : 0;
+
+  const stBt: BacktestResult = {
+    ...scoreBt,
+    trades: stMetrics.trades,
+    num_trades: stMetrics.num_trades,
+    win_rate: stMetrics.win_rate,
+    total_return: stMetrics.total_return,
+    profit_factor: stMetrics.profit_factor,
+    max_drawdown: stMetrics.max_drawdown,
+    sharpe: stMetrics.sharpe,
+    sortino: stMetrics.sortino ?? 0,
+    expectancy: stMetrics.expectancy ?? 0,
+    avg_win: stMetrics.avg_win ?? 0,
+    avg_loss: stMetrics.avg_loss ?? 0,
+    alpha: stMetrics.alpha,
+    alpha_status: stMetrics.alpha >= 0 ? "ADDING VALUE" : "DESTROYING VALUE",
+    exit_reasons: stMetrics.num_trades > 0 ? { "ST Reversal": stMetrics.num_trades } : {},
+    stop_loss_price: result.st_value > 0 ? result.st_value : scoreBt.stop_loss_price,
+    r_multiples: stMetrics.trades.map(t => t.r_multiple),
+    equity_curve: stEquityCurve,
+    equity_dates: stEquityDates,
+    avg_mae: fn(stMetrics.trades, "mae_pct"),
+    avg_mfe: fn(stMetrics.trades, "mfe_pct"),
+    winner_mae: fn(winners, "mae_pct"),
+    winner_mfe: fn(winners, "mfe_pct"),
+    loser_mae:  fn(losers,  "mae_pct"),
+    avg_duration: fn(stMetrics.trades, "bars_held"),
+    median_duration: 0,
+    min_duration: stMetrics.trades.length > 0 ? Math.min(...stMetrics.trades.map(t => t.bars_held)) : 0,
+    max_duration: stMetrics.trades.length > 0 ? Math.max(...stMetrics.trades.map(t => t.bars_held)) : 0,
+    avg_winner_duration: fn(winners, "bars_held"),
+    avg_loser_duration:  fn(losers,  "bars_held"),
+    median_winner_duration: 0,
+    median_loser_duration: 0,
+    kill_switch_triggered: false,
+    calmar_ratio: 0,
+    ulcer_index: 0,
+    omega_ratio: 0,
+    signal_bars: 0,
+  };
+
+  return { ...result, backtest: stBt };
+}
+
 export default function StockCard({ result, config }: Props) {
   const [tab, setTab] = useState<Tab>("OVERVIEW");
+  const [strategy, setStrategy] = useState<Strategy>("score");
+
   const bt = result.backtest;
   const isError = result.signal === "ERROR";
+  const hasST = !!result.comparison;
+
+  // Build the result view for the active strategy
+  const activeResult = strategy === "supertrend" && hasST
+    ? buildSTView(result)
+    : result;
 
   const priceFmt = (p: number) => {
     if (!p || p === 0) return "—";
@@ -47,6 +141,7 @@ export default function StockCard({ result, config }: Props) {
   };
 
   const chg = result.change_pct ?? 0;
+  const stDir = result.st_direction ?? -1;
 
   return (
     <div className="card flex flex-col">
@@ -59,6 +154,14 @@ export default function StockCard({ result, config }: Props) {
             <span className="text-[#4a6080] text-xs">{result.name}</span>
             <span className={`text-xs px-1.5 py-0.5 rounded border ${signalBadge(result.signal)}`}>
               {result.signal}
+            </span>
+            {/* ST direction badge inline */}
+            <span className={`text-xs px-1 py-0.5 rounded border font-mono ${
+              stDir === 1
+                ? "border-[#00ff88]/30 text-[#00ff88] bg-[#00ff88]/5"
+                : "border-[#ff4757]/30 text-[#ff4757] bg-[#ff4757]/5"
+            }`}>
+              {stDir === 1 ? "🟢 ST" : "🔴 ST"}
             </span>
           </div>
           {/* Price row */}
@@ -103,15 +206,46 @@ export default function StockCard({ result, config }: Props) {
         </div>
       </div>
 
-      {/* ── TABS ── */}
-      <div className="flex border-b border-[#1e2d4a] overflow-x-auto">
+      {/* ── STRATEGY TOGGLE + TABS ── */}
+      <div className="flex items-center border-b border-[#1e2d4a] overflow-x-auto">
+        {/* Strategy toggle — compact pill left of tabs */}
+        {hasST && (
+          <div className="flex shrink-0 border-r border-[#1e2d4a] mr-1">
+            <button
+              onClick={() => setStrategy("score")}
+              className={`px-2 py-1.5 text-xs font-mono transition-all whitespace-nowrap ${
+                strategy === "score"
+                  ? "text-[#00d4ff] bg-[#00d4ff]/10 border-b-2 border-[#00d4ff]"
+                  : "text-[#4a6080] hover:text-[#6b85a0]"
+              }`}
+              title="Score multi-indicator strategy"
+            >
+              SCR
+            </button>
+            <button
+              onClick={() => setStrategy("supertrend")}
+              className={`px-2 py-1.5 text-xs font-mono transition-all whitespace-nowrap ${
+                strategy === "supertrend"
+                  ? "text-[#ffa502] bg-[#ffa502]/10 border-b-2 border-[#ffa502]"
+                  : "text-[#4a6080] hover:text-[#6b85a0]"
+              }`}
+              title="SuperTrend trend-following strategy"
+            >
+              ST
+            </button>
+          </div>
+        )}
+
+        {/* Tabs */}
         {TABS.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`flex-1 py-1.5 text-xs whitespace-nowrap px-2 transition-all ${
               tab === t
-                ? "text-[#00d4ff] border-b-2 border-[#00d4ff] bg-[#00d4ff]/5"
+                ? strategy === "supertrend"
+                  ? "text-[#ffa502] border-b-2 border-[#ffa502] bg-[#ffa502]/5"
+                  : "text-[#00d4ff] border-b-2 border-[#00d4ff] bg-[#00d4ff]/5"
                 : "text-[#4a6080] hover:text-[#6b85a0]"
             }`}
           >
@@ -120,6 +254,22 @@ export default function StockCard({ result, config }: Props) {
         ))}
       </div>
 
+      {/* ── STRATEGY CONTEXT BANNER ── */}
+      {strategy === "supertrend" && hasST && (
+        <div className="flex items-center gap-2 px-3 py-1 bg-[#ffa502]/5 border-b border-[#ffa502]/20 text-xs">
+          <span className="text-[#ffa502] font-mono font-bold">ST MODE</span>
+          <span className="text-[#4a6080]">·</span>
+          <span className="text-[#4a6080]">exits on trend reversal only · no ATR stop / target / max days</span>
+          <button
+            onClick={() => setStrategy("score")}
+            className="ml-auto text-[#4a6080] hover:text-[#ffa502] transition-colors"
+            title="Switch back to Score strategy"
+          >
+            ← Score
+          </button>
+        </div>
+      )}
+
       {/* ── TAB CONTENT ── */}
       <div className="flex-1 overflow-auto min-h-0">
         {isError ? (
@@ -127,13 +277,14 @@ export default function StockCard({ result, config }: Props) {
         ) : (
           <>
             {tab === "CHART"       && <ChartTab       result={result} />}
-            {tab === "OVERVIEW"    && <OverviewTab    result={result} />}
-            {tab === "BACKTEST"    && <BacktestTab    result={result} />}
+            {tab === "OVERVIEW"    && <OverviewTab    result={activeResult} />}
+            {tab === "BACKTEST"    && <BacktestTab    result={activeResult} />}
             {tab === "MONTE CARLO" && <MonteCarloTab  result={result} />}
-            {tab === "PLAN"        && <TradingPlanTab result={result} />}
+            {tab === "PLAN"        && <TradingPlanTab result={activeResult} />}
           </>
         )}
       </div>
     </div>
   );
 }
+

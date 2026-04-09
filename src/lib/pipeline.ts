@@ -222,21 +222,42 @@ export function runPipeline(
     ? ((currentPrice - stValue) / currentPrice) * 100
     : 0;
 
-  // Detect open ST position: find last ST BUY entry that hasn't been exited
+  // ── SuperTrend open position detection ────────────────────────
+  // Strategy: replay the same entry logic as the ST backtest but track
+  // whether the last position was ever closed. If ST is still bullish
+  // and no reversal fired after the last entry, the position is open.
   let stOpenReturnPct: number | null = null;
-  {
-    let inPosition = false;
-    let entryPrice = 0;
-    for (const b of bars) {
-      if (b.stEntrySignal === "BUY" && !inPosition) {
-        inPosition = true;
-        entryPrice = b.close; // approximate entry at close of signal bar
-      } else if (b.supertrendDir === -1 && inPosition) {
-        inPosition = false;
+  if (stDirection === 1) {
+    // Walk through bars to find the last entry that was NOT followed by an exit
+    let lastEntryPrice: number | null = null;
+    let lastEntryIdx: number | null = null;
+    let positionClosed = false;
+
+    for (let i = 1; i < bars.length; i++) {
+      const cur = bars[i];
+      const prev = bars[i - 1];
+
+      // Entry: same logic as runSupertrendBacktest
+      if (lastEntryPrice === null && prev.stEntrySignal === "BUY") {
+        lastEntryPrice = cur.open * (1 + config.backtest.slippageRate);
+        lastEntryIdx = i;
+        positionClosed = false;
+      }
+      // Exit: direction flips bearish while in position
+      else if (lastEntryPrice !== null) {
+        const stReversed = cur.supertrendDir === -1 && prev.supertrendDir === 1;
+        if (stReversed) {
+          // Position closed — reset, look for next entry
+          lastEntryPrice = null;
+          lastEntryIdx = null;
+          positionClosed = true;
+        }
       }
     }
-    if (inPosition && entryPrice > 0) {
-      stOpenReturnPct = ((currentPrice - entryPrice) / entryPrice) * 100;
+
+    // If we ended with an open position (lastEntryPrice set, ST still bullish)
+    if (lastEntryPrice !== null && lastEntryPrice > 0) {
+      stOpenReturnPct = ((currentPrice - lastEntryPrice) / lastEntryPrice) * 100;
     }
   }
 
@@ -249,6 +270,10 @@ export function runPipeline(
       profit_factor: bt.profit_factor,
       max_drawdown: bt.max_drawdown,
       sharpe: bt.sharpe,
+      sortino: bt.sortino,
+      expectancy: bt.expectancy,
+      avg_win: bt.avg_win,
+      avg_loss: bt.avg_loss,
       alpha: bt.alpha,
       trades: bt.trades,
     };

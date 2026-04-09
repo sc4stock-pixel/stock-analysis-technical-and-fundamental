@@ -24,7 +24,7 @@ function MetricCol({ label, score, st, higherIsBetter = true }: {
   const tied = Math.abs(sVal - stVal) < 0.01;
   return (
     <div className="flex justify-between py-1 border-b border-[#1e2d4a]/30 text-xs">
-      <span className="text-[#4a6080] w-24 flex-shrink-0">{label}</span>
+      <span className="text-[#4a6080] w-28 flex-shrink-0">{label}</span>
       <span className={`font-mono w-16 text-right ${!tied && scoreWins ? "text-[#00ff88]" : "text-[#c8d8f0]"}`}>
         {typeof score === "number" ? score.toFixed(1) : score}
       </span>
@@ -71,13 +71,13 @@ export default function BacktestTab({ result }: Props) {
                 ? "border-[#ffa502] text-[#ffa502] bg-[#ffa502]/10"
                 : "border-[#4a6080] text-[#4a6080]"
             }`}>
-              {cmp.winner === "tie" ? "TIE" : `${cmp.winner === "score" ? "SCORE" : "ST"} WINS +${cmp.winner_margin.toFixed(1)}%`}
+              {cmp.winner === "tie" ? "TIE" : `${cmp.winner === "score" ? "SCORE" : "ST"} WINS +${cmp.winner_margin.toFixed(1)}%α`}
             </div>
           </div>
 
           {/* Column headers */}
           <div className="flex justify-between text-xs mb-1 pb-1 border-b border-[#1e2d4a]">
-            <span className="text-[#4a6080] w-24">METRIC</span>
+            <span className="text-[#4a6080] w-28">METRIC</span>
             <span className="text-[#00d4ff] w-16 text-right font-mono">SCORE</span>
             <span className="text-[#ffa502] w-16 text-right font-mono">ST</span>
           </div>
@@ -85,28 +85,103 @@ export default function BacktestTab({ result }: Props) {
           <MetricCol label="Return %" score={cmp.score.total_return} st={cmp.supertrend.total_return} />
           <MetricCol label="Alpha %" score={cmp.score.alpha} st={cmp.supertrend.alpha} />
           <MetricCol label="Sharpe" score={cmp.score.sharpe} st={cmp.supertrend.sharpe} />
+          <MetricCol label="Sortino" score={cmp.score.sortino} st={cmp.supertrend.sortino} />
           <MetricCol label="Win %" score={cmp.score.win_rate} st={cmp.supertrend.win_rate} />
           <MetricCol label="Prft Factor" score={cmp.score.profit_factor} st={cmp.supertrend.profit_factor} />
+          <MetricCol label="Expectancy%" score={cmp.score.expectancy} st={cmp.supertrend.expectancy} />
+          <MetricCol label="Avg Win %" score={cmp.score.avg_win} st={cmp.supertrend.avg_win} />
+          <MetricCol label="Avg Loss %" score={cmp.score.avg_loss} st={cmp.supertrend.avg_loss} higherIsBetter={false} />
           <MetricCol label="Max DD %" score={cmp.score.max_drawdown} st={cmp.supertrend.max_drawdown} higherIsBetter={false} />
-          <div className="flex justify-between py-1 text-xs">
-            <span className="text-[#4a6080] w-24">Trades</span>
+          <div className="flex justify-between py-1 border-b border-[#1e2d4a]/30 text-xs">
+            <span className="text-[#4a6080] w-28">Trades</span>
             <span className="text-[#c8d8f0] font-mono w-16 text-right">{cmp.score.num_trades}</span>
             <span className="text-[#c8d8f0] font-mono w-16 text-right">{cmp.supertrend.num_trades}</span>
           </div>
+
+          {/* Recent trades — last 4 per strategy */}
+          <div className="mt-2 pt-2 border-t border-[#1e2d4a]/50 grid grid-cols-2 gap-2">
+            <div>
+              <div className="text-[#00d4ff] text-[0.6rem] font-bold mb-1">SCORE RECENT</div>
+              {[...cmp.score.trades].reverse().slice(0, 4).map(t => (
+                <div key={t.trade_num} className="flex justify-between text-[0.6rem] font-mono mb-0.5">
+                  <span className="text-[#4a6080]">{t.entry_date?.slice(5)}</span>
+                  <span className={t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>
+                    {t.return >= 0 ? "+" : ""}{(t.return * 100).toFixed(1)}%
+                    <span className="text-[#4a6080] ml-1">({t.r_multiple >= 0 ? "+" : ""}{t.r_multiple.toFixed(1)}R)</span>
+                  </span>
+                </div>
+              ))}
+              {cmp.score.trades.length === 0 && <div className="text-[#4a6080] text-[0.6rem]">No trades</div>}
+            </div>
+            <div>
+              <div className="text-[#ffa502] text-[0.6rem] font-bold mb-1">ST RECENT</div>
+              {[...cmp.supertrend.trades].reverse().slice(0, 4).map(t => (
+                <div key={t.trade_num} className="flex justify-between text-[0.6rem] font-mono mb-0.5">
+                  <span className="text-[#4a6080]">{t.entry_date?.slice(5)}</span>
+                  <span className={t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>
+                    {t.return >= 0 ? "+" : ""}{(t.return * 100).toFixed(1)}%
+                    <span className="text-[#4a6080] ml-1">({t.r_multiple >= 0 ? "+" : ""}{t.r_multiple.toFixed(1)}R)</span>
+                  </span>
+                </div>
+              ))}
+              {cmp.supertrend.trades.length === 0 && <div className="text-[#4a6080] text-[0.6rem]">No trades</div>}
+            </div>
+          </div>
+
+          {/* ST Status footer */}
+          {(() => {
+            const dir = result.st_direction ?? -1;
+            const dist = result.st_stop_distance_pct ?? 0;
+            const openRet = result.st_open_return_pct;
+            return (
+              <div className="mt-2 pt-2 border-t border-[#1e2d4a]/50 flex items-center gap-2 text-xs font-mono">
+                <span className="text-[#4a6080]">ST Status:</span>
+                {dir === 1 ? (
+                  <>
+                    <span className="text-[#00ff88]">🟢</span>
+                    {openRet !== null && openRet !== undefined && (
+                      <span className={openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>
+                        {openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%
+                      </span>
+                    )}
+                    {openRet !== null && openRet !== undefined && (
+                      <span className="text-[#4a6080]">·</span>
+                    )}
+                    <span className="text-[#c8d8f0]">{dist.toFixed(1)}% to stop</span>
+                  </>
+                ) : (
+                  <span className="text-[#ff4757]">🔴 Bearish — wait for flip</span>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
       {/* Equity curve */}
       {eqData.length > 2 && (
         <div>
-          <div className="text-[#4a6080] text-xs mb-1">EQUITY CURVE (SCORE STRATEGY)</div>
+          <div className="text-[#4a6080] text-xs mb-1">
+            EQUITY CURVE
+            {cmp && (
+              <span className={`ml-2 px-1.5 py-0.5 rounded text-[0.6rem] font-mono border ${
+                result.comparison?.winner === "supertrend" && bt.signal_bars === 0
+                  ? "border-[#ffa502]/40 text-[#ffa502]"
+                  : "border-[#00d4ff]/40 text-[#00d4ff]"
+              }`}>
+                {bt.signal_bars === 0 ? "ST STRATEGY" : "SCORE STRATEGY"}
+              </span>
+            )}
+          </div>
           <div className="h-28">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={eqData}>
                 <XAxis dataKey="i" hide />
                 <YAxis domain={["auto", "auto"]} hide />
                 <ReferenceLine y={result.backtest?.equity_curve?.[0] ?? 10000} stroke="#1e2d4a" strokeDasharray="4 2" />
-                <Line type="monotone" dataKey="v" stroke="#00d4ff" strokeWidth={1.5} dot={false} />
+                <Line type="monotone" dataKey="v"
+                  stroke={bt.signal_bars === 0 ? "#ffa502" : "#00d4ff"}
+                  strokeWidth={1.5} dot={false} />
                 <Tooltip contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
                   formatter={(v: number) => [`$${v.toFixed(0)}`, "Equity"]} />
               </LineChart>
@@ -118,7 +193,9 @@ export default function BacktestTab({ result }: Props) {
       {/* Trade waterfall */}
       {waterfallData.length > 0 && (
         <div>
-          <div className="text-[#4a6080] text-xs mb-1">SCORE TRADE RETURNS (last {waterfallData.length})</div>
+          <div className="text-[#4a6080] text-xs mb-1">
+            {bt.signal_bars === 0 ? "ST" : "SCORE"} TRADE RETURNS (last {waterfallData.length})
+          </div>
           <div className="h-20">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={waterfallData} barSize={12}>

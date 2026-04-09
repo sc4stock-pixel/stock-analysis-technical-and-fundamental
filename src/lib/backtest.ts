@@ -711,7 +711,7 @@ export function runSupertrendBacktest(
     return buildEmptyResults(symbol, bars, config, false, equityCurve, equityDates);
   }
 
-  // ── Metrics (same calculation as score backtest) ─────────────
+  // ── Metrics — identical equity-curve method as runBacktest() ─
   const winners = trades.filter((t) => t.return > 0);
   const losers = trades.filter((t) => t.return <= 0);
   const winRate = winners.length / trades.length;
@@ -719,6 +719,9 @@ export function runSupertrendBacktest(
   const avgLoss = losers.length > 0 ? mean(losers.map((t) => t.return)) : 0;
   const expectancy = winRate * avgWin + (1 - winRate) * avgLoss;
 
+  // Sharpe: use FULL equity curve daily returns, identical to runBacktest().
+  // Do NOT use in-trade-only returns: with 2 uniformly losing trades the
+  // variance collapses → nonsensical positive Sharpe (e.g. -7.5% return, +1.1 Sharpe).
   const dailyReturns: number[] = [];
   for (let i = 1; i < equityCurve.length; i++) {
     const prev = equityCurve[i - 1];
