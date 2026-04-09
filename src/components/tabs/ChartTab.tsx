@@ -183,6 +183,13 @@ export default function ChartTab({ result }: Props) {
   const winsInView   = tradesInView.filter(t => t.return > 0).length;
   const lossesInView = tradesInView.filter(t => t.return <= 0).length;
 
+  // ST trades in view
+  const stTradesInView = (result.comparison?.supertrend?.trades ?? []).filter(
+    t => datesInView.has(t.entry_date) || datesInView.has(t.exit_date)
+  );
+  const stWinsInView = stTradesInView.filter(t => t.return > 0).length;
+  const stLossesInView = stTradesInView.filter(t => t.return <= 0).length;
+
   // ── Toggle button helper ─────────────────────────────────────────
   const Tog = ({
     label, active, onClick, activeClass,
@@ -494,11 +501,11 @@ export default function ChartTab({ result }: Props) {
         );
       })()}
 
-      {/* ── Trades in view table ── */}
+      {/* ── Score Trades in view table ── */}
       {showTrades && tradesInView.length > 0 && (
         <div className="mt-1">
-          <div className="text-[#4a6080] text-xs mb-1 font-bold">
-            TRADES IN VIEW — {tradesInView.length} trades · <span className="text-[#00ff88]">{winsInView}W</span> <span className="text-[#ff4757]">{lossesInView}L</span>
+          <div className="text-[#00d4ff] text-xs mb-1 font-bold">
+            SCORE TRADES IN VIEW — {tradesInView.length} · <span className="text-[#00ff88]">{winsInView}W</span> <span className="text-[#ff4757]">{lossesInView}L</span>
           </div>
           <div className="overflow-x-auto rounded border border-[#1e2d4a]/60">
             <table className="w-full text-xs">
@@ -544,6 +551,61 @@ export default function ChartTab({ result }: Props) {
                     <td className="py-1 px-2 text-[#4a6080] text-[0.6rem] max-w-[90px] truncate">
                       {t.entry_regime?.replace(/_/g, " ")}
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── SuperTrend Trades in view table ── */}
+      {stTradesInView.length > 0 && (
+        <div className="mt-2">
+          <div className="text-[#ffa502] text-xs mb-1 font-bold">
+            ST TRADES IN VIEW — {stTradesInView.length} · <span className="text-[#00ff88]">{stWinsInView}W</span> <span className="text-[#ff4757]">{stLossesInView}L</span>
+            <span className="text-[#4a6080] font-normal ml-2">(exit = trend reversal only)</span>
+          </div>
+          <div className="overflow-x-auto rounded border border-[#ffa502]/20">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-[#4a6080] bg-[#0f1629] border-b border-[#1e2d4a]">
+                  <th className="text-left py-1 px-2">#</th>
+                  <th className="text-left py-1 px-2">Entry Date</th>
+                  <th className="text-left py-1 px-2">Exit Date</th>
+                  <th className="text-right py-1 px-2">Entry $</th>
+                  <th className="text-right py-1 px-2">Exit $</th>
+                  <th className="text-right py-1 px-2">Ret%</th>
+                  <th className="text-right py-1 px-2">R</th>
+                  <th className="text-right py-1 px-2">Bars</th>
+                  <th className="text-left py-1 px-2">Exit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stTradesInView.map(t => (
+                  <tr key={t.trade_num}
+                    className={`border-b border-[#1e2d4a]/30 hover:bg-[#ffa502]/5 transition-colors ${
+                      t.return > 0 ? "bg-[#00ff88]/3" : "bg-[#ff4757]/3"
+                    }`}>
+                    <td className="py-1 px-2 text-[#4a6080]">{t.trade_num}</td>
+                    <td className="py-1 px-2 font-mono">
+                      <span className="text-[#ffa502]">▲</span>
+                      <span className="text-[#6b85a0] ml-1">{t.entry_date}</span>
+                    </td>
+                    <td className="py-1 px-2 font-mono">
+                      <span className="text-[#ff4757]">▼</span>
+                      <span className="text-[#6b85a0] ml-1">{t.exit_date}</span>
+                    </td>
+                    <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.entry_price.toFixed(2)}</td>
+                    <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.exit_price.toFixed(2)}</td>
+                    <td className={`py-1 px-2 text-right font-mono font-bold ${t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+                      {t.return >= 0 ? "+" : ""}{(t.return * 100).toFixed(1)}%
+                    </td>
+                    <td className={`py-1 px-2 text-right font-mono ${t.r_multiple > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+                      {t.r_multiple >= 0 ? "+" : ""}{t.r_multiple.toFixed(2)}R
+                    </td>
+                    <td className="py-1 px-2 text-right text-[#6b85a0]">{t.bars_held}</td>
+                    <td className="py-1 px-2 text-[#ffa502]/70 text-[0.6rem]">ST Reversal</td>
                   </tr>
                 ))}
               </tbody>

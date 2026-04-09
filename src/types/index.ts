@@ -229,6 +229,10 @@ export interface StrategyMetrics {
   profit_factor: number;
   max_drawdown: number;
   sharpe: number;
+  sortino: number;
+  expectancy: number;
+  avg_win: number;
+  avg_loss: number;
   alpha: number;
   trades: Trade[];
 }

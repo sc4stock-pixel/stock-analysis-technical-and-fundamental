@@ -240,25 +240,25 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
                       const dist = r.st_stop_distance_pct ?? 0;
                       const openRet = r.st_open_return_pct;
                       if (dir !== 1) {
-                        return <span className="text-[#ff4757]">🔴</span>;
+                        return <span className="text-[#ff4757]" title="ST Bearish — no long entries">🔴</span>;
                       }
                       if (openRet !== null && openRet !== undefined) {
-                        // BULLISH with open position
+                        // BULLISH with open position: 🟢 +ret% · dist%
                         const retColor = openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]";
                         return (
-                          <span>
+                          <span title={`Open pos: ${openRet>=0?"+":""}${openRet.toFixed(1)}% · Stop dist: ${dist.toFixed(1)}%`}>
                             <span className="text-[#00ff88]">🟢 </span>
-                            <span className={retColor}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span>
-                            <span className="text-[#4a6080]"> · </span>
-                            <span className="text-[#c8d8f0]">{dist.toFixed(1)}%</span>
+                            <span className={`font-bold ${retColor}`}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span>
+                            <span className="text-[#2a3d5a]"> ·</span>
+                            <span className="text-[#4a6080]"> {dist.toFixed(1)}%</span>
                           </span>
                         );
                       }
-                      // BULLISH no position
+                      // BULLISH no open position: 🟢 dist% (no position)
                       return (
-                        <span>
+                        <span title={`ST Bullish, no position · Stop dist from price: ${dist.toFixed(1)}%`}>
                           <span className="text-[#00ff88]">🟢 </span>
-                          <span className="text-[#c8d8f0]">{dist.toFixed(1)}%</span>
+                          <span className="text-[#4a6080] italic">{dist.toFixed(1)}%↑</span>
                         </span>
                       );
                     })()}
