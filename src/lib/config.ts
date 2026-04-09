@@ -7,6 +7,7 @@ export const DEFAULT_CONFIG: AppConfig = {
       { symbol: "0700.HK", name: "Tencent", exchange: "HK" },
       { symbol: "1211.HK", name: "BYD", exchange: "HK" },
       { symbol: "1810.HK", name: "Xiaomi", exchange: "HK" },
+      { symbol: "0175.HK", name: "Geely", exchange: "HK" },
       { symbol: "3033.HK", name: "HSTech ETF", exchange: "HK" },
       { symbol: "AAPL", name: "Apple", exchange: "US" },
       { symbol: "MSFT", name: "Microsoft", exchange: "US" },
@@ -15,6 +16,8 @@ export const DEFAULT_CONFIG: AppConfig = {
       { symbol: "AMD", name: "AMD", exchange: "US" },
       { symbol: "NVDA", name: "NVIDIA", exchange: "US" },
       { symbol: "TSM", name: "TSMC", exchange: "US" },
+      { symbol: "SPY", name: "SPY", exchange: "US" },
+      { symbol: "QQQ", name: "QQQ", exchange: "US" },
     ],
   },
   analysis: {
