@@ -43,7 +43,7 @@ export default function OverviewTab({ result }: Props) {
   const firstV = sparkData[0]?.v ?? 1;
   const lastV = sparkData[sparkData.length - 1]?.v ?? 1;
   const sparkColor = lastV >= firstV ? "#00ff88" : "#ff4757";
-  const equityLabel = isSTMode ? "ST EQUITY CURVE (reconstructed)" : "SCORE EQUITY CURVE (last 50 bars)";
+  const equityLabel = isSTMode ? "ST EQUITY" : "EQUITY (50d)";
   const equityStroke = isSTMode ? "#ffa502" : sparkColor;
 
   // Score heatmap — only meaningful in Score mode
@@ -64,45 +64,70 @@ export default function OverviewTab({ result }: Props) {
 
   return (
     <div className="p-3 space-y-3">
-      {/* Equity sparkline */}
-      {sparkData.length > 2 && (
-        <div>
-          <div className="text-[#4a6080] text-xs mb-1">{equityLabel}</div>
-          <div className="h-16">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={sparkData}>
-                <Line type="monotone" dataKey="v" stroke={equityStroke} strokeWidth={1.5} dot={false} />
-                <Tooltip
-                  contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
-                  formatter={(v: number) => [`$${v.toFixed(0)}`, "Equity"]}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
 
-      {/* Score heatmap — only in Score mode */}
-      {!isSTMode && scoreHistory.length > 0 && (
-        <div>
-          <div className="text-[#4a6080] text-xs mb-1">SCORE HISTORY (last {scoreHistory.length} bars)</div>
-          <div className="flex gap-0.5">
-            {scoreHistory.map((s, i) => {
-              const bg = s >= 6.5 ? "bg-[#00ff88]" : s >= 5.5 ? "bg-[#ffa502]" : s >= 4.5 ? "bg-[#ffa502]/50" : "bg-[#ff4757]";
-              return (
-                <div key={i} title={`Bar ${i + 1}: ${s.toFixed(1)}`}
-                  className={`flex-1 h-5 rounded-sm ${bg} opacity-80`}
-                  style={{ minWidth: 4 }}
-                />
-              );
-            })}
+      {/* ── Score History (left) + Equity Curve (right) — side by side ── */}
+      <div className="grid grid-cols-2 gap-2">
+
+        {/* Score heatmap — Score mode only, left column */}
+        {!isSTMode && scoreHistory.length > 0 ? (
+          <div>
+            <div className="text-[#4a6080] text-xs mb-1">SCORE HISTORY</div>
+            <div className="flex gap-0.5 h-10">
+              {scoreHistory.map((s, i) => {
+                const bg = s >= 6.5 ? "bg-[#00ff88]" : s >= 5.5 ? "bg-[#ffa502]" : s >= 4.5 ? "bg-[#ffa502]/50" : "bg-[#ff4757]";
+                return (
+                  <div key={i} title={`Bar ${i + 1}: ${s.toFixed(1)}`}
+                    className={`flex-1 rounded-sm ${bg} opacity-80`}
+                    style={{ minWidth: 3 }}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex justify-between text-[#4a6080] text-[0.6rem] mt-0.5">
+              <span>20d ago</span><span>now</span>
+            </div>
           </div>
-          <div className="flex justify-between text-[#4a6080] text-xs mt-0.5">
-            <span>20d ago</span>
-            <span>now</span>
+        ) : (
+          /* ST mode: left col shows ST run info */
+          <div>
+            <div className="text-[#4a6080] text-xs mb-1">ST STATUS</div>
+            <div className={`h-10 flex items-center justify-center rounded border text-xs font-mono ${
+              stDir === 1
+                ? "border-[#00ff88]/30 text-[#00ff88] bg-[#00ff88]/5"
+                : "border-[#ff4757]/30 text-[#ff4757] bg-[#ff4757]/5"
+            }`}>
+              {stDir === 1 ? "🟢 BULLISH" : "🔴 BEARISH"}
+            </div>
+            <div className="text-[#4a6080] text-[0.6rem] mt-0.5">
+              {stDir === 1 ? `${stDist.toFixed(1)}% above stop` : "No long entries"}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Equity sparkline — right column */}
+        {sparkData.length > 2 && (
+          <div>
+            <div className="text-[#4a6080] text-xs mb-1 truncate">{equityLabel}</div>
+            <div className="h-10">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={sparkData}>
+                  <Line type="monotone" dataKey="v" stroke={equityStroke} strokeWidth={1.5} dot={false} />
+                  <Tooltip
+                    contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
+                    formatter={(v: number) => [`$${v.toFixed(0)}`, "Equity"]}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex justify-between text-[#4a6080] text-[0.6rem] mt-0.5">
+              <span>${(sparkData[0]?.v ?? 0).toFixed(0)}</span>
+              <span className={lastV >= firstV ? "text-[#00ff88]" : "text-[#ff4757]"}>
+                ${lastV.toFixed(0)}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* SuperTrend heatmap */}
       <div>

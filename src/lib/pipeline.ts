@@ -223,41 +223,41 @@ export function runPipeline(
     : 0;
 
   // ── SuperTrend open position detection ────────────────────────
-  // Strategy: replay the same entry logic as the ST backtest but track
-  // whether the last position was ever closed. If ST is still bullish
-  // and no reversal fired after the last entry, the position is open.
+  // Mirrors runSupertrendBacktest exactly: enter on first bar of each
+  // bullish run (EMA filter), exit on bearish flip. If last run is still
+  // open at end of bars, compute open return vs current price.
   let stOpenReturnPct: number | null = null;
   if (stDirection === 1) {
-    // Walk through bars to find the last entry that was NOT followed by an exit
-    let lastEntryPrice: number | null = null;
-    let lastEntryIdx: number | null = null;
-    let positionClosed = false;
+    let enteredRun = false;
+    let openEntryPrice: number | null = null;
 
     for (let i = 1; i < bars.length; i++) {
       const cur = bars[i];
       const prev = bars[i - 1];
 
-      // Entry: same logic as runSupertrendBacktest
-      if (lastEntryPrice === null && prev.stEntrySignal === "BUY") {
-        lastEntryPrice = cur.open * (1 + config.backtest.slippageRate);
-        lastEntryIdx = i;
-        positionClosed = false;
+      // Reset flag when direction went bearish
+      if (prev.supertrendDir === -1) enteredRun = false;
+
+      // Entry: first bullish bar, EMA filter, not already entered this run
+      if (openEntryPrice === null && prev.supertrendDir === 1 && !enteredRun) {
+        const emaFilter = prev.close > prev.ema50;
+        if (emaFilter) {
+          openEntryPrice = cur.open * (1 + config.backtest.slippageRate);
+          enteredRun = true;
+        }
       }
-      // Exit: direction flips bearish while in position
-      else if (lastEntryPrice !== null) {
+      // Exit: bearish flip
+      else if (openEntryPrice !== null) {
         const stReversed = cur.supertrendDir === -1 && prev.supertrendDir === 1;
         if (stReversed) {
-          // Position closed — reset, look for next entry
-          lastEntryPrice = null;
-          lastEntryIdx = null;
-          positionClosed = true;
+          openEntryPrice = null;
+          enteredRun = false;
         }
       }
     }
 
-    // If we ended with an open position (lastEntryPrice set, ST still bullish)
-    if (lastEntryPrice !== null && lastEntryPrice > 0) {
-      stOpenReturnPct = ((currentPrice - lastEntryPrice) / lastEntryPrice) * 100;
+    if (openEntryPrice !== null && openEntryPrice > 0) {
+      stOpenReturnPct = ((currentPrice - openEntryPrice) / openEntryPrice) * 100;
     }
   }
 
