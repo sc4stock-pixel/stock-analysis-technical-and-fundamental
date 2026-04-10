@@ -588,10 +588,6 @@ export function runSupertrendBacktest(
   const drawdownHistory: number[] = [];
   let portfolioPeak = initialCapital;
 
-  // Track whether we've already entered the current bullish run
-  // so we don't re-enter on every bar while bullish with no position
-  let enteredCurrentBullRun = false;
-
   for (let i = 1; i < bars.length; i++) {
     const cur = bars[i];
     const prev = bars[i - 1];
@@ -600,45 +596,45 @@ export function runSupertrendBacktest(
     const portfolioDrawdown = portfolioPeak > 0 ? (portfolioPeak - currentEquity) / portfolioPeak : 0;
     drawdownHistory.push(portfolioDrawdown);
 
-    // Reset flag when trend goes bearish (new bullish run will be a new entry opportunity)
-    if (prev.supertrendDir === -1) {
-      enteredCurrentBullRun = false;
-    }
-
     // ── ENTRY ────────────────────────────────────────────────────
-    // Enter on the FIRST bar after a bearish→bullish flip, if EMA filter passes.
-    // enteredCurrentBullRun prevents re-entering on every subsequent bullish bar.
-    if (position === null && prev.supertrendDir === 1 && !enteredCurrentBullRun) {
-      const emaFilter = prev.close > prev.ema50;
-      if (emaFilter) {
-        const entryPrice = cur.open * (1 + slippage);
-        const entryAtr = cur.atr;
+    // Python logic: enter on the bar AFTER a bearish→bullish flip,
+    // using the next bar's open price. EMA-only filter: close > ema50 on flip bar.
+    // We detect the flip as: prev bar was bearish AND current bar is bullish.
+    // (cur.supertrendDir===1 && prev.supertrendDir===-1 means TODAY is the first bullish bar)
+    // We enter at today's open (which is the bar after the flip bar's close triggered the signal).
+    if (position === null) {
+      const isBullishFlip = cur.supertrendDir === 1 && prev.supertrendDir === -1;
+      if (isBullishFlip) {
+        const emaFilter = cur.close > cur.ema50; // use cur bar's values at entry bar
+        if (emaFilter) {
+          const entryPrice = cur.open * (1 + slippage);
+          const entryAtr = cur.atr;
 
-        let shares: number;
-        if (useVanTharp) {
-          const riskAmount = runningEquity * riskConfig.riskPerTrade;
-          const riskDist = 2 * entryAtr;
-          shares = riskDist > 0 ? riskAmount / riskDist : 1;
-        } else {
-          shares = Math.floor((runningEquity * 0.998) / entryPrice);
+          let shares: number;
+          if (useVanTharp) {
+            const riskAmount = runningEquity * riskConfig.riskPerTrade;
+            const riskDist = 2 * entryAtr;
+            shares = riskDist > 0 ? riskAmount / riskDist : 1;
+          } else {
+            shares = Math.floor((runningEquity * 0.998) / entryPrice);
+          }
+
+          const entryCostPerShare = entryPrice * (1 + commission);
+          position = {
+            entry_date: cur.date,
+            entry_price: entryPrice,
+            entry_cost_per_share: entryCostPerShare,
+            shares,
+            entry_equity: runningEquity,
+            bars_held: 0,
+            highest_price: entryPrice,
+            mae: 0,
+            mfe: 0,
+            mae_pct: 0,
+            mfe_pct: 0,
+            entry_idx: i,
+          };
         }
-
-        const entryCostPerShare = entryPrice * (1 + commission);
-        position = {
-          entry_date: cur.date,
-          entry_price: entryPrice,
-          entry_cost_per_share: entryCostPerShare,
-          shares,
-          entry_equity: runningEquity,
-          bars_held: 0,
-          highest_price: entryPrice,
-          mae: 0,
-          mfe: 0,
-          mae_pct: 0,
-          mfe_pct: 0,
-          entry_idx: i,
-        };
-        enteredCurrentBullRun = true;
       }
     }
 

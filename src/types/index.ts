@@ -257,6 +257,7 @@ export interface StockAnalysisResult {
   change_pct: number;
   backtest: BacktestResult | null;
   monte_carlo: MonteCarloResult | null;
+  st_monte_carlo: MonteCarloResult | null;
   walk_forward: WalkForwardResult | null;
   kelly: KellyResult | null;
   fundamentals?: Fundamentals;

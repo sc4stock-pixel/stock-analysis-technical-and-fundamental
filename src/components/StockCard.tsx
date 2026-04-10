@@ -279,7 +279,11 @@ export default function StockCard({ result, config }: Props) {
             {tab === "CHART"       && <ChartTab       result={result} />}
             {tab === "OVERVIEW"    && <OverviewTab    result={activeResult} />}
             {tab === "BACKTEST"    && <BacktestTab    result={activeResult} />}
-            {tab === "MONTE CARLO" && <MonteCarloTab  result={activeResult} />}
+            {tab === "MONTE CARLO" && <MonteCarloTab  result={
+              strategy === "supertrend" && hasST && result.st_monte_carlo
+                ? { ...activeResult, monte_carlo: result.st_monte_carlo }
+                : activeResult
+            } />}
             {tab === "PLAN"        && <TradingPlanTab result={activeResult} />}
           </>
         )}

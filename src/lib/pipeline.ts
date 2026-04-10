@@ -167,6 +167,11 @@ export function runPipeline(
     ? runMonteCarlo(backtestResult.equity_curve, config)
     : null;
 
+  // ST Monte Carlo — only run if we have enough ST trades
+  const stMcResult = config.monteCarlo.enabled && stBacktestResult.equity_curve.length >= 30
+    ? runMonteCarlo(stBacktestResult.equity_curve, config)
+    : null;
+
   // ── Walk-Forward (simplified grid search) ────────────────────
   let walkForward: WalkForwardResult | null = null;
   if (config.walkForward.enabled && bars.length >= 100) {
@@ -223,35 +228,27 @@ export function runPipeline(
     : 0;
 
   // ── SuperTrend open position detection ────────────────────────
-  // Mirrors runSupertrendBacktest exactly: enter on first bar of each
-  // bullish run (EMA filter), exit on bearish flip. If last run is still
-  // open at end of bars, compute open return vs current price.
+  // Mirrors corrected runSupertrendBacktest exactly:
+  // Enter on the FLIP bar (cur.supertrendDir===1 && prev===-1), using cur.open.
+  // EMA filter uses cur bar. Exit on first bearish bar.
   let stOpenReturnPct: number | null = null;
   if (stDirection === 1) {
-    let enteredRun = false;
     let openEntryPrice: number | null = null;
 
     for (let i = 1; i < bars.length; i++) {
       const cur = bars[i];
       const prev = bars[i - 1];
 
-      // Reset flag when direction went bearish
-      if (prev.supertrendDir === -1) enteredRun = false;
-
-      // Entry: first bullish bar, EMA filter, not already entered this run
-      if (openEntryPrice === null && prev.supertrendDir === 1 && !enteredRun) {
-        const emaFilter = prev.close > prev.ema50;
-        if (emaFilter) {
+      if (openEntryPrice === null) {
+        // Entry: bearish→bullish flip with EMA filter
+        const isBullishFlip = cur.supertrendDir === 1 && prev.supertrendDir === -1;
+        if (isBullishFlip && cur.close > cur.ema50) {
           openEntryPrice = cur.open * (1 + config.backtest.slippageRate);
-          enteredRun = true;
         }
-      }
-      // Exit: bearish flip
-      else if (openEntryPrice !== null) {
-        const stReversed = cur.supertrendDir === -1 && prev.supertrendDir === 1;
-        if (stReversed) {
-          openEntryPrice = null;
-          enteredRun = false;
+      } else {
+        // Exit: first bearish bar
+        if (cur.supertrendDir === -1 && prev.supertrendDir === 1) {
+          openEntryPrice = null; // closed — look for next entry
         }
       }
     }
@@ -304,6 +301,7 @@ export function runPipeline(
     change_pct: changePct,
     backtest: backtestResult,
     monte_carlo: mcResult,
+    st_monte_carlo: stMcResult,
     walk_forward: walkForward,
     kelly,
     chart_bars: chartBars,

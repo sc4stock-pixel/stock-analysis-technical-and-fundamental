@@ -169,7 +169,7 @@ export default function BacktestTab({ result }: Props) {
                   ? "border-[#ffa502]/40 text-[#ffa502]"
                   : "border-[#00d4ff]/40 text-[#00d4ff]"
               }`}>
-                {bt.signal_bars === 0 ? "ST STRATEGY" : "SCORE STRATEGY"}
+                {bt.signal_bars === 0 ? "ST STRATEGY" : "SCORE"}
               </span>
             )}
           </div>
