@@ -193,13 +193,25 @@ export function volumeRatio(volumes: number[], period = 20): number[] {
 }
 
 /**
- * SuperTrend Indicator — ATR-based trend detection.
- * atrPeriod=10, multiplier=3.0 (industry standard)
+ * SuperTrend Indicator — exact port of Python TechnicalIndicators.supertrend()
+ * atrPeriod=10, multiplier=3.0
  *
- * Returns arrays of:
- *   supertrendArr: SuperTrend line value (support in uptrend, resistance in downtrend)
- *   directionArr:  1 = uptrend, -1 = downtrend
- *   signalArr:     'BUY' on flip to uptrend, 'SELL' on flip to downtrend, 'HOLD' otherwise
+ * Formula:
+ *   Upper Band = HL2 + (multiplier x ATR)  <- resistance in downtrend
+ *   Lower Band = HL2 - (multiplier x ATR)  <- support in uptrend
+ *
+ * Band locking rules (prevent whipsawing):
+ *   finalLower[i] = max(lowerBand[i], finalLower[i-1])  IF close[i-1] >= finalLower[i-1]
+ *                 = lowerBand[i]                          OTHERWISE (reset)
+ *   finalUpper[i] = min(upperBand[i], finalUpper[i-1])  IF close[i-1] <= finalUpper[i-1]
+ *                 = upperBand[i]                          OTHERWISE (reset)
+ *
+ * Direction:
+ *   Uptrend  (1): continues while close >= finalLower; flips bearish when close < finalLower
+ *   Downtrend(-1): continues while close <= finalUpper; flips bullish when close > finalUpper
+ *
+ * Returns: [supertrendLine, direction, signal]
+ *   signal = 'BUY' on bearish->bullish flip, 'SELL' on bullish->bearish flip, 'HOLD' otherwise
  */
 export function supertrend(
   highs: number[],
@@ -211,66 +223,68 @@ export function supertrend(
   const n = closes.length;
   const atrArr = atr(highs, lows, closes, atrPeriod);
 
-  const supertrendArr = new Array(n).fill(NaN);
-  const directionArr = new Array(n).fill(1);
-  const signalArr = new Array(n).fill("HOLD");
+  const stLine   = new Array(n).fill(NaN);
+  const dirArr   = new Array(n).fill(1);
+  const sigArr   = new Array(n).fill("HOLD");
 
-  // Band arrays
-  const upperBand = new Array(n).fill(NaN);
-  const lowerBand = new Array(n).fill(NaN);
+  const finalUpper = new Array(n).fill(NaN);
+  const finalLower = new Array(n).fill(NaN);
 
+  // Find first valid ATR bar
+  let firstValid = -1;
   for (let i = 0; i < n; i++) {
-    const hl2 = (highs[i] + lows[i]) / 2;
-    const a = atrArr[i];
-    if (isNaN(a)) continue;
-    upperBand[i] = hl2 + multiplier * a;
-    lowerBand[i] = hl2 - multiplier * a;
+    if (!isNaN(atrArr[i])) { firstValid = i; break; }
   }
+  if (firstValid < 0) return [stLine, dirArr, sigArr];
 
-  // SuperTrend logic — iterate from first valid ATR bar
-  for (let i = 1; i < n; i++) {
-    if (isNaN(upperBand[i]) || isNaN(lowerBand[i])) {
-      directionArr[i] = directionArr[i - 1];
-      supertrendArr[i] = supertrendArr[i - 1];
+  // Seed first valid bar
+  const hl2_0 = (highs[firstValid] + lows[firstValid]) / 2;
+  finalUpper[firstValid] = hl2_0 + multiplier * atrArr[firstValid];
+  finalLower[firstValid] = hl2_0 - multiplier * atrArr[firstValid];
+  dirArr[firstValid] = 1;
+  stLine[firstValid] = finalLower[firstValid];
+
+  for (let i = firstValid + 1; i < n; i++) {
+    if (isNaN(atrArr[i])) {
+      finalUpper[i] = finalUpper[i - 1];
+      finalLower[i] = finalLower[i - 1];
+      dirArr[i]     = dirArr[i - 1];
+      stLine[i]     = stLine[i - 1];
       continue;
     }
 
-    // Final upper band: can only tighten (decrease) if previous close was below previous upper
-    const prevUpper = isNaN(supertrendArr[i - 1]) ? upperBand[i] : (
-      directionArr[i - 1] === -1 ? supertrendArr[i - 1] : upperBand[i - 1]
-    );
-    const finalUpperBand = (upperBand[i] < prevUpper || closes[i - 1] > prevUpper)
-      ? upperBand[i]
-      : prevUpper;
+    const hl2 = (highs[i] + lows[i]) / 2;
+    const rawUpper = hl2 + multiplier * atrArr[i];
+    const rawLower = hl2 - multiplier * atrArr[i];
 
-    // Final lower band: can only widen (increase) if previous close was above previous lower
-    const prevLower = isNaN(supertrendArr[i - 1]) ? lowerBand[i] : (
-      directionArr[i - 1] === 1 ? supertrendArr[i - 1] : lowerBand[i - 1]
-    );
-    const finalLowerBand = (lowerBand[i] > prevLower || closes[i - 1] < prevLower)
-      ? lowerBand[i]
-      : prevLower;
+    // Lock lower band upward (support can only rise while price stays above it)
+    finalLower[i] = (closes[i - 1] >= finalLower[i - 1])
+      ? Math.max(rawLower, finalLower[i - 1])
+      : rawLower;
 
-    // Direction flip logic
-    const prevDir = directionArr[i - 1];
+    // Lock upper band downward (resistance can only fall while price stays below it)
+    finalUpper[i] = (closes[i - 1] <= finalUpper[i - 1])
+      ? Math.min(rawUpper, finalUpper[i - 1])
+      : rawUpper;
+
+    // Direction
+    const prevDir = dirArr[i - 1];
     let curDir: number;
-
-    if (prevDir === -1) {
-      // Was downtrend: flip to uptrend if price closes above upper band
-      curDir = closes[i] > finalUpperBand ? 1 : -1;
+    if (prevDir === 1) {
+      // Uptrend: stays bullish unless close drops below lower band
+      curDir = closes[i] >= finalLower[i] ? 1 : -1;
     } else {
-      // Was uptrend: flip to downtrend if price closes below lower band
-      curDir = closes[i] < finalLowerBand ? -1 : 1;
+      // Downtrend: stays bearish unless close rises above upper band
+      curDir = closes[i] <= finalUpper[i] ? -1 : 1;
     }
 
-    directionArr[i] = curDir;
-    supertrendArr[i] = curDir === 1 ? finalLowerBand : finalUpperBand;
+    dirArr[i] = curDir;
+    stLine[i] = curDir === 1 ? finalLower[i] : finalUpper[i];
 
-    // Signal: only on flip
     if (prevDir !== curDir) {
-      signalArr[i] = curDir === 1 ? "BUY" : "SELL";
+      sigArr[i] = curDir === 1 ? "BUY" : "SELL";
     }
   }
 
-  return [supertrendArr, directionArr, signalArr];
+  return [stLine, dirArr, sigArr];
 }
