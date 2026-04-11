@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import { AppConfig, StockAnalysisResult } from "@/types";
 import ConfigPanel from "@/components/ConfigPanel";
@@ -14,9 +14,20 @@ export default function Dashboard() {
   const [progress, setProgress]       = useState(0);
   const [progressSymbol, setProgressSymbol] = useState("");
   const [showConfig, setShowConfig]   = useState(false);
-  // Track which card is highlighted after jump
   const [highlightedSymbol, setHighlightedSymbol] = useState<string | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Scroll-to-top button visibility ───────────────────────────
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const scrollToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
@@ -53,19 +64,13 @@ export default function Dashboard() {
     setLoading(false);
   }, [config]);
 
-  // ── Scroll to a stock card by symbol ───────────────────────────
-  // Each StockCard renders with id="card-{SYMBOL}" (dots replaced with dashes)
   const scrollToCard = useCallback((symbol: string) => {
     const id  = `card-${symbol.replace(/\./g, "-")}`;
     const el  = document.getElementById(id);
     if (!el) return;
-
-    // Smooth scroll with offset for sticky header (~52px) + summary bar
     const yOffset = -64;
     const y = el.getBoundingClientRect().top + window.scrollY + yOffset;
     window.scrollTo({ top: y, behavior: "smooth" });
-
-    // Highlight the card briefly
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     setHighlightedSymbol(symbol);
     highlightTimer.current = setTimeout(() => setHighlightedSymbol(null), 2000);
@@ -78,7 +83,7 @@ export default function Dashboard() {
       <header className="border-b border-[#1e2d4a] bg-[#0f1629] px-4 py-2.5 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <span className="text-[#00d4ff] font-bold text-sm tracking-widest">▶ TA DASHBOARD</span>
-          <span className="text-[#4a6080] text-xs">V12.5.6</span>
+          <span className="text-[#4a6080] text-xs">V13</span>
           {lastUpdated && <span className="text-[#4a6080] text-xs">· Updated {lastUpdated}</span>}
           {loading && (
             <span className="text-[#ffa502] text-xs blink">
@@ -122,8 +127,6 @@ export default function Dashboard() {
 
       {/* ── STOCK CARDS ── */}
       <main className="p-4">
-
-        {/* Skeleton while loading with no results yet */}
         {loading && results.length === 0 && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {config.stocks.PORTFOLIO.map((s) => (
@@ -142,7 +145,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Live results grid */}
         {results.length > 0 && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {results.map((result) => {
@@ -162,8 +164,6 @@ export default function Dashboard() {
                 </div>
               );
             })}
-
-            {/* Skeleton placeholders for stocks still loading */}
             {loading && config.stocks.PORTFOLIO
               .filter(s => !results.some(r => r.symbol === s.symbol))
               .map(s => (
@@ -183,7 +183,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Empty state */}
         {!loading && results.length === 0 && (
           <div className="flex flex-col items-center justify-center h-96 text-[#4a6080]">
             <div className="text-4xl mb-4 opacity-20">◈</div>
@@ -198,6 +197,46 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {/* ── SCROLL TO TOP BUTTON ── */}
+      <button
+        onClick={scrollToTop}
+        aria-label="Scroll to top"
+        style={{
+          position: "fixed",
+          bottom: 30,
+          right: 30,
+          width: 44,
+          height: 44,
+          borderRadius: "50%",
+          background: "linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)",
+          border: "none",
+          cursor: "pointer",
+          zIndex: 9999,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 18,
+          color: "#0a0e1a",
+          fontWeight: "bold",
+          boxShadow: "0 4px 16px rgba(0,212,255,0.4)",
+          opacity: showScrollTop ? 1 : 0,
+          pointerEvents: showScrollTop ? "auto" : "none",
+          transform: showScrollTop ? "scale(1)" : "scale(0.8)",
+          transition: "opacity 0.25s ease, transform 0.25s ease, box-shadow 0.2s ease",
+        }}
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.12)";
+          (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 6px 24px rgba(0,212,255,0.6)";
+        }}
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLButtonElement).style.transform = showScrollTop ? "scale(1)" : "scale(0.8)";
+          (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 16px rgba(0,212,255,0.4)";
+        }}
+      >
+        ↑
+      </button>
+
     </div>
   );
 }
