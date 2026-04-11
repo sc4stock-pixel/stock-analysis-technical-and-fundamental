@@ -360,6 +360,7 @@ export interface ChartBar {
   volume: number;
   sma20: number;
   sma50: number;
+  ema50: number;
   bbUpper: number;
   bbLower: number;
   signal: string;       // signalConfirmed per bar

@@ -208,6 +208,7 @@ export function runPipeline(
     volume: b.volume,
     sma20: b.sma20,
     sma50: b.sma50,
+    ema50: b.ema50,
     bbUpper: b.bbUpper,
     bbLower: b.bbLower,
     signal: b.signalConfirmed,
