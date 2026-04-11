@@ -39,11 +39,11 @@ export default function OverviewTab({ result }: Props) {
   const isSTMode = bt.signal_bars === 0 && (result.comparison?.supertrend.num_trades ?? 0) > 0;
 
   // Equity sparkline — uses whichever bt was passed (Score or ST view)
-  const sparkData = bt.equity_curve.slice(-50).map((v) => ({ v }));
+  const sparkData = bt.equity_curve.map((v) => ({ v }));
   const firstV = sparkData[0]?.v ?? 1;
   const lastV = sparkData[sparkData.length - 1]?.v ?? 1;
   const sparkColor = lastV >= firstV ? "#00ff88" : "#ff4757";
-  const equityLabel = isSTMode ? "ST EQUITY" : "EQUITY (50d)";
+  const equityLabel = isSTMode ? "ST EQUITY (full)" : "EQUITY (full backtest)";
   const equityStroke = isSTMode ? "#ffa502" : sparkColor;
 
   // Score heatmap — only meaningful in Score mode
@@ -156,7 +156,7 @@ export default function OverviewTab({ result }: Props) {
             <div className="flex justify-between items-center mb-1">
               <div className="text-[#4a6080] text-xs truncate">{equityLabel}</div>
             </div>
-            <div className="flex-1" style={{ minHeight: "80px" }}>
+            <div className="flex-1" style={{ minHeight: "110px" }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={sparkData}>
                   <Line type="monotone" dataKey="v" stroke={equityStroke} strokeWidth={1.5} dot={false} />

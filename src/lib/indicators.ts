@@ -180,6 +180,16 @@ export function sma(values: number[], period: number): number[] {
 }
 
 /**
+ * Standard Exponential Moving Average — alpha = 2/(period+1).
+ * Matches: pandas series.ewm(span=period, adjust=False).mean()
+ * Used for the 50-day EMA filter in SuperTrend entry condition.
+ */
+export function ema(values: number[], period: number): number[] {
+  const alpha = 2 / (period + 1);
+  return ewm(values, alpha);
+}
+
+/**
  * Volume ratio vs 20-period rolling mean (shifted to avoid look-ahead)
  */
 export function volumeRatio(volumes: number[], period = 20): number[] {

@@ -3,7 +3,7 @@
 // Mirrors Python's main analysis flow per stock
 // ============================================================
 import { AppConfig, StockAnalysisResult, KellyResult, WalkForwardResult, OHLCVBar, ChartBar } from "@/types";
-import { rsi, macd, adx, atr, bollingerBands, sma, volumeRatio, supertrend } from "./indicators";
+import { rsi, macd, adx, atr, bollingerBands, sma, ema, volumeRatio, supertrend } from "./indicators";
 import { calculateRegimePerBar, detectRegime } from "./regime";
 import { calculateScores, detectRsiDivergence } from "./scoring";
 import { generateSignals } from "./signals";
@@ -39,7 +39,7 @@ export function runPipeline(
   const atrArr = atr(highs, lows, closes, config.analysis.atrPeriod);
   const sma20Arr = sma(closes, config.analysis.smaShort);
   const sma50Arr = sma(closes, config.analysis.smaLong);
-  const ema50Arr = sma(closes, 50); // EMA-50 proxy (SMA-50 for filter)
+  const ema50Arr = ema(closes, 50); // True EMA(50) — alpha=2/51 — for ST entry filter
   const [bbUpper, bbMid, bbLower] = bollingerBands(closes);
   const volRatioArr = volumeRatio(volumes, config.analysis.volumePeriod);
 
@@ -142,16 +142,19 @@ export function runPipeline(
   }));
 
   // ── SuperTrend entry signal with EMA filter (ema_only mode) ─
-  // Entry: ST flips BULLISH AND price > EMA50 (no look-ahead: use same bar's close/ema50)
-  // Shift by 1: stEntrySignal[i] = filtered signal from bar[i-1] (enter on next open)
+  // Matches runSupertrendBacktest exactly:
+  // Entry bar = the first bullish bar (supertrendDir flips 1->bearish then back to 1)
+  // i.e. cur.supertrendDir===1 && prev.supertrendDir===-1
+  // EMA filter uses cur bar's close vs ema50 (same as backtest)
   for (let i = 1; i < bars.length; i++) {
+    const cur = bars[i];
     const prev = bars[i - 1];
-    const stFlipBullish = prev.supertrendSignal === "BUY";
+    const isBullishFlip = cur.supertrendDir === 1 && prev.supertrendDir === -1;
     const emaFilter = stConfig.filter_mode === "ema_only"
-      ? prev.close > prev.ema50
-      : prev.close > prev.ema50 && prev.adx > 20; // 'full' mode adds ADX
-    bars[i].stEntrySignal = stFlipBullish && emaFilter ? "BUY"
-      : prev.supertrendSignal === "SELL" ? "SELL"
+      ? cur.close > cur.ema50
+      : cur.close > cur.ema50 && cur.adx > 20;
+    bars[i].stEntrySignal = isBullishFlip && emaFilter ? "BUY"
+      : cur.supertrendDir === -1 && prev.supertrendDir === 1 ? "SELL"
       : "HOLD";
   }
 
