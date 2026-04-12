@@ -1,6 +1,6 @@
 "use client";
 import { StockAnalysisResult } from "@/types";
-import { LineChart, Line, ResponsiveContainer, Tooltip } from "recharts";
+import { LineChart, Line, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
 
 interface Props { result: StockAnalysisResult; }
 
@@ -150,31 +150,93 @@ export default function OverviewTab({ result }: Props) {
           </div>
         </div>
 
-        {/* RIGHT column: equity curve — taller to use the full left height */}
-        {sparkData.length > 2 && (
-          <div className="flex flex-col">
-            <div className="flex justify-between items-center mb-1">
-              <div className="text-[#4a6080] text-xs truncate">{equityLabel}</div>
+        {/* RIGHT column: dual equity curve overlay — Score (cyan) + ST (orange) */}
+        {(() => {
+          // Build merged dataset aligned by index position
+          // Both series may differ in length; align from the start (same initial capital)
+          const scoreCurve = result.backtest?.equity_curve ?? [];
+          const stCurve = result.comparison?.supertrend?.trades
+            ? (() => {
+                // Reconstruct ST equity curve from trades (same logic as buildSTView)
+                const initial = scoreCurve[0] ?? 10000;
+                const curve: number[] = [initial];
+                let eq = initial;
+                const stTrades = [...(result.comparison?.supertrend?.trades ?? [])]
+                  .sort((a, b) => a.entry_idx - b.entry_idx);
+                for (const t of stTrades) {
+                  const barsBefore = Math.max(0, t.entry_idx - curve.length + 1);
+                  for (let b = 0; b < barsBefore; b++) curve.push(eq);
+                  const barsHeld = Math.max(1, t.bars_held);
+                  for (let b = 0; b < barsHeld; b++) {
+                    curve.push(eq + (t.pnl * (b + 1)) / barsHeld);
+                  }
+                  eq += t.pnl;
+                }
+                while (curve.length < scoreCurve.length) curve.push(eq);
+                return curve;
+              })()
+            : [];
+
+          const len = Math.max(scoreCurve.length, stCurve.length);
+          if (len < 3) return null;
+
+          const dualData = Array.from({ length: len }, (_, i) => ({
+            i,
+            sc: scoreCurve[i] ?? scoreCurve[scoreCurve.length - 1] ?? 0,
+            st: stCurve.length > 0 ? (stCurve[i] ?? stCurve[stCurve.length - 1] ?? 0) : null,
+          }));
+
+          const scLast = scoreCurve[scoreCurve.length - 1] ?? 10000;
+          const stLast = stCurve.length > 0 ? stCurve[stCurve.length - 1] : null;
+          const initial = scoreCurve[0] ?? 10000;
+
+          return (
+            <div className="flex flex-col">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-[#4a6080] text-xs">EQUITY CURVES</div>
+                <div className="flex items-center gap-2 text-[0.6rem] font-mono">
+                  <span className="text-[#00d4ff]">— SCR</span>
+                  {stCurve.length > 0 && <span className="text-[#ffa502]">— ST</span>}
+                </div>
+              </div>
+              <div className="flex-1" style={{ minHeight: "110px" }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={dualData}>
+                    <ReferenceLine y={initial} stroke="#1e2d4a" strokeDasharray="3 3" />
+                    <Line type="monotone" dataKey="sc" stroke="#00d4ff" strokeWidth={1.5}
+                      dot={false} name="Score" legendType="none"
+                      strokeOpacity={0.9} />
+                    {stCurve.length > 0 && (
+                      <Line type="monotone" dataKey="st" stroke="#ffa502" strokeWidth={1.5}
+                        dot={false} name="ST" legendType="none"
+                        strokeOpacity={0.85} strokeDasharray="4 2" connectNulls={false} />
+                    )}
+                    <Tooltip
+                      contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
+                      formatter={(v: number, name: string) => [
+                        `$${v.toFixed(0)}`,
+                        name === "sc" ? "Score" : "ST"
+                      ]}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex justify-between text-[0.6rem] mt-0.5 font-mono">
+                <span className="text-[#4a6080]">${initial.toFixed(0)}</span>
+                <div className="flex gap-3">
+                  <span className={scLast >= initial ? "text-[#00d4ff]" : "text-[#ff4757]"}>
+                    SCR ${scLast.toFixed(0)}
+                  </span>
+                  {stLast !== null && (
+                    <span className={stLast >= initial ? "text-[#ffa502]" : "text-[#ff4757]"}>
+                      ST ${stLast.toFixed(0)}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="flex-1" style={{ minHeight: "110px" }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={sparkData}>
-                  <Line type="monotone" dataKey="v" stroke={equityStroke} strokeWidth={1.5} dot={false} />
-                  <Tooltip
-                    contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
-                    formatter={(v: number) => [`$${v.toFixed(0)}`, "Equity"]}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="flex justify-between text-[#4a6080] text-[0.6rem] mt-0.5">
-              <span>${(sparkData[0]?.v ?? 0).toFixed(0)}</span>
-              <span className={lastV >= firstV ? "text-[#00ff88]" : "text-[#ff4757]"}>
-                ${lastV.toFixed(0)}
-              </span>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Indicator grid */}

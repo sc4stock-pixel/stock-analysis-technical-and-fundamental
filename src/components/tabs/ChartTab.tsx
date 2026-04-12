@@ -180,7 +180,7 @@ export default function ChartTab({ result }: Props) {
     .filter((_, i) => i === 0 || i === chartData.length - 1 || i % tickStep === 0)
     .map(d => d.dateShort);
 
-  // ── Trades in view ───────────────────────────────────────────────
+  // ── Trades in view (for chart MARKERS only — limited to visible bars) ──────
   const datesInView = new Set(sliced.map(b => b.date));
   const tradesInView = (bt?.trades ?? []).filter(
     t => datesInView.has(t.entry_date) || datesInView.has(t.exit_date)
@@ -188,8 +188,12 @@ export default function ChartTab({ result }: Props) {
   const winsInView   = tradesInView.filter(t => t.return > 0).length;
   const lossesInView = tradesInView.filter(t => t.return <= 0).length;
 
-  // ST trades in view
-  const stTradesInView = (result.comparison?.supertrend?.trades ?? []).filter(
+  // ALL trades for tables (full backtest period, not just visible window)
+  const allScoreTrades = bt?.trades ?? [];
+  const allStTrades = result.comparison?.supertrend?.trades ?? [];
+
+  // ST chart markers (visible window only)
+  const stTradesInView = allStTrades.filter(
     t => datesInView.has(t.entry_date) || datesInView.has(t.exit_date)
   );
   const stWinsInView = stTradesInView.filter(t => t.return > 0).length;
@@ -256,7 +260,7 @@ export default function ChartTab({ result }: Props) {
           activeClass="border-[#34d399]/60 text-[#34d399] bg-[#34d399]/10" />
         <div className="h-3 w-px bg-[#1e2d4a]" />
         <Tog
-          label={`Trades${showTrades && tradesInView.length > 0 ? ` (${winsInView}W ${lossesInView}L)` : ""}`}
+          label={`Trades${showTrades ? ` (${allScoreTrades.length}S ${allStTrades.length}ST)` : ""}`}
           active={showTrades}
           onClick={() => setShowTrades(v => !v)}
           activeClass="border-[#00ff88]/50 text-[#00ff88] bg-[#00ff88]/08"
@@ -519,78 +523,90 @@ export default function ChartTab({ result }: Props) {
         );
       })()}
 
-      {/* ── Score Trades in view table ── */}
-      {showTrades && tradesInView.length > 0 && (
+      {/* ── Score Trades — ALL trades, most recent first ── */}
+      {showTrades && allScoreTrades.length > 0 && (
         <div className="mt-1">
           <div className="text-[#00d4ff] text-xs mb-1 font-bold">
-            SCORE TRADES IN VIEW — {tradesInView.length} · <span className="text-[#00ff88]">{winsInView}W</span> <span className="text-[#ff4757]">{lossesInView}L</span>
+            SCORE TRADES — {allScoreTrades.length} total ·{" "}
+            <span className="text-[#00ff88]">{allScoreTrades.filter(t => t.return > 0).length}W</span>{" "}
+            <span className="text-[#ff4757]">{allScoreTrades.filter(t => t.return <= 0).length}L</span>
+            <span className="text-[#4a6080] font-normal ml-2 text-[0.65rem]">
+              ({tradesInView.length} in chart view)
+            </span>
           </div>
-          <div className="overflow-x-auto rounded border border-[#1e2d4a]/60">
+          <div className="overflow-x-auto rounded border border-[#1e2d4a]/60 max-h-64 overflow-y-auto">
             <table className="w-full text-xs">
-              <thead>
+              <thead className="sticky top-0">
                 <tr className="text-[#4a6080] bg-[#0f1629] border-b border-[#1e2d4a]">
                   <th className="text-left py-1 px-2">#</th>
-                  <th className="text-left py-1 px-2">Entry Date</th>
-                  <th className="text-left py-1 px-2">Exit Date</th>
+                  <th className="text-left py-1 px-2">Entry</th>
+                  <th className="text-left py-1 px-2">Exit</th>
                   <th className="text-right py-1 px-2">Entry $</th>
                   <th className="text-right py-1 px-2">Exit $</th>
                   <th className="text-right py-1 px-2">Ret%</th>
                   <th className="text-right py-1 px-2">R</th>
                   <th className="text-right py-1 px-2">Bars</th>
-                  <th className="text-left py-1 px-2">Exit Reason</th>
+                  <th className="text-left py-1 px-2">Reason</th>
                   <th className="text-left py-1 px-2">Regime</th>
                 </tr>
               </thead>
               <tbody>
-                {tradesInView.map(t => (
-                  <tr key={t.trade_num}
-                    className={`border-b border-[#1e2d4a]/30 hover:bg-[#00d4ff]/5 transition-colors ${
-                      t.return > 0 ? "bg-[#00ff88]/3" : "bg-[#ff4757]/3"
-                    }`}>
-                    <td className="py-1 px-2 text-[#4a6080]">{t.trade_num}</td>
-                    <td className="py-1 px-2 font-mono">
-                      <span className="text-[#00ff88]">▲</span>
-                      <span className="text-[#6b85a0] ml-1">{t.entry_date}</span>
-                    </td>
-                    <td className="py-1 px-2 font-mono">
-                      <span className="text-[#ff4757]">▼</span>
-                      <span className="text-[#6b85a0] ml-1">{t.exit_date}</span>
-                    </td>
-                    <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.entry_price.toFixed(2)}</td>
-                    <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.exit_price.toFixed(2)}</td>
-                    <td className={`py-1 px-2 text-right font-mono font-bold ${t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-                      {t.return >= 0 ? "+" : ""}{(t.return * 100).toFixed(1)}%
-                    </td>
-                    <td className={`py-1 px-2 text-right font-mono ${t.r_multiple > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-                      {t.r_multiple >= 0 ? "+" : ""}{t.r_multiple.toFixed(2)}R
-                    </td>
-                    <td className="py-1 px-2 text-right text-[#6b85a0]">{t.bars_held}</td>
-                    <td className="py-1 px-2 text-[#6b85a0] max-w-[100px] truncate">{t.exit_reason}</td>
-                    <td className="py-1 px-2 text-[#4a6080] text-[0.6rem] max-w-[90px] truncate">
-                      {t.entry_regime?.replace(/_/g, " ")}
-                    </td>
-                  </tr>
-                ))}
+                {[...allScoreTrades].reverse().map(t => {
+                  const inView = datesInView.has(t.entry_date) || datesInView.has(t.exit_date);
+                  return (
+                    <tr key={t.trade_num}
+                      className={`border-b border-[#1e2d4a]/30 hover:bg-[#00d4ff]/5 transition-colors ${
+                        t.return > 0 ? "bg-[#00ff88]/3" : "bg-[#ff4757]/3"
+                      } ${inView ? "ring-1 ring-inset ring-[#00d4ff]/20" : "opacity-70"}`}>
+                      <td className="py-1 px-2 text-[#4a6080]">{t.trade_num}</td>
+                      <td className="py-1 px-2 font-mono">
+                        <span className="text-[#00ff88]">▲</span>
+                        <span className="text-[#6b85a0] ml-1">{t.entry_date?.slice(5)}</span>
+                      </td>
+                      <td className="py-1 px-2 font-mono">
+                        <span className="text-[#ff4757]">▼</span>
+                        <span className="text-[#6b85a0] ml-1">{t.exit_date?.slice(5)}</span>
+                      </td>
+                      <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.entry_price.toFixed(2)}</td>
+                      <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.exit_price.toFixed(2)}</td>
+                      <td className={`py-1 px-2 text-right font-mono font-bold ${t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+                        {t.return >= 0 ? "+" : ""}{(t.return * 100).toFixed(1)}%
+                      </td>
+                      <td className={`py-1 px-2 text-right font-mono ${t.r_multiple > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+                        {t.r_multiple >= 0 ? "+" : ""}{t.r_multiple.toFixed(2)}R
+                      </td>
+                      <td className="py-1 px-2 text-right text-[#6b85a0]">{t.bars_held}</td>
+                      <td className="py-1 px-2 text-[#6b85a0] max-w-[90px] truncate">{t.exit_reason}</td>
+                      <td className="py-1 px-2 text-[#4a6080] text-[0.6rem] max-w-[80px] truncate">
+                        {t.entry_regime?.replace(/_/g, " ")}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* ── SuperTrend Trades in view table ── */}
-      {stTradesInView.length > 0 && (
+      {/* ── SuperTrend Trades — ALL trades, most recent first ── */}
+      {allStTrades.length > 0 && showTrades && (
         <div className="mt-2">
           <div className="text-[#ffa502] text-xs mb-1 font-bold">
-            ST TRADES IN VIEW — {stTradesInView.length} · <span className="text-[#00ff88]">{stWinsInView}W</span> <span className="text-[#ff4757]">{stLossesInView}L</span>
-            <span className="text-[#4a6080] font-normal ml-2">(exit = trend reversal only)</span>
+            ST TRADES — {allStTrades.length} total ·{" "}
+            <span className="text-[#00ff88]">{allStTrades.filter(t => t.return > 0).length}W</span>{" "}
+            <span className="text-[#ff4757]">{allStTrades.filter(t => t.return <= 0).length}L</span>
+            <span className="text-[#4a6080] font-normal ml-2 text-[0.65rem]">
+              ({stTradesInView.length} in chart view · exit = trend reversal + trailing stop)
+            </span>
           </div>
-          <div className="overflow-x-auto rounded border border-[#ffa502]/20">
+          <div className="overflow-x-auto rounded border border-[#ffa502]/20 max-h-48 overflow-y-auto">
             <table className="w-full text-xs">
-              <thead>
+              <thead className="sticky top-0">
                 <tr className="text-[#4a6080] bg-[#0f1629] border-b border-[#1e2d4a]">
                   <th className="text-left py-1 px-2">#</th>
-                  <th className="text-left py-1 px-2">Entry Date</th>
-                  <th className="text-left py-1 px-2">Exit Date</th>
+                  <th className="text-left py-1 px-2">Entry</th>
+                  <th className="text-left py-1 px-2">Exit</th>
                   <th className="text-right py-1 px-2">Entry $</th>
                   <th className="text-right py-1 px-2">Exit $</th>
                   <th className="text-right py-1 px-2">Ret%</th>
@@ -600,32 +616,35 @@ export default function ChartTab({ result }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {stTradesInView.map(t => (
-                  <tr key={t.trade_num}
-                    className={`border-b border-[#1e2d4a]/30 hover:bg-[#ffa502]/5 transition-colors ${
-                      t.return > 0 ? "bg-[#00ff88]/3" : "bg-[#ff4757]/3"
-                    }`}>
-                    <td className="py-1 px-2 text-[#4a6080]">{t.trade_num}</td>
-                    <td className="py-1 px-2 font-mono">
-                      <span className="text-[#ffa502]">▲</span>
-                      <span className="text-[#6b85a0] ml-1">{t.entry_date}</span>
-                    </td>
-                    <td className="py-1 px-2 font-mono">
-                      <span className="text-[#ff4757]">▼</span>
-                      <span className="text-[#6b85a0] ml-1">{t.exit_date}</span>
-                    </td>
-                    <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.entry_price.toFixed(2)}</td>
-                    <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.exit_price.toFixed(2)}</td>
-                    <td className={`py-1 px-2 text-right font-mono font-bold ${t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-                      {t.return >= 0 ? "+" : ""}{(t.return * 100).toFixed(1)}%
-                    </td>
-                    <td className={`py-1 px-2 text-right font-mono ${t.r_multiple > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-                      {t.r_multiple >= 0 ? "+" : ""}{t.r_multiple.toFixed(2)}R
-                    </td>
-                    <td className="py-1 px-2 text-right text-[#6b85a0]">{t.bars_held}</td>
-                    <td className="py-1 px-2 text-[#ffa502]/70 text-[0.6rem]">ST Reversal</td>
-                  </tr>
-                ))}
+                {[...allStTrades].reverse().map(t => {
+                  const inView = datesInView.has(t.entry_date) || datesInView.has(t.exit_date);
+                  return (
+                    <tr key={t.trade_num}
+                      className={`border-b border-[#1e2d4a]/30 hover:bg-[#ffa502]/5 transition-colors ${
+                        t.return > 0 ? "bg-[#00ff88]/3" : "bg-[#ff4757]/3"
+                      } ${inView ? "ring-1 ring-inset ring-[#ffa502]/20" : "opacity-70"}`}>
+                      <td className="py-1 px-2 text-[#4a6080]">{t.trade_num}</td>
+                      <td className="py-1 px-2 font-mono">
+                        <span className="text-[#ffa502]">▲</span>
+                        <span className="text-[#6b85a0] ml-1">{t.entry_date?.slice(5)}</span>
+                      </td>
+                      <td className="py-1 px-2 font-mono">
+                        <span className="text-[#ff4757]">▼</span>
+                        <span className="text-[#6b85a0] ml-1">{t.exit_date?.slice(5)}</span>
+                      </td>
+                      <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.entry_price.toFixed(2)}</td>
+                      <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.exit_price.toFixed(2)}</td>
+                      <td className={`py-1 px-2 text-right font-mono font-bold ${t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+                        {t.return >= 0 ? "+" : ""}{(t.return * 100).toFixed(1)}%
+                      </td>
+                      <td className={`py-1 px-2 text-right font-mono ${t.r_multiple > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+                        {t.r_multiple >= 0 ? "+" : ""}{t.r_multiple.toFixed(2)}R
+                      </td>
+                      <td className="py-1 px-2 text-right text-[#6b85a0]">{t.bars_held}</td>
+                      <td className="py-1 px-2 text-[#ffa502]/70 text-[0.6rem] truncate">{t.exit_reason}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
