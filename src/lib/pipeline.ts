@@ -142,20 +142,33 @@ export function runPipeline(
   }));
 
   // ── SuperTrend entry signal with EMA filter (ema_only mode) ─
-  // Matches runSupertrendBacktest exactly:
-  // Entry bar = the first bullish bar (supertrendDir flips 1->bearish then back to 1)
-  // i.e. cur.supertrendDir===1 && prev.supertrendDir===-1
-  // EMA filter uses cur bar's close vs ema50 (same as backtest)
+  // Python: Signal_Confirmed[flip_bar] = 'BUY', Entry_Signal = Signal_Confirmed.shift(1)
+  // So Entry_Signal[flip_bar + 1] = 'BUY' → enter at (flip_bar + 1).open
+  // We store stEntrySignal[i+1] = 'BUY' when bar[i] is the flip bar.
   for (let i = 1; i < bars.length; i++) {
     const cur = bars[i];
     const prev = bars[i - 1];
+
+    // Check if bar[i-1] was the flip bar (prev was bearish, cur is bullish)
+    // EMA filter uses the flip bar's close vs ema50 (cur = flip bar when checking prev flip)
+    // Actually: the flip is detected at bar i (cur.dir=1, prev.dir=-1)
+    // Python Signal_Confirmed is set at bar i, Entry_Signal shifts it to bar i+1
     const isBullishFlip = cur.supertrendDir === 1 && prev.supertrendDir === -1;
+    const isBearishFlip = cur.supertrendDir === -1 && prev.supertrendDir === 1;
+
     const emaFilter = stConfig.filter_mode === "ema_only"
       ? cur.close > cur.ema50
       : cur.close > cur.ema50 && cur.adx > 20;
-    bars[i].stEntrySignal = isBullishFlip && emaFilter ? "BUY"
-      : cur.supertrendDir === -1 && prev.supertrendDir === 1 ? "SELL"
-      : "HOLD";
+
+    // Set stEntrySignal on the NEXT bar (i+1) so backtest enters at (i+1).open
+    // This matches Python's Entry_Signal = Signal_Confirmed.shift(1)
+    if (i + 1 < bars.length) {
+      if (isBullishFlip && emaFilter) {
+        bars[i + 1].stEntrySignal = "BUY";
+      } else if (isBearishFlip) {
+        bars[i + 1].stEntrySignal = "SELL";
+      }
+    }
   }
 
   // ── Generate Signals ─────────────────────────────────────────
@@ -233,26 +246,34 @@ export function runPipeline(
 
   // ── SuperTrend open position detection ────────────────────────
   // Mirrors corrected runSupertrendBacktest exactly:
-  // Enter on the FLIP bar (cur.supertrendDir===1 && prev===-1), using cur.open.
-  // EMA filter uses cur bar. Exit on first bearish bar.
+  // - Entry: stEntrySignal='BUY' on bar i → enter at bars[i].open (bar after flip)
+  // - Exit: Low <= trailing ST stop OR prev.supertrendSignal === 'SELL'
   let stOpenReturnPct: number | null = null;
   if (stDirection === 1) {
     let openEntryPrice: number | null = null;
+    let trailingStop: number | null = null;
 
     for (let i = 1; i < bars.length; i++) {
       const cur = bars[i];
       const prev = bars[i - 1];
 
       if (openEntryPrice === null) {
-        // Entry: bearish→bullish flip with EMA filter
-        const isBullishFlip = cur.supertrendDir === 1 && prev.supertrendDir === -1;
-        if (isBullishFlip && cur.close > cur.ema50) {
+        // Entry: when stEntrySignal was set on this bar (prev flip + EMA filter)
+        if (prev.stEntrySignal === "BUY") {
           openEntryPrice = cur.open * (1 + config.backtest.slippageRate);
+          trailingStop = prev.supertrend > 0 ? prev.supertrend : null;
         }
       } else {
-        // Exit: first bearish bar
-        if (cur.supertrendDir === -1 && prev.supertrendDir === 1) {
-          openEntryPrice = null; // closed — look for next entry
+        // Trail stop upward
+        if (!isNaN(cur.supertrend) && (trailingStop === null || cur.supertrend > trailingStop)) {
+          trailingStop = cur.supertrend;
+        }
+        // Exit: low hits trailing stop OR SELL signal
+        const stopHit = trailingStop !== null && cur.low <= trailingStop;
+        const sellSignal = prev.supertrendSignal === "SELL";
+        if (stopHit || sellSignal) {
+          openEntryPrice = null;
+          trailingStop = null;
         }
       }
     }

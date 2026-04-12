@@ -597,44 +597,42 @@ export function runSupertrendBacktest(
     drawdownHistory.push(portfolioDrawdown);
 
     // ── ENTRY ────────────────────────────────────────────────────
-    // Python logic: enter on the bar AFTER a bearish→bullish flip,
-    // using the next bar's open price. EMA-only filter: close > ema50 on flip bar.
-    // We detect the flip as: prev bar was bearish AND current bar is bullish.
-    // (cur.supertrendDir===1 && prev.supertrendDir===-1 means TODAY is the first bullish bar)
-    // We enter at today's open (which is the bar after the flip bar's close triggered the signal).
+    // Python: if prev_row['Entry_Signal'] == 'BUY' → enter at cur.open
+    // stEntrySignal is already pre-shifted in pipeline (set on bar after flip)
     if (position === null) {
-      const isBullishFlip = cur.supertrendDir === 1 && prev.supertrendDir === -1;
-      if (isBullishFlip) {
-        const emaFilter = cur.close > cur.ema50; // use cur bar's values at entry bar
-        if (emaFilter) {
-          const entryPrice = cur.open * (1 + slippage);
-          const entryAtr = cur.atr;
+      if (prev.stEntrySignal === "BUY") {
+        const entryPrice = cur.open * (1 + slippage);
+        const entryAtr = cur.atr;
 
-          let shares: number;
-          if (useVanTharp) {
-            const riskAmount = runningEquity * riskConfig.riskPerTrade;
-            const riskDist = 2 * entryAtr;
-            shares = riskDist > 0 ? riskAmount / riskDist : 1;
-          } else {
-            shares = Math.floor((runningEquity * 0.998) / entryPrice);
-          }
-
-          const entryCostPerShare = entryPrice * (1 + commission);
-          position = {
-            entry_date: cur.date,
-            entry_price: entryPrice,
-            entry_cost_per_share: entryCostPerShare,
-            shares,
-            entry_equity: runningEquity,
-            bars_held: 0,
-            highest_price: entryPrice,
-            mae: 0,
-            mfe: 0,
-            mae_pct: 0,
-            mfe_pct: 0,
-            entry_idx: i,
-          };
+        let shares: number;
+        if (useVanTharp) {
+          const riskAmount = runningEquity * riskConfig.riskPerTrade;
+          const riskDist = 2 * entryAtr;
+          shares = riskDist > 0 ? riskAmount / riskDist : 1;
+        } else {
+          shares = Math.floor((runningEquity * 0.998) / entryPrice);
         }
+
+        const entryCostPerShare = entryPrice * (1 + commission);
+        // Python: initial stop = SuperTrend line value from previous bar
+        const stStop = prev.supertrend > 0 ? prev.supertrend : entryPrice - 2 * entryAtr;
+
+        position = {
+          entry_date: cur.date,
+          entry_price: entryPrice,
+          entry_cost_per_share: entryCostPerShare,
+          shares,
+          entry_equity: runningEquity,
+          bars_held: 0,
+          highest_price: entryPrice,
+          mae: 0,
+          mfe: 0,
+          mae_pct: 0,
+          mfe_pct: 0,
+          entry_idx: i,
+          atr_stop_price: stStop, // ST line as initial stop (trails up)
+          original_stop: stStop,  // immutable reference for R-multiple
+        };
       }
     }
 
@@ -654,13 +652,20 @@ export function runSupertrendBacktest(
         position.mfe_pct = favorable / (position.entry_price as number);
       }
 
-      // ST exit: direction flips to BEARISH (supertrendDir === -1)
-      // Use prev bar's direction (signal already shifted)
-      const stReversed = cur.supertrendDir === -1 && prev.supertrendDir === 1;
+      // ── ST EXIT LOGIC (matches Python exactly) ─────────────────
+      // Python: trail the ST line upward each bar (stop only moves UP, never down)
+      // Exit condition 1: Low touches the trailing ST stop
+      // Exit condition 2: Explicit SELL signal (prev bar's supertrendSignal === 'SELL')
+      const currentST = cur.supertrend;
+      if (!isNaN(currentST) && currentST > (position.atr_stop_price as number)) {
+        position.atr_stop_price = currentST; // Trail stop upward following ST line
+      }
 
-      if (stReversed) {
-        // Exit at ST line value (the price where trend flipped) or open, whichever is more conservative
-        const exitPrice = Math.min(cur.open, cur.supertrend) * (1 - slippage);
+      const stStopHit = cur.low <= (position.atr_stop_price as number);
+      const stSignalSell = prev.supertrendSignal === "SELL";
+
+      if (stStopHit || stSignalSell) {
+        const exitPrice = Math.min(position.atr_stop_price as number, cur.open) * (1 - slippage);
         const exitProceedsPerShare = exitPrice * (1 - commission);
         const perSharePnl = exitProceedsPerShare - (position.entry_cost_per_share as number);
         const totalPnl = perSharePnl * (position.shares as number);
@@ -668,9 +673,10 @@ export function runSupertrendBacktest(
 
         runningEquity = (position.entry_equity as number) + totalPnl;
 
-        // R-multiple: use 2×ATR as risk proxy
-        const approxRisk = 2 * bars[position.entry_idx as number].atr;
-        const rMultiple = approxRisk > 0 ? (exitPrice - (position.entry_price as number)) / approxRisk : 0;
+        const entryBar = bars[position.entry_idx as number];
+        const riskPerShare = (position.entry_price as number) - (position.original_stop as number ?? (position.entry_price as number) - 2 * entryBar.atr);
+        const actualRiskPct = riskPerShare > 0 ? (riskPerShare / (position.entry_price as number)) : 0.02;
+        const rMultiple = actualRiskPct > 0 ? returnPct / actualRiskPct : 0;
 
         tradeNum++;
         trades.push({
@@ -686,13 +692,13 @@ export function runSupertrendBacktest(
           shares: position.shares as number,
           bars_held: position.bars_held as number,
           r_multiple: rMultiple,
-          exit_reason: "ST Reversal",
-          atr_stop_price: cur.supertrend,
+          exit_reason: stSignalSell ? "ST Signal" : "SuperTrend Exit",
+          atr_stop_price: position.atr_stop_price as number,
           trailing_stop: null,
           mae_pct: (position.mae_pct as number) * 100,
           mfe_pct: (position.mfe_pct as number) * 100,
-          actual_risk_pct: approxRisk > 0 ? (approxRisk / (position.entry_price as number)) * 100 : 2,
-          entry_regime: bars[position.entry_idx as number].regime,
+          actual_risk_pct: actualRiskPct * 100,
+          entry_regime: entryBar.regime,
           atr_mult: 2,
           trail_mult: 0,
           max_hold_days: 9999,
