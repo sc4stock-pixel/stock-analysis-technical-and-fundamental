@@ -165,7 +165,11 @@ export function runBacktest(
     }
 
     // ── ENTRY ──────────────────────────────────────────────────
-    if (position === null && prev.entrySignal === "BUY" && !killSwitchActive) {
+    // ── ENTRY ──────────────────────────────────────────────────
+    // entrySignal[i] = signalConfirmed[i-1] (shifted in signals.ts)
+    // So cur.entrySignal === 'BUY' means yesterday confirmed BUY → enter today at cur.open
+    // Using prev.entrySignal was a double-shift (2 bars late). Fixed: use cur.entrySignal.
+    if (position === null && cur.entrySignal === "BUY" && !killSwitchActive) {
       const entryPrice = cur.open * (1 + slippage);
       const entryAtr = cur.atr;
       const entryRegime = prev.regime ?? "NEUTRAL";
@@ -414,6 +418,15 @@ export function runBacktest(
   const annualizedReturn = totalReturn * (252 / bars.length);
   const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
 
+  // Period returns from equity curve (matches Python total_return_250d logic)
+  const ec = equitySeries;
+  const totalReturn250d = ec.length > 250
+    ? (ec[ec.length - 1] - ec[ec.length - 251]) / ec[ec.length - 251]
+    : totalReturn;
+  const totalReturn500d = ec.length > 500
+    ? (ec[ec.length - 1] - ec[ec.length - 501]) / ec[ec.length - 501]
+    : totalReturn;
+
   // Ulcer Index
   const squaredDDs = drawdownHistory.map((d) => d ** 2);
   const ulcerIndex = Math.sqrt(mean(squaredDDs)) * 100;
@@ -455,6 +468,8 @@ export function runBacktest(
     win_rate: winRate * 100,
     expectancy: expectancy * 100,
     total_return: totalReturn * 100,
+    total_return_250d: totalReturn250d * 100,
+    total_return_500d: totalReturn500d * 100,
     sharpe,
     sortino,
     max_drawdown: maxDrawdown * 100,
@@ -528,6 +543,7 @@ function buildEmptyResults(
   return {
     symbol, trades: [], num_trades: 0,
     win_rate: 0, expectancy: 0, total_return: 0,
+    total_return_250d: 0, total_return_500d: 0,
     sharpe: 0, sortino: 0, max_drawdown: 0, profit_factor: 0,
     avg_win: 0, avg_loss: 0, r_multiples: [],
     equity_curve: equityCurve, equity_dates: equityDates,
@@ -597,10 +613,11 @@ export function runSupertrendBacktest(
     drawdownHistory.push(portfolioDrawdown);
 
     // ── ENTRY ────────────────────────────────────────────────────
-    // Python: if prev_row['Entry_Signal'] == 'BUY' → enter at cur.open
-    // stEntrySignal is already pre-shifted in pipeline (set on bar after flip)
+    // stEntrySignal[i] was set in pipeline on the bar AFTER the flip.
+    // cur.stEntrySignal === 'BUY' means the flip happened on prev bar → enter at cur.open.
+    // Using prev.stEntrySignal was a double-shift (2 bars late). Fixed: use cur.stEntrySignal.
     if (position === null) {
-      if (prev.stEntrySignal === "BUY") {
+      if (cur.stEntrySignal === "BUY") {
         const entryPrice = cur.open * (1 + slippage);
         const entryAtr = cur.atr;
 
@@ -614,8 +631,8 @@ export function runSupertrendBacktest(
         }
 
         const entryCostPerShare = entryPrice * (1 + commission);
-        // Python: initial stop = SuperTrend line value from previous bar
-        const stStop = prev.supertrend > 0 ? prev.supertrend : entryPrice - 2 * entryAtr;
+        // Initial stop = ST line on the entry bar (the bar after the flip)
+        const stStop = cur.supertrend > 0 ? cur.supertrend : entryPrice - 2 * entryAtr;
 
         position = {
           entry_date: cur.date,
@@ -768,6 +785,15 @@ export function runSupertrendBacktest(
   const annualizedReturn = totalReturn * (252 / bars.length);
   const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
 
+  // Period returns from equity curve
+  const ec = equityCurve;
+  const totalReturn250d = ec.length > 250
+    ? (ec[ec.length - 1] - ec[ec.length - 251]) / ec[ec.length - 251]
+    : totalReturn;
+  const totalReturn500d = ec.length > 500
+    ? (ec[ec.length - 1] - ec[ec.length - 501]) / ec[ec.length - 501]
+    : totalReturn;
+
   const squaredDDs = drawdownHistory.map((d) => d ** 2);
   const ulcerIndex = Math.sqrt(mean(squaredDDs)) * 100;
   const gains = dailyReturns.filter((r) => r > 0).reduce((a, b) => a + b, 0);
@@ -791,6 +817,8 @@ export function runSupertrendBacktest(
     win_rate: winRate * 100,
     expectancy: expectancy * 100,
     total_return: totalReturn * 100,
+    total_return_250d: totalReturn250d * 100,
+    total_return_500d: totalReturn500d * 100,
     sharpe,
     sortino,
     max_drawdown: maxDrawdown * 100,

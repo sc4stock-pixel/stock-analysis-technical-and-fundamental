@@ -11,8 +11,8 @@ import {
 
 interface Props { result: StockAnalysisResult; }
 
-type Range = "1M" | "3M" | "6M" | "1Y";
-const RANGE_BARS: Record<Range, number> = { "1M": 21, "3M": 63, "6M": 126, "1Y": 252 };
+type Range = "1M" | "3M" | "6M" | "1Y" | "2Y";
+const RANGE_BARS: Record<Range, number> = { "1M": 21, "3M": 63, "6M": 126, "1Y": 252, "2Y": 500 };
 
 // ── Custom entry/exit SVG markers rendered as chart dots ────────
 const EntryMarker = (props: { cx?: number; cy?: number; value?: number }) => {
@@ -92,7 +92,7 @@ const PriceTooltip = ({ active, payload, label }: {
 export default function ChartTab({ result }: Props) {
   const [range, setRange] = useState<Range>("1Y");
   const [showSMA, setShowSMA]       = useState(true);
-  const [showEMA50, setShowEMA50]   = useState(false); // EMA50 = ST entry filter line
+  const [showEMA50, setShowEMA50]   = useState(true);  // EMA50 on by default (ST filter line)
   const [showBB, setShowBB]         = useState(true);
   const [showST, setShowST]         = useState(true);
   const [showVol, setShowVol]       = useState(true);
@@ -238,7 +238,7 @@ export default function ChartTab({ result }: Props) {
       <div className="flex flex-wrap items-center gap-1.5">
         {/* Range */}
         <div className="flex gap-1">
-          {(["1M","3M","6M","1Y"] as Range[]).map(r => <RangeBtn key={r} r={r} />)}
+          {(["1M","3M","6M","1Y","2Y"] as Range[]).map(r => <RangeBtn key={r} r={r} />)}
         </div>
         <div className="h-3 w-px bg-[#1e2d4a]" />
         {/* Overlays */}

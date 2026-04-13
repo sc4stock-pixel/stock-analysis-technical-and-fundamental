@@ -70,7 +70,9 @@ const numColor = (v: number | null | undefined, good = 0) =>
 // ── Column definitions ────────────────────────────────────────
 type ColKey =
   | "symbol" | "price" | "change_pct" | "regime" | "grade" | "score"
-  | "signal" | "st_status" | "rsi" | "macd_hist" | "sc_ret" | "st_ret" | "sharpe" | "alpha";
+  | "signal" | "st_status" | "rsi" | "macd_hist"
+  | "sc_500d" | "st_500d" | "sc_250d" | "st_250d"
+  | "sharpe" | "alpha";
 
 interface ColDef {
   key: ColKey;
@@ -80,20 +82,22 @@ interface ColDef {
 }
 
 const COLS: ColDef[] = [
-  { key: "symbol",     label: "Ticker",  align: "left",   sortVal: r => r.symbol.charCodeAt(0) },
-  { key: "price",      label: "Price",   align: "right",  sortVal: r => r.current_price },
-  { key: "change_pct", label: "Chg%",   align: "right",  sortVal: r => r.change_pct ?? 0 },
-  { key: "regime",     label: "Regime",  align: "left",   sortVal: r => r.regime?.charCodeAt(0) ?? 0 },
-  { key: "grade",      label: "Grd",     align: "center", sortVal: r => r.score ?? 0 },
-  { key: "score",      label: "Score",   align: "right",  sortVal: r => r.score ?? 0 },
-  { key: "signal",     label: "Signal",  align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
-  { key: "st_status",  label: "ST",      align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
-  { key: "rsi",        label: "RSI",     align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
-  { key: "macd_hist",  label: "MACD H",  align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
-  { key: "sc_ret",     label: "Sc Ret%", align: "right",  sortVal: r => r.backtest?.total_return ?? 0 },
-  { key: "st_ret",     label: "ST Ret%", align: "right",  sortVal: r => r.comparison?.supertrend.total_return ?? 0 },
-  { key: "sharpe",     label: "Sharpe",  align: "right",  sortVal: r => r.backtest?.sharpe ?? 0 },
-  { key: "alpha",      label: "Alpha",   align: "right",  sortVal: r => r.backtest?.alpha ?? 0 },
+  { key: "symbol",     label: "Ticker",    align: "left",   sortVal: r => r.symbol.charCodeAt(0) },
+  { key: "price",      label: "Price",     align: "right",  sortVal: r => r.current_price },
+  { key: "change_pct", label: "Chg%",     align: "right",  sortVal: r => r.change_pct ?? 0 },
+  { key: "regime",     label: "Regime",    align: "left",   sortVal: r => r.regime?.charCodeAt(0) ?? 0 },
+  { key: "grade",      label: "Grd",       align: "center", sortVal: r => r.score ?? 0 },
+  { key: "score",      label: "Score",     align: "right",  sortVal: r => r.score ?? 0 },
+  { key: "signal",     label: "Signal",    align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
+  { key: "st_status",  label: "ST",        align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
+  { key: "rsi",        label: "RSI",       align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
+  { key: "macd_hist",  label: "MACD H",    align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
+  { key: "sc_500d",    label: "SC 500d%",  align: "right",  sortVal: r => r.backtest?.total_return_500d ?? 0 },
+  { key: "st_500d",    label: "ST 500d%",  align: "right",  sortVal: r => r.comparison?.supertrend.total_return_500d ?? 0 },
+  { key: "sc_250d",    label: "SC 250d%",  align: "right",  sortVal: r => r.backtest?.total_return_250d ?? 0 },
+  { key: "st_250d",    label: "ST 250d%",  align: "right",  sortVal: r => r.comparison?.supertrend.total_return_250d ?? 0 },
+  { key: "sharpe",     label: "Sharpe",    align: "right",  sortVal: r => r.backtest?.sharpe ?? 0 },
+  { key: "alpha",      label: "Alpha",     align: "right",  sortVal: r => r.backtest?.alpha ?? 0 },
 ];
 
 // ── Main component ─────────────────────────────────────────────
@@ -127,13 +131,15 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
   const avgSharpe  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.sharpe ?? 0), 0) / withBt.length : 0;
   const avgWinRate = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.win_rate ?? 0), 0) / withBt.length : 0;
   const avgAlpha   = results.length ? results.reduce((a, r) => a + (r.backtest?.alpha ?? 0), 0) / results.length : 0;
-  const avgScRet   = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.total_return ?? 0), 0) / withBt.length : 0;
+  const avgSc500d  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.total_return_500d ?? 0), 0) / withBt.length : 0;
+  const avgSc250d  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.total_return_250d ?? 0), 0) / withBt.length : 0;
 
   // ST strategy aggregates
   const stBull    = results.filter(r => (r.st_direction ?? -1) === 1).length;
   const stBear    = results.filter(r => (r.st_direction ?? -1) === -1).length;
   const withST    = results.filter(r => (r.comparison?.supertrend.num_trades ?? 0) > 0);
-  const avgSTRet  = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.total_return ?? 0), 0) / withST.length : 0;
+  const avgST500d   = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.total_return_500d ?? 0), 0) / withST.length : 0;
+  const avgST250d   = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.total_return_250d ?? 0), 0) / withST.length : 0;
   const avgSTSharpe = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.sharpe ?? 0), 0) / withST.length : 0;
   const avgSTAlpha  = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.alpha ?? 0), 0) / withST.length : 0;
   const avgSTWin    = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.win_rate ?? 0), 0) / withST.length : 0;
@@ -161,7 +167,7 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
       {/* ── Header strip — dual strategy summary ── */}
       <div className="mb-2 space-y-1">
         {/* Score row */}
-        <div className="flex items-center gap-4 text-xs flex-wrap">
+        <div className="flex items-center gap-3 text-xs flex-wrap">
           <span className="text-[#00d4ff] font-bold tracking-widest">◈ SCORE</span>
           <span>
             {buy  > 0 && <span className="text-[#00ff88] font-bold mr-2">▲{buy} BUY</span>}
@@ -169,20 +175,22 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
             {hold > 0 && <span className="text-[#ffa502]">◆{hold} HOLD</span>}
           </span>
           <span className="text-[#1e2d4a]">|</span>
-          <span className="text-[#4a6080]">Ret <span className={numColor(avgScRet, 0)}>{sn(avgScRet, 1, "%")}</span></span>
+          <span className="text-[#4a6080]">500d <span className={numColor(avgSc500d, 0)}>{sn(avgSc500d, 1, "%")}</span></span>
+          <span className="text-[#4a6080]">250d <span className={numColor(avgSc250d, 0)}>{sn(avgSc250d, 1, "%")}</span></span>
           <span className="text-[#4a6080]">Sharpe <span className={numColor(avgSharpe, 0.5)}>{avgSharpe.toFixed(2)}</span></span>
           <span className="text-[#4a6080]">Win% <span className={numColor(avgWinRate, 50)}>{avgWinRate.toFixed(0)}%</span></span>
           <span className="text-[#4a6080]">α <span className={numColor(avgAlpha, 0)}>{sn(avgAlpha, 1, "%")}</span></span>
         </div>
         {/* ST row */}
-        <div className="flex items-center gap-4 text-xs flex-wrap">
+        <div className="flex items-center gap-3 text-xs flex-wrap">
           <span className="text-[#ffa502] font-bold tracking-widest">◈ ST</span>
           <span>
             <span className="text-[#00ff88] font-bold mr-2">🟢{stBull} BULL</span>
             <span className="text-[#ff4757]">🔴{stBear} BEAR</span>
           </span>
           <span className="text-[#1e2d4a]">|</span>
-          <span className="text-[#4a6080]">Ret <span className={numColor(avgSTRet, 0)}>{sn(avgSTRet, 1, "%")}</span></span>
+          <span className="text-[#4a6080]">500d <span className={numColor(avgST500d, 0)}>{sn(avgST500d, 1, "%")}</span></span>
+          <span className="text-[#4a6080]">250d <span className={numColor(avgST250d, 0)}>{sn(avgST250d, 1, "%")}</span></span>
           <span className="text-[#4a6080]">Sharpe <span className={numColor(avgSTSharpe, 0.5)}>{avgSTSharpe.toFixed(2)}</span></span>
           <span className="text-[#4a6080]">Win% <span className={numColor(avgSTWin, 50)}>{avgSTWin.toFixed(0)}%</span></span>
           <span className="text-[#4a6080]">α <span className={numColor(avgSTAlpha, 0)}>{sn(avgSTAlpha, 1, "%")}</span></span>
@@ -298,19 +306,32 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
                     {n(bt?.macd_hist, 3)}
                   </td>
 
-                  {/* Sc Ret% */}
-                  <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return, 0)}`}>
-                    {bt?.total_return != null ? sn(bt.total_return, 1, "%") : "—"}
+                  {/* SC 500d% */}
+                  <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return_500d, 0)}`}>
+                    {bt?.total_return_500d != null ? sn(bt.total_return_500d, 1, "%") : "—"}
                   </td>
 
-                  {/* ST Ret% */}
+                  {/* ST 500d% */}
                   {(() => {
-                    const stRet = r.comparison?.supertrend.total_return;
+                    const v = r.comparison?.supertrend.total_return_500d;
                     return (
-                      <td className={`px-2 py-1.5 text-right font-mono ${
-                        stRet == null ? "text-[#4a6080]" : numColor(stRet, 0)
-                      }`}>
-                        {stRet != null ? sn(stRet, 1, "%") : "—"}
+                      <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>
+                        {v != null ? sn(v, 1, "%") : "—"}
+                      </td>
+                    );
+                  })()}
+
+                  {/* SC 250d% */}
+                  <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return_250d, 0)}`}>
+                    {bt?.total_return_250d != null ? sn(bt.total_return_250d, 1, "%") : "—"}
+                  </td>
+
+                  {/* ST 250d% */}
+                  {(() => {
+                    const v = r.comparison?.supertrend.total_return_250d;
+                    return (
+                      <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>
+                        {v != null ? sn(v, 1, "%") : "—"}
                       </td>
                     );
                   })()}
