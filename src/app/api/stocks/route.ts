@@ -209,7 +209,10 @@ async function analyzeStock(
         },
         current_price: 0, change_pct: 0,
         fundamentals,
-        backtest: null, monte_carlo: null, walk_forward: null, kelly: null,
+        backtest: null, monte_carlo: null, st_monte_carlo: null,
+        walk_forward: null, kelly: null,
+        st_direction: -1, st_value: 0, st_stop_distance_pct: 0, st_open_return_pct: null,
+        comparison: null,
         error: "Insufficient data",
       };
     }
@@ -231,7 +234,10 @@ async function analyzeStock(
         pe_ratio: null, forward_pe: null, eps_trailing: null,
         eps_forward: null, eps_growth: null, analyst_target: null, analyst_rating: null,
       },
-      backtest: null, monte_carlo: null, walk_forward: null, kelly: null,
+      backtest: null, monte_carlo: null, st_monte_carlo: null,
+      walk_forward: null, kelly: null,
+      st_direction: -1, st_value: 0, st_stop_distance_pct: 0, st_open_return_pct: null,
+      comparison: null,
       error: String(e),
     };
   }

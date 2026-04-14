@@ -94,11 +94,15 @@ function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
     avg_loss: stMetrics.avg_loss ?? 0,
     alpha: stMetrics.alpha,
     alpha_status: stMetrics.alpha >= 0 ? "ADDING VALUE" : "DESTROYING VALUE",
-    exit_reasons: stMetrics.num_trades > 0 ? { "ST Reversal": stMetrics.num_trades } : {},
+    exit_reasons: stMetrics.trades.reduce((acc, t) => {
+      acc[t.exit_reason] = (acc[t.exit_reason] ?? 0) + 1; return acc;
+    }, {} as Record<string, number>),
     stop_loss_price: result.st_value > 0 ? result.st_value : scoreBt.stop_loss_price,
     r_multiples: stMetrics.trades.map(t => t.r_multiple),
     equity_curve: stEquityCurve,
     equity_dates: stEquityDates,
+    total_return_250d: stMetrics.total_return_250d ?? stMetrics.total_return,
+    total_return_500d: stMetrics.total_return_500d ?? stMetrics.total_return,
     avg_mae: fn(stMetrics.trades, "mae_pct"),
     avg_mfe: fn(stMetrics.trades, "mfe_pct"),
     winner_mae: fn(winners, "mae_pct"),

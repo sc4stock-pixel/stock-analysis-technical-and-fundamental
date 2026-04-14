@@ -124,8 +124,6 @@ export interface BacktestResult {
   win_rate: number;
   expectancy: number;
   total_return: number;
-  total_return_250d?: number; 
-  total_return_500d?: number;
   sharpe: number;
   sortino: number;
   max_drawdown: number;
