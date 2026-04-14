@@ -165,7 +165,6 @@ export function runBacktest(
     }
 
     // ── ENTRY ──────────────────────────────────────────────────
-    // ── ENTRY ──────────────────────────────────────────────────
     // entrySignal[i] = signalConfirmed[i-1] (shifted in signals.ts)
     // So cur.entrySignal === 'BUY' means yesterday confirmed BUY → enter today at cur.open
     // Using prev.entrySignal was a double-shift (2 bars late). Fixed: use cur.entrySignal.
@@ -835,7 +834,9 @@ export function runSupertrendBacktest(
     calmar_ratio: calmarRatio,
     ulcer_index: ulcerIndex,
     omega_ratio: omegaRatio,
-    exit_reasons: { "ST Reversal": trades.length },
+    exit_reasons: trades.reduce((acc, t) => {
+      acc[t.exit_reason] = (acc[t.exit_reason] ?? 0) + 1; return acc;
+    }, {} as Record<string, number>),
     avg_mae: mean(trades.map((t) => t.mae_pct)),
     avg_mfe: mean(trades.map((t) => t.mfe_pct)),
     winner_mae: winners.length > 0 ? mean(winners.map((t) => t.mae_pct)) : 0,
