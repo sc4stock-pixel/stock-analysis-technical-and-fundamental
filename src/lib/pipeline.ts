@@ -258,10 +258,10 @@ export function runPipeline(
       const prev = bars[i - 1];
 
       if (openEntryPrice === null) {
-        // Entry: when stEntrySignal was set on this bar (prev flip + EMA filter)
-        if (prev.stEntrySignal === "BUY") {
+        // Entry: when cur.stEntrySignal === 'BUY' (set on bar after flip in pipeline)
+        if (cur.stEntrySignal === "BUY") {
           openEntryPrice = cur.open * (1 + config.backtest.slippageRate);
-          trailingStop = prev.supertrend > 0 ? prev.supertrend : null;
+          trailingStop = cur.supertrend > 0 ? cur.supertrend : null;
         }
       } else {
         // Trail stop upward
@@ -287,6 +287,8 @@ export function runPipeline(
   function toMetrics(bt: typeof backtestResult) {
     return {
       total_return: bt.total_return,
+      total_return_250d: bt.total_return_250d,
+      total_return_500d: bt.total_return_500d,
       win_rate: bt.win_rate,
       num_trades: bt.num_trades,
       profit_factor: bt.profit_factor,
