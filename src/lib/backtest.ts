@@ -190,7 +190,14 @@ export function runBacktest(
 
       const entryCostPerShare = entryPrice * (1 + commission);
       const entryCostTotal = entryCostPerShare * shares;
-      const atrStop = entryPrice - entryAtrMult * entryAtr;
+
+      // Vol-Capped Stop: max(ATR-based stop, 15% max loss floor)
+      // Ensures the stop is never wider than 15% of entry price,
+      // while still using the tighter ATR stop when volatility is low.
+      const atrStopRaw = entryPrice - entryAtrMult * entryAtr;
+      const volCapStop = entryPrice * 0.85; // 15% max loss floor
+      const atrStop = Math.max(atrStopRaw, volCapStop);
+
       const profitTarget = entryPrice + entryProfitTargetAtr * entryAtr;
 
       position = {
@@ -519,6 +526,7 @@ export function runBacktest(
     week_52_low: week52Low,
     sma_20: last.sma20,
     sma_50: last.sma50,
+    ema_20: last.ema20 ?? null,
     candlestick_patterns: detectCandlestickPatterns(bars, 5),
   };
 }
@@ -569,7 +577,7 @@ function buildEmptyResults(
     stop_loss_price: calcStopLoss(bars, config.risk.atrMultiplier),
     fib_targets: calcFibTargets(bars),
     week_52_high: week52High, week_52_low: week52Low,
-    sma_20: last.sma20, sma_50: last.sma50,
+    sma_20: last.sma20, sma_50: last.sma50, ema_20: last.ema20 ?? null,
     candlestick_patterns: detectCandlestickPatterns(bars, 5),
   };
 }
@@ -870,6 +878,7 @@ export function runSupertrendBacktest(
     week_52_low: week52Low,
     sma_20: last.sma20,
     sma_50: last.sma50,
+    ema_20: last.ema20 ?? null,
     candlestick_patterns: [],
   };
 }

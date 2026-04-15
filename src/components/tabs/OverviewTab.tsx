@@ -261,6 +261,7 @@ export default function OverviewTab({ result }: Props) {
         <div>
           <div className="text-[#4a6080] text-xs font-bold mb-1">LEVELS</div>
           <Metric label="SMA(20)" value={bt.sma_20?.toFixed(2) ?? "—"} />
+          <Metric label="EMA(20)" value={bt.ema_20?.toFixed(2) ?? "—"} color="text-[#a78bfa]" />
           <Metric label="SMA(50)" value={bt.sma_50?.toFixed(2) ?? "—"} />
           <Metric label="Support" value={bt.support_level?.toFixed(2) ?? "—"} color="text-[#00ff88]" />
           <Metric label="Resistance" value={bt.resistance_level?.toFixed(2) ?? "—"} color="text-[#ff4757]" />

@@ -39,7 +39,11 @@ export function runPipeline(
   const atrArr = atr(highs, lows, closes, config.analysis.atrPeriod);
   const sma20Arr = sma(closes, config.analysis.smaShort);
   const sma50Arr = sma(closes, config.analysis.smaLong);
+  const ema20Arr = ema(closes, 20); // True EMA(20) for Velocity Entry filter
   const ema50Arr = ema(closes, 50); // True EMA(50) — alpha=2/51 — for ST entry filter
+
+  // EMA20 slope over 3 bars (positive = trend accelerating)
+  const ema20SlopeArr = ema20Arr.map((v, i) => (i < 3 || isNaN(v) || isNaN(ema20Arr[i - 3])) ? 0 : v - ema20Arr[i - 3]);
   const [bbUpper, bbMid, bbLower] = bollingerBands(closes);
   const volRatioArr = volumeRatio(volumes, config.analysis.volumePeriod);
 
@@ -114,6 +118,8 @@ export function runPipeline(
     minusDI: minusDIArr[i] ?? 0,
     sma20: sma20Arr[i] ?? 0,
     sma50: sma50Arr[i] ?? 0,
+    ema20: ema20Arr[i] ?? 0,
+    ema20Slope: ema20SlopeArr[i] ?? 0,
     bbUpper: bbUpper[i] ?? 0,
     bbMid: bbMid[i] ?? 0,
     bbLower: bbLower[i] ?? 0,
@@ -221,6 +227,7 @@ export function runPipeline(
     volume: b.volume,
     sma20: b.sma20,
     sma50: b.sma50,
+    ema20: b.ema20,
     ema50: b.ema50,
     bbUpper: b.bbUpper,
     bbLower: b.bbLower,

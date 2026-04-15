@@ -178,6 +178,7 @@ export interface BacktestResult {
   week_52_low: number | null;
   sma_20: number | null;
   sma_50: number | null;
+  ema_20: number | null;
   // Patterns
   candlestick_patterns: CandlestickPattern[];
 }
@@ -310,6 +311,8 @@ export interface OHLCVBar {
   minusDI: number;
   sma20: number;
   sma50: number;
+  ema20: number;       // True EMA(20) for Velocity Entry filter
+  ema20Slope: number;  // EMA20 change over 3 bars (positive = accelerating upward)
   bbUpper: number;
   bbMid: number;
   bbLower: number;
@@ -364,6 +367,7 @@ export interface ChartBar {
   volume: number;
   sma20: number;
   sma50: number;
+  ema20: number;
   ema50: number;
   bbUpper: number;
   bbLower: number;

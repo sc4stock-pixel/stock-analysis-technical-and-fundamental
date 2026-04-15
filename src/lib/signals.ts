@@ -93,7 +93,25 @@ export function generateSignals(
     }
   }
 
-  // ── Step 6: Entry_Signal = Signal_Confirmed shifted by 1 bar ──────────
+  // ── Step 6: Velocity Entry Filter (Score Alpha) ────────────────────────
+  // Only allow BUY confirmation through if BOTH velocity conditions pass:
+  //   1. Price closes above EMA20 (trend confirmed)
+  //   2. EMA20 slope > 0 over last 3 bars (trend accelerating, not flat/falling)
+  // This ensures we capture momentum runs, not exhausted or flat moves.
+  // SELL signals and HOLD pass through unchanged.
+  // Force entries (volume surge) bypass this filter.
+  for (let i = 0; i < bars.length; i++) {
+    const bar = bars[i];
+    if (bar.signalConfirmed !== "BUY") continue;
+    if (bar.forceEntry === 1) continue; // volume surge bypasses velocity filter
+
+    const velocityPass = bar.close > bar.ema20 && bar.ema20Slope > 0;
+    if (!velocityPass) {
+      bar.signalConfirmed = "HOLD";
+    }
+  }
+
+  // ── Step 7: Entry_Signal = Signal_Confirmed shifted by 1 bar ──────────
   // Python: df['Entry_Signal'] = df['Signal_Confirmed'].shift(1)
   // shift(1) → row 0 gets NaN → we use "HOLD"
   for (let i = 0; i < bars.length; i++) {

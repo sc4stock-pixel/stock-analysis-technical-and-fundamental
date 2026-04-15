@@ -59,6 +59,7 @@ const PriceTooltip = ({ active, payload, label }: {
   const close = p("Close");
   const sma20 = p("SMA20");
   const sma50 = p("SMA50");
+  const ema20 = p("EMA20");
   const ema50 = p("EMA50");
   const stBull = p("ST_Bull");
   const stBear = p("ST_Bear");
@@ -73,6 +74,7 @@ const PriceTooltip = ({ active, payload, label }: {
       {close != null && <div className="text-[#c8d8f0]">Close: <span className="text-[#00d4ff] font-bold">{close.toFixed(2)}</span></div>}
       {sma20 != null && <div className="text-[#00ff88]">SMA20: {sma20.toFixed(2)}</div>}
       {sma50 != null && <div className="text-[#ff7f50]">SMA50: {sma50.toFixed(2)}</div>}
+      {ema20 != null && <div className="text-[#a78bfa]">EMA20: {ema20.toFixed(2)} <span className="text-[#4a6080]">(velocity)</span></div>}
       {ema50 != null && <div className="text-[#f59e0b]">EMA50: {ema50.toFixed(2)} <span className="text-[#4a6080]">(ST filter)</span></div>}
       {stBull != null && <div className="text-[#00ff88]">ST 🟢: {stBull.toFixed(2)} (support)</div>}
       {stBear != null && <div className="text-[#ff4757]">ST 🔴: {stBear.toFixed(2)} (resistance)</div>}
@@ -92,7 +94,8 @@ const PriceTooltip = ({ active, payload, label }: {
 export default function ChartTab({ result }: Props) {
   const [range, setRange] = useState<Range>("1Y");
   const [showSMA, setShowSMA]       = useState(true);
-  const [showEMA50, setShowEMA50]   = useState(true);  // EMA50 on by default (ST filter line)
+  const [showEMA20, setShowEMA20]   = useState(true);  // EMA20 = Velocity filter line (Score Alpha)
+  const [showEMA50, setShowEMA50]   = useState(true);  // EMA50 = ST entry filter line
   const [showBB, setShowBB]         = useState(true);
   const [showST, setShowST]         = useState(true);
   const [showVol, setShowVol]       = useState(true);
@@ -138,6 +141,7 @@ export default function ChartTab({ result }: Props) {
       Close: b.close,
       SMA20: isNaN(b.sma20)   ? null : b.sma20,
       SMA50: isNaN(b.sma50)   ? null : b.sma50,
+      EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
       EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
       BBU:   isNaN(b.bbUpper) ? null : b.bbUpper,
       BBL:   isNaN(b.bbLower) ? null : b.bbLower,
@@ -159,6 +163,7 @@ export default function ChartTab({ result }: Props) {
     ...(showBB ? chartData.map(d => d.BBU).filter(Boolean) as number[] : []),
     ...(showBB ? chartData.map(d => d.BBL).filter(Boolean) as number[] : []),
     ...(showST ? chartData.map(d => d.ST_Bull ?? d.ST_Bear).filter(Boolean) as number[] : []),
+    ...(showEMA20 ? chartData.map(d => d.EMA20).filter(Boolean) as number[] : []),
     ...(showEMA50 ? chartData.map(d => d.EMA50).filter(Boolean) as number[] : []),
     ...(showTrades ? chartData.filter(d => d.Entry).map(d => d.Entry!) : []),
     ...(showTrades ? chartData.filter(d => d.Exit).map(d => d.Exit!) : []),
@@ -244,6 +249,8 @@ export default function ChartTab({ result }: Props) {
         {/* Overlays */}
         <Tog label="SMA"   active={showSMA}    onClick={() => setShowSMA(v => !v)}
           activeClass="border-[#ffa502]/60 text-[#ffa502] bg-[#ffa502]/10" />
+        <Tog label="EMA20" active={showEMA20}  onClick={() => setShowEMA20(v => !v)}
+          activeClass="border-[#a78bfa]/60 text-[#a78bfa] bg-[#a78bfa]/10" />
         <Tog label="EMA50" active={showEMA50}  onClick={() => setShowEMA50(v => !v)}
           activeClass="border-[#f59e0b]/70 text-[#f59e0b] bg-[#f59e0b]/10" />
         <Tog label="BB"    active={showBB}     onClick={() => setShowBB(v => !v)}
@@ -308,7 +315,13 @@ export default function ChartTab({ result }: Props) {
               </>
             )}
 
-            {/* EMA50 — ST entry filter line (amber, distinguishable from SMA50 orange) */}
+            {/* EMA20 — Score Alpha Velocity Entry filter (purple, dashed) */}
+            {showEMA20 && (
+              <Line dataKey="EMA20" stroke="#a78bfa" strokeWidth={1.5} dot={false}
+                name="EMA20" strokeOpacity={0.9} strokeDasharray="4 2" legendType="none" />
+            )}
+
+            {/* EMA50 — ST entry filter line (amber, dashed) */}
             {showEMA50 && (
               <Line dataKey="EMA50" stroke="#f59e0b" strokeWidth={1.5} dot={false}
                 name="EMA50" strokeOpacity={0.9} strokeDasharray="6 3" legendType="none" />
@@ -457,6 +470,11 @@ export default function ChartTab({ result }: Props) {
             <span className="w-5 h-0.5 bg-[#ff7f50] inline-block rounded" /> SMA50
           </span>
         </>}
+        {showEMA20 && (
+          <span className="flex items-center gap-1.5">
+            <span className="w-5 inline-block" style={{ borderTop: "2px dashed #a78bfa" }} /> EMA20 <span className="text-[#4a6080] text-[0.6rem]">(velocity)</span>
+          </span>
+        )}
         {showEMA50 && (
           <span className="flex items-center gap-1.5">
             <span className="w-5 inline-block" style={{ borderTop: "2px dashed #f59e0b" }} /> EMA50 <span className="text-[#4a6080] text-[0.6rem]">(ST filter)</span>
