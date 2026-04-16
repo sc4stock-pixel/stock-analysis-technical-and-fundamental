@@ -660,7 +660,7 @@ export function runSupertrendBacktest(
       }
     }
 
-    // ── MANAGE / EXIT ────────────────────────────────────────────
+// ── MANAGE / EXIT ────────────────────────────────────────────
     else if (position !== null) {
       (position.bars_held as number)++;
       if (cur.high > (position.highest_price as number)) position.highest_price = cur.high;
@@ -676,20 +676,15 @@ export function runSupertrendBacktest(
         position.mfe_pct = favorable / (position.entry_price as number);
       }
 
-      // ── ST EXIT LOGIC (matches Python exactly) ─────────────────
-      // Python: trail the ST line upward each bar (stop only moves UP, never down)
-      // Exit condition 1: Low touches the trailing ST stop
-      // Exit condition 2: Explicit SELL signal (prev bar's supertrendSignal === 'SELL')
-      const currentST = cur.supertrend;
-      if (!isNaN(currentST) && currentST > (position.atr_stop_price as number)) {
-        position.atr_stop_price = currentST; // Trail stop upward following ST line
-      }
+      // ── ST EXIT: direction flip to bearish = exit ───────────────
+      // The SuperTrend direction IS the trade signal.
+      // Exit on the bar where supertrendDir flips to -1 (bearish).
+      // cur.supertrend is the ST LINE value (upper band during downtrend),
+      // NOT a trailing stop — do NOT trail it manually.
+      const stReversalExit = cur.supertrendDir === -1;
 
-      const stStopHit = cur.low <= (position.atr_stop_price as number);
-      const stSignalSell = prev.supertrendSignal === "SELL";
-
-      if (stStopHit || stSignalSell) {
-        const exitPrice = Math.min(position.atr_stop_price as number, cur.open) * (1 - slippage);
+      if (stReversalExit) {
+        const exitPrice = cur.open * (1 - slippage);
         const exitProceedsPerShare = exitPrice * (1 - commission);
         const perSharePnl = exitProceedsPerShare - (position.entry_cost_per_share as number);
         const totalPnl = perSharePnl * (position.shares as number);
@@ -716,8 +711,8 @@ export function runSupertrendBacktest(
           shares: position.shares as number,
           bars_held: position.bars_held as number,
           r_multiple: rMultiple,
-          exit_reason: stSignalSell ? "ST Signal" : "SuperTrend Exit",
-          atr_stop_price: position.atr_stop_price as number,
+          exit_reason: "SuperTrend Exit",
+          atr_stop_price: position.original_stop as number,
           trailing_stop: null,
           mae_pct: (position.mae_pct as number) * 100,
           mfe_pct: (position.mfe_pct as number) * 100,
