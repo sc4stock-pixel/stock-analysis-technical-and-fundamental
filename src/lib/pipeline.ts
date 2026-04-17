@@ -39,10 +39,9 @@ export function runPipeline(
   const atrArr = atr(highs, lows, closes, config.analysis.atrPeriod);
   const sma20Arr = sma(closes, config.analysis.smaShort);
   const sma50Arr = sma(closes, config.analysis.smaLong);
-  const ema20Arr = ema(closes, 20); // True EMA(20) for Velocity Entry filter
-  const ema50Arr = ema(closes, 50); // True EMA(50) — alpha=2/51 — for ST entry filter
+  const ema20Arr = ema(closes, 20);
+  const ema50Arr = ema(closes, 50);
 
-  // EMA20 slope over 3 bars (positive = trend accelerating)
   const ema20SlopeArr = ema20Arr.map((v, i) => (i < 3 || isNaN(v) || isNaN(ema20Arr[i - 3])) ? 0 : v - ema20Arr[i - 3]);
   const [bbUpper, bbMid, bbLower] = bollingerBands(closes);
   const volRatioArr = volumeRatio(volumes, config.analysis.volumePeriod);
@@ -54,20 +53,17 @@ export function runPipeline(
   // ADX slope (3-bar for scoring, 4-bar for regime)
   const adxSlope3 = adxArr.map((v, i) => (i < 3 ? 0 : v - adxArr[i - 3]));
 
-  // Volume accumulation (shifted mean to avoid look-ahead)
   const volAccumulation = volumes.map((v, i) => {
     if (i < 20) return 0;
-    const slice = volumes.slice(i - 20, i); // previous 20, NOT including current
+    const slice = volumes.slice(i - 20, i);
     const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
     return v > mean * 1.5 && closes[i] > rawBars[i].open ? 1 : 0;
   });
 
-  // Trend gate (golden cross)
   const trendGate = closes.map((c, i) =>
     c > sma20Arr[i] && c > sma50Arr[i] && sma20Arr[i] > sma50Arr[i] ? 1 : 0
   );
 
-  // BB Position with zero-division guard
   const bbPosition = closes.map((c, i) => {
     const range = bbUpper[i] - bbLower[i];
     return range > 0 ? (c - bbLower[i]) / range : 0.5;
@@ -80,10 +76,6 @@ export function runPipeline(
     closeArr: closes, sma20Arr, sma50Arr, rsiArr,
   });
 
-  // ── RSI Divergence — matches Python: single call on full dataset ─────
-  // Python: divergence, divergence_type = self.detect_rsi_divergence(df, lookback)
-  // Then broadcasts scalar to entire df['RSI_Divergence'] column.
-  // We do the same: one call on the full arrays, broadcast to all bars.
   const [rsiDivScalar, rsiDivTypeScalar] = detectRsiDivergence(
     closes, rsiArr, config.analysis.divergenceLookback
   );
@@ -139,38 +131,37 @@ export function runPipeline(
     signalConfirmed: "HOLD",
     entrySignal: "HOLD",
     forceEntry: 0,
-    // SuperTrend fields
     supertrend: stArr[i] ?? NaN,
     supertrendDir: stDirArr[i] ?? 1,
     supertrendSignal: stSigArr[i] ?? "HOLD",
-    stEntrySignal: "HOLD", // filled below after filter
+    stEntrySignal: "HOLD",
     ema50: ema50Arr[i] ?? 0,
   }));
 
-  // ── SuperTrend entry signal with EMA filter (ema_only mode) ─
-  // Python: Signal_Confirmed[flip_bar] = 'BUY', Entry_Signal = Signal_Confirmed.shift(1)
-  // So Entry_Signal[flip_bar + 1] = 'BUY' → enter at (flip_bar + 1).open
-  // We store stEntrySignal[i+1] = 'BUY' when bar[i] is the flip bar.
+  // ── SuperTrend entry signal with EMA filter ──────────────────
+  // Flip detected at bar i (cur.dir=1, prev.dir=-1).
+  // Entry signal written to bar i+1 (enter at bars[i+1].open).
+  // EMA filter applied to the ENTRY bar (i+1), not the flip bar (i).
+  // This matches Python: filter is checked at the bar we actually enter,
+  // preventing false blocks when the flip bar itself dips below EMA50.
   for (let i = 1; i < bars.length; i++) {
     const cur = bars[i];
     const prev = bars[i - 1];
 
-    // Check if bar[i-1] was the flip bar (prev was bearish, cur is bullish)
-    // EMA filter uses the flip bar's close vs ema50 (cur = flip bar when checking prev flip)
-    // Actually: the flip is detected at bar i (cur.dir=1, prev.dir=-1)
-    // Python Signal_Confirmed is set at bar i, Entry_Signal shifts it to bar i+1
     const isBullishFlip = cur.supertrendDir === 1 && prev.supertrendDir === -1;
     const isBearishFlip = cur.supertrendDir === -1 && prev.supertrendDir === 1;
 
-    const emaFilter = stConfig.filter_mode === "ema_only"
-      ? cur.close > cur.ema50
-      : cur.close > cur.ema50 && cur.adx > 20;
-
-    // Set stEntrySignal on the NEXT bar (i+1) so backtest enters at (i+1).open
-    // This matches Python's Entry_Signal = Signal_Confirmed.shift(1)
     if (i + 1 < bars.length) {
-      if (isBullishFlip && emaFilter) {
-        bars[i + 1].stEntrySignal = "BUY";
+      if (isBullishFlip) {
+        // Apply EMA filter on the entry bar (i+1), not the flip bar
+        const entryBar = bars[i + 1];
+        const emaFilter = stConfig.filter_mode === "ema_only"
+          ? entryBar.close > entryBar.ema50
+          : entryBar.close > entryBar.ema50 && entryBar.adx > 20;
+
+        if (emaFilter) {
+          bars[i + 1].stEntrySignal = "BUY";
+        }
       } else if (isBearishFlip) {
         bars[i + 1].stEntrySignal = "SELL";
       }
@@ -189,12 +180,11 @@ export function runPipeline(
     ? runMonteCarlo(backtestResult.equity_curve, config)
     : null;
 
-  // ST Monte Carlo — only run if we have enough ST trades
   const stMcResult = config.monteCarlo.enabled && stBacktestResult.equity_curve.length >= 30
     ? runMonteCarlo(stBacktestResult.equity_curve, config)
     : null;
 
-  // ── Walk-Forward (simplified grid search) ────────────────────
+  // ── Walk-Forward ──────────────────────────────────────────────
   let walkForward: WalkForwardResult | null = null;
   if (config.walkForward.enabled && bars.length >= 100) {
     walkForward = runWalkForward(bars, stockConfig.symbol, config, stockConfig.exchange);
@@ -213,11 +203,10 @@ export function runPipeline(
     closeArr: closes, sma20Arr, sma50Arr, rsiArr,
   });
 
-  // ── Current signal ────────────────────────────────────────────
   const lastBar = bars[bars.length - 1];
   const signal = lastBar.signalConfirmed ?? "HOLD";
 
-  // Build per-bar ChartBar data (last 252 bars) for Price/Signal chart tab
+  // ── Chart bars (last 252) ─────────────────────────────────────
   const chartBars: ChartBar[] = bars.slice(-252).map((b) => ({
     date: b.date,
     open: b.open,
@@ -244,7 +233,7 @@ export function runPipeline(
     supertrendDir: b.supertrendDir,
   }));
 
-  // ── SuperTrend status for current bar ────────────────────────
+  // ── SuperTrend status ─────────────────────────────────────────
   const stDirection = lastBar.supertrendDir;
   const stValue = lastBar.supertrend;
   const stStopDistPct = stValue > 0 && currentPrice > 0
@@ -252,35 +241,24 @@ export function runPipeline(
     : 0;
 
   // ── SuperTrend open position detection ────────────────────────
-  // Mirrors corrected runSupertrendBacktest exactly:
-  // - Entry: stEntrySignal='BUY' on bar i → enter at bars[i].open (bar after flip)
-  // - Exit: Low <= trailing ST stop OR prev.supertrendSignal === 'SELL'
+  // Must mirror runSupertrendBacktest exactly:
+  // - Entry: stEntrySignal === 'BUY' → enter at bar.open
+  // - Exit: supertrendDir === -1 (direction flip to bearish)
   let stOpenReturnPct: number | null = null;
   if (stDirection === 1) {
     let openEntryPrice: number | null = null;
-    let trailingStop: number | null = null;
 
     for (let i = 1; i < bars.length; i++) {
       const cur = bars[i];
-      const prev = bars[i - 1];
 
       if (openEntryPrice === null) {
-        // Entry: when cur.stEntrySignal === 'BUY' (set on bar after flip in pipeline)
         if (cur.stEntrySignal === "BUY") {
           openEntryPrice = cur.open * (1 + config.backtest.slippageRate);
-          trailingStop = cur.supertrend > 0 ? cur.supertrend : null;
         }
       } else {
-        // Trail stop upward
-        if (!isNaN(cur.supertrend) && (trailingStop === null || cur.supertrend > trailingStop)) {
-          trailingStop = cur.supertrend;
-        }
-        // Exit: low hits trailing stop OR SELL signal
-        const stopHit = trailingStop !== null && cur.low <= trailingStop;
-        const sellSignal = prev.supertrendSignal === "SELL";
-        if (stopHit || sellSignal) {
-          openEntryPrice = null;
-          trailingStop = null;
+        // Exit mirrors backtest: direction flip to bearish
+        if (cur.supertrendDir === -1) {
+          openEntryPrice = null; // trade closed
         }
       }
     }
