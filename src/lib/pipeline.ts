@@ -241,9 +241,9 @@ export function runPipeline(
     : 0;
 
   // ── SuperTrend open position detection ────────────────────────
-  // Mirrors runSupertrendBacktest exactly:
+  // Mirrors runSupertrendBacktest exactly (and Python):
   // Entry: stEntrySignal === 'BUY' → enter at bar.open
-  // Trail: only move stop UP when supertrendDir === 1 (never trail with downtrend upper band)
+  // Trail: NO direction guard — matches Python which trails any ST value > current stop
   // Exit: low <= trailingStop OR prev.supertrendSignal === 'SELL'
   let stOpenReturnPct: number | null = null;
   if (stDirection === 1) {
@@ -257,12 +257,12 @@ export function runPipeline(
       if (openEntryPrice === null) {
         if (cur.stEntrySignal === "BUY") {
           openEntryPrice = cur.open * (1 + config.backtest.slippageRate);
-          trailingStop = (!isNaN(cur.supertrend) && cur.supertrendDir === 1 && cur.supertrend > 0)
+          trailingStop = (!isNaN(cur.supertrend) && cur.supertrend > 0)
             ? cur.supertrend : null;
         }
       } else {
-        // Only trail upward when ST is in uptrend (dir===1)
-        if (!isNaN(cur.supertrend) && cur.supertrendDir === 1 &&
+        // Trail to any higher ST value — no direction check (matches Python exactly)
+        if (!isNaN(cur.supertrend) &&
             (trailingStop === null || cur.supertrend > trailingStop)) {
           trailingStop = cur.supertrend;
         }
