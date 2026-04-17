@@ -27,8 +27,6 @@ function ewm(values: number[], alpha: number): number[] {
 
 /**
  * RSI — Wilder's RMA smoothing with edge case handling.
- * Exact match to Python: alpha=1/period, adjust=False
- * Edge cases: avg_loss=0 → RSI=100; both=0 → RSI=50; avg_gain=0 → RSI=0
  */
 export function rsi(closes: number[], period = 14): number[] {
   const deltas = closes.map((c, i) => (i === 0 ? NaN : c - closes[i - 1]));
@@ -43,9 +41,9 @@ export function rsi(closes: number[], period = 14): number[] {
     const ag = avgGain[i];
     const al = avgLoss[i];
     if (isNaN(ag) || isNaN(al)) return NaN;
-    if (ag === 0 && al === 0) return 50; // both zero → neutral
-    if (al === 0) return 100; // no losses → RSI=100
-    if (ag === 0) return 0; // no gains → RSI=0
+    if (ag === 0 && al === 0) return 50;
+    if (al === 0) return 100;
+    if (ag === 0) return 0;
     const rs = ag / al;
     return Math.min(100, Math.max(0, 100 - 100 / (1 + rs)));
   });
@@ -53,7 +51,6 @@ export function rsi(closes: number[], period = 14): number[] {
 
 /**
  * MACD — EMA smoothing (span=fast/slow/signal).
- * Returns [macdLine, signalLine, histogram]
  */
 export function macd(
   closes: number[],
@@ -76,7 +73,6 @@ export function macd(
 
 /**
  * ATR — Wilder's ATR using RMA smoothing.
- * Matches: tr.ewm(alpha=1/period, adjust=False).mean()
  */
 export function atr(
   highs: number[],
@@ -96,7 +92,6 @@ export function atr(
 
 /**
  * ADX — Wilder's ADX with DM mutual exclusion and RMA smoothing.
- * Returns [adx, plusDI, minusDI]
  */
 export function adx(
   highs: number[],
@@ -112,7 +107,6 @@ export function adx(
   for (let i = 1; i < n; i++) {
     const upMove = highs[i] - highs[i - 1];
     const downMove = lows[i - 1] - lows[i];
-    // Mutual exclusion rule
     plusDM[i] = upMove > downMove && upMove > 0 ? upMove : 0;
     minusDM[i] = downMove > upMove && downMove > 0 ? downMove : 0;
     const hl = highs[i] - lows[i];
@@ -144,7 +138,6 @@ export function adx(
 
 /**
  * Bollinger Bands — population std (ddof=0).
- * Returns [upper, middle, lower]
  */
 export function bollingerBands(
   closes: number[],
@@ -158,7 +151,6 @@ export function bollingerBands(
   for (let i = period - 1; i < closes.length; i++) {
     const slice = closes.slice(i - period + 1, i + 1);
     const sma = slice.reduce((a, b) => a + b, 0) / period;
-    // Population std (ddof=0)
     const variance = slice.reduce((a, b) => a + (b - sma) ** 2, 0) / period;
     const std = Math.sqrt(variance);
     middle[i] = sma;
@@ -182,7 +174,6 @@ export function sma(values: number[], period: number): number[] {
 /**
  * Standard Exponential Moving Average — alpha = 2/(period+1).
  * Matches: pandas series.ewm(span=period, adjust=False).mean()
- * Used for the 50-day EMA filter in SuperTrend entry condition.
  */
 export function ema(values: number[], period: number): number[] {
   const alpha = 2 / (period + 1);
@@ -190,12 +181,11 @@ export function ema(values: number[], period: number): number[] {
 }
 
 /**
- * Volume ratio vs 20-period rolling mean (shifted to avoid look-ahead)
+ * Volume ratio vs 20-period rolling mean
  */
 export function volumeRatio(volumes: number[], period = 20): number[] {
   return volumes.map((v, i) => {
     if (i < period) return 1.0;
-    // Shifted mean: use previous day's average (i-period to i-1)
     const slice = volumes.slice(i - period, i);
     const mean = slice.reduce((a, b) => a + b, 0) / period;
     return mean > 0 ? v / mean : 1.0;
@@ -205,18 +195,10 @@ export function volumeRatio(volumes: number[], period = 20): number[] {
 /**
  * SuperTrend Indicator — exact port of Python TechnicalIndicators.supertrend()
  *
- * Matches Python logic precisely:
- * 1. Band adjustment: based on close vs previous ST LINE (not bands independently)
- *    - if close[i-1] > stLine[i-1]: lock lower band upward (we were above ST = uptrend support)
- *    - else: lock upper band downward (we were below ST = downtrend resistance)
- * 2. Direction flip: compare close[i] vs PREVIOUS RAW bands (upper_band[i-1], lower_band[i-1])
- *    - close[i] > upper_band[i-1] → bullish flip
- *    - close[i] < lower_band[i-1] → bearish flip
- *    - else → keep previous direction
- * 3. Seed: first bar = upper_band (bearish default), direction = 1 only if close > upper
+ * V14 FIX: Added forward-fill after main loop to match Python's
+ * supertrend.bfill().ffill() — prevents NaN gaps causing false flip detections.
  *
  * Returns: [supertrendLine, direction, signal]
- *   signal = 'BUY' on bearish→bullish flip, 'SELL' on bullish→bearish flip, 'HOLD' otherwise
  */
 export function supertrend(
   highs: number[],
@@ -232,11 +214,9 @@ export function supertrend(
   const dirArr = new Array(n).fill(-1);
   const sigArr = new Array(n).fill("HOLD");
 
-  // Raw band arrays (recomputed each bar from HL2 + ATR)
   const upperBand = new Array(n).fill(NaN);
   const lowerBand = new Array(n).fill(NaN);
 
-  // Build raw bands first
   for (let i = 0; i < n; i++) {
     if (isNaN(atrArr[i])) continue;
     const hl2 = (highs[i] + lows[i]) / 2;
@@ -244,15 +224,12 @@ export function supertrend(
     lowerBand[i] = hl2 - multiplier * atrArr[i];
   }
 
-  // Find first valid bar
   let firstValid = -1;
   for (let i = 0; i < n; i++) {
     if (!isNaN(atrArr[i])) { firstValid = i; break; }
   }
   if (firstValid < 0) return [stLine, dirArr, sigArr];
 
-  // Seed: Python sets supertrend[first] = upper_band[first] (bearish default)
-  // direction[first] = 1 only if close > upper_band (rare), else -1
   stLine[firstValid] = upperBand[firstValid];
   dirArr[firstValid] = closes[firstValid] > upperBand[firstValid] ? 1 : -1;
 
@@ -265,23 +242,19 @@ export function supertrend(
       continue;
     }
 
-    // Band adjustment: Python checks close[i-1] vs stLine[i-1] (the active ST value)
     if (closes[i - 1] > stLine[i - 1]) {
-      // Was above ST line → lock lower band upward (support rising)
       lowerBand[i] = Math.max(lowerBand[i], lowerBand[i - 1]);
     } else {
-      // Was below ST line → lock upper band downward (resistance falling)
       upperBand[i] = Math.min(upperBand[i], upperBand[i - 1]);
     }
 
-    // Direction flip: compare close[i] vs PREVIOUS bars' (already-adjusted) bands
     let curDir: number;
     if (closes[i] > upperBand[i - 1]) {
-      curDir = 1;   // Crossed above upper band → bullish
+      curDir = 1;
     } else if (closes[i] < lowerBand[i - 1]) {
-      curDir = -1;  // Crossed below lower band → bearish
+      curDir = -1;
     } else {
-      curDir = dirArr[i - 1]; // No flip
+      curDir = dirArr[i - 1];
     }
 
     dirArr[i] = curDir;
@@ -290,6 +263,14 @@ export function supertrend(
     if (dirArr[i - 1] !== curDir) {
       sigArr[i] = curDir === 1 ? "BUY" : "SELL";
     }
+  }
+
+  // ── Forward-fill NaN gaps ─────────────────────────────────────
+  // Matches Python's: supertrend.bfill().ffill()
+  // Prevents NaN holes in early bars from causing false flip detections.
+  for (let i = 1; i < n; i++) {
+    if (isNaN(stLine[i]) && !isNaN(stLine[i - 1])) stLine[i] = stLine[i - 1];
+    if (isNaN(dirArr[i]) && !isNaN(dirArr[i - 1]))  dirArr[i] = dirArr[i - 1];
   }
 
   return [stLine, dirArr, sigArr];
