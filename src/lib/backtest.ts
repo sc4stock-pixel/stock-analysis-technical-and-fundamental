@@ -664,7 +664,7 @@ export function runSupertrendBacktest(
     else if (position !== null) {
       (position.bars_held as number)++;
       if (cur.high > (position.highest_price as number)) position.highest_price = cur.high;
-
+    
       const adverse = (position.entry_price as number) - cur.low;
       if (adverse > (position.mae as number)) {
         position.mae = adverse;
@@ -674,6 +674,24 @@ export function runSupertrendBacktest(
       if (favorable > (position.mfe as number)) {
         position.mfe = favorable;
         position.mfe_pct = favorable / (position.entry_price as number);
+  }
+
+  // Trail ST line UPWARD — only when supertrendDir===1.
+  // When dir===-1, cur.supertrend is the UPPER band (above price),
+  // trailing it causes immediate false stop hit.
+  const currentST = cur.supertrend;
+  if (!isNaN(currentST) && cur.supertrendDir === 1 &&
+      currentST > (position.atr_stop_price as number)) {
+    position.atr_stop_price = currentST;
+  }
+
+  const stStopHit = cur.low <= (position.atr_stop_price as number);
+  const stSignalSell = prev.supertrendSignal === "SELL";
+
+  if (stStopHit || stSignalSell) {
+    // Python: exit_price = min(position['atr_stop_price'], current_row['Open'])
+    const rawExit = Math.min(position.atr_stop_price as number, cur.open);
+    const exitPrice = rawExit * (1 - slippage);
       }
 
       // ── ST EXIT: direction flip to bearish = exit ───────────────
