@@ -680,9 +680,8 @@ export function runSupertrendBacktest(
   // When dir===-1, cur.supertrend is the UPPER band (above price),
   // trailing it causes immediate false stop hit.
   const currentST = cur.supertrend;
-  if (!isNaN(currentST) && cur.supertrendDir === 1 &&
-      currentST > (position.atr_stop_price as number)) {
-    position.atr_stop_price = currentST;
+  if (!isNaN(currentST) && currentST > (position.atr_stop_price as number)) {
+  position.atr_stop_price = currentST;
   }
 
   const stStopHit = cur.low <= (position.atr_stop_price as number);
