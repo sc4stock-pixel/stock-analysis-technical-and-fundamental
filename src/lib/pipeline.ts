@@ -50,7 +50,6 @@ export function runPipeline(
   const stConfig = config.supertrend ?? { atrPeriod: 10, multiplier: 3.0, filter_mode: "ema_only" };
   const [stArr, stDirArr, stSigArr] = supertrend(highs, lows, closes, stConfig.atrPeriod, stConfig.multiplier);
 
-  // ADX slope (3-bar for scoring, 4-bar for regime)
   const adxSlope3 = adxArr.map((v, i) => (i < 3 ? 0 : v - adxArr[i - 3]));
 
   const volAccumulation = volumes.map((v, i) => {
@@ -139,11 +138,13 @@ export function runPipeline(
   }));
 
   // ── SuperTrend entry signal with EMA filter ──────────────────
-  // Flip detected at bar i (cur.dir=1, prev.dir=-1).
-  // Entry signal written to bar i+1 (enter at bars[i+1].open).
-  // EMA filter applied to the ENTRY bar (i+1), not the flip bar (i).
-  // This matches Python: filter is checked at the bar we actually enter,
-  // preventing false blocks when the flip bar itself dips below EMA50.
+  // Matches Python exactly:
+  //   Signal_Confirmed[i] = 'BUY' when SuperTrend_Signal[i]=='BUY' AND close[i] > EMA_50[i]
+  //   Entry_Signal = Signal_Confirmed.shift(1)
+  //   → stEntrySignal[i+1] = 'BUY' when flip at bar i AND close[i] > ema50[i]
+  //
+  // EMA filter is checked on the FLIP BAR (cur = bar i), not the entry bar.
+  // This matches Python's SuperTrend_Signal_EMA_Only computation.
   for (let i = 1; i < bars.length; i++) {
     const cur = bars[i];
     const prev = bars[i - 1];
@@ -153,11 +154,10 @@ export function runPipeline(
 
     if (i + 1 < bars.length) {
       if (isBullishFlip) {
-        // Apply EMA filter on the entry bar (i+1), not the flip bar
-        const entryBar = bars[i + 1];
+        // EMA filter on the FLIP BAR (cur), matching Python's column-wise filter
         const emaFilter = stConfig.filter_mode === "ema_only"
-          ? entryBar.close > entryBar.ema50
-          : entryBar.close > entryBar.ema50 && entryBar.adx > 20;
+          ? cur.close > cur.ema50
+          : cur.close > cur.ema50 && cur.adx > 20;
 
         if (emaFilter) {
           bars[i + 1].stEntrySignal = "BUY";
@@ -196,7 +196,7 @@ export function runPipeline(
     kelly = calcKelly(backtestResult, config);
   }
 
-  // ── Current regime (last bar) ─────────────────────────────────
+  // ── Current regime ────────────────────────────────────────────
   const regimeInfo = detectRegime({
     adxArr, plusDIArr, minusDIArr, atrArr,
     macdArr: macdLine, macdSignalArr: macdSignal,
@@ -241,24 +241,36 @@ export function runPipeline(
     : 0;
 
   // ── SuperTrend open position detection ────────────────────────
-  // Must mirror runSupertrendBacktest exactly:
-  // - Entry: stEntrySignal === 'BUY' → enter at bar.open
-  // - Exit: supertrendDir === -1 (direction flip to bearish)
+  // Mirrors runSupertrendBacktest exactly:
+  // Entry: stEntrySignal === 'BUY' → enter at bar.open
+  // Trail: only move stop UP when supertrendDir === 1 (never trail with downtrend upper band)
+  // Exit: low <= trailingStop OR prev.supertrendSignal === 'SELL'
   let stOpenReturnPct: number | null = null;
   if (stDirection === 1) {
     let openEntryPrice: number | null = null;
+    let trailingStop: number | null = null;
 
     for (let i = 1; i < bars.length; i++) {
       const cur = bars[i];
+      const prev = bars[i - 1];
 
       if (openEntryPrice === null) {
         if (cur.stEntrySignal === "BUY") {
           openEntryPrice = cur.open * (1 + config.backtest.slippageRate);
+          trailingStop = (!isNaN(cur.supertrend) && cur.supertrendDir === 1 && cur.supertrend > 0)
+            ? cur.supertrend : null;
         }
       } else {
-        // Exit mirrors backtest: direction flip to bearish
-        if (cur.supertrendDir === -1) {
-          openEntryPrice = null; // trade closed
+        // Only trail upward when ST is in uptrend (dir===1)
+        if (!isNaN(cur.supertrend) && cur.supertrendDir === 1 &&
+            (trailingStop === null || cur.supertrend > trailingStop)) {
+          trailingStop = cur.supertrend;
+        }
+        const stopHit = trailingStop !== null && cur.low <= trailingStop;
+        const sellSignal = prev.supertrendSignal === "SELL";
+        if (stopHit || sellSignal) {
+          openEntryPrice = null;
+          trailingStop = null;
         }
       }
     }
