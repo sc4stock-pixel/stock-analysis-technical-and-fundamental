@@ -46,7 +46,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   backtest: {
     enabled: true,
     initialCapital: 10000,
-    lookbackDays: 500,
+    lookbackDays: 365,
     commissionRate: 0.001,
     slippageRate: 0.0005,
     use_van_tharp: false,
