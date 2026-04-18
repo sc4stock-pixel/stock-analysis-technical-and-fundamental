@@ -116,7 +116,7 @@ async function fetchYahooOHLCV(
   lookbackDays: number
 ): Promise<{ bars: RawOHLCV[]; currentPrice: number; changePct: number } | null> {
   try {
-    const calendarDays = Math.floor(lookbackDays * 9 / 5) + 15;
+    const calendarDays = Math.floor(lookbackDays * 7 / 5) + 30;
     const end   = Math.floor(Date.now() / 1000);
     const start = end - calendarDays * 86400;
     const url   = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${start}&period2=${end}&interval=1d&events=div,splits`;
