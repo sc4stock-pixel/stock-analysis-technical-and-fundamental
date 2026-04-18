@@ -3,6 +3,15 @@ import { StockAnalysisResult } from "@/types";
 
 interface Props { result: StockAnalysisResult; }
 
+// mm/dd/yy formatter
+function fmtDate(iso: string | undefined): string {
+  if (!iso) return "—";
+  const parts = iso.split("T")[0].split("-");
+  if (parts.length < 3) return iso;
+  const [y, m, d] = parts;
+  return `${m}/${d}/${y.slice(2)}`;
+}
+
 function Row({ label, value, color }: { label: string; value: string | number; color?: string }) {
   return (
     <div className="flex justify-between py-1 border-b border-[#1e2d4a]/40">
@@ -15,7 +24,7 @@ function Row({ label, value, color }: { label: string; value: string | number; c
 // ─── TRADES TAB ───────────────────────────────────────────────
 export function TradesTab({ result }: Props) {
   const scoreTrades = result.backtest?.trades ?? [];
-  const stTrades = result.comparison?.supertrend?.trades ?? [];
+  const stTrades    = result.comparison?.supertrend?.trades ?? [];
 
   function TradeTable({ trades, label, color }: { trades: typeof scoreTrades; label: string; color: string }) {
     if (trades.length === 0) {
@@ -30,7 +39,7 @@ export function TradesTab({ result }: Props) {
     return (
       <div className="mb-4">
         <div className={`text-xs font-bold mb-1 ${color}`}>{label}</div>
-        <div className="text-[#4a6080] text-xs mb-2">{recent.length} of {trades.length} shown</div>
+        <div className="text-[#4a6080] text-xs mb-2">{recent.length} of {trades.length} shown (most recent first)</div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
@@ -38,6 +47,8 @@ export function TradesTab({ result }: Props) {
                 <th className="text-left py-1 pr-2">#</th>
                 <th className="text-left py-1 pr-2">ENTRY</th>
                 <th className="text-left py-1 pr-2">EXIT</th>
+                <th className="text-right py-1 pr-2">IN $</th>
+                <th className="text-right py-1 pr-2">OUT $</th>
                 <th className="text-right py-1 pr-2">RET%</th>
                 <th className="text-right py-1 pr-2">R</th>
                 <th className="text-left py-1 pr-2">BARS</th>
@@ -48,13 +59,15 @@ export function TradesTab({ result }: Props) {
               {recent.map((t) => (
                 <tr key={t.trade_num} className="border-b border-[#1e2d4a]/30 hover:bg-[#1e2d4a]/10">
                   <td className="py-1 pr-2 text-[#4a6080]">{t.trade_num}</td>
-                  <td className="py-1 pr-2 text-[#6b85a0]">{t.entry_date?.slice(5)}</td>
-                  <td className="py-1 pr-2 text-[#6b85a0]">{t.exit_date?.slice(5)}</td>
+                  <td className="py-1 pr-2 font-mono text-[#6b85a0]">{fmtDate(t.entry_date)}</td>
+                  <td className="py-1 pr-2 font-mono text-[#6b85a0]">{fmtDate(t.exit_date)}</td>
+                  <td className="py-1 pr-2 text-right font-mono text-[#c8d8f0]">{t.entry_price.toFixed(2)}</td>
+                  <td className="py-1 pr-2 text-right font-mono text-[#c8d8f0]">{t.exit_price.toFixed(2)}</td>
                   <td className={`py-1 pr-2 text-right font-mono ${t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-                    {(t.return * 100).toFixed(1)}%
+                    {t.return >= 0 ? "+" : ""}{(t.return * 100).toFixed(1)}%
                   </td>
                   <td className={`py-1 pr-2 text-right font-mono ${t.r_multiple > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-                    {t.r_multiple.toFixed(2)}R
+                    {t.r_multiple >= 0 ? "+" : ""}{t.r_multiple.toFixed(2)}R
                   </td>
                   <td className="py-1 pr-2 text-[#c8d8f0]">{t.bars_held}</td>
                   <td className="py-1 text-[#6b85a0] truncate max-w-20">{t.exit_reason}</td>
@@ -72,10 +85,9 @@ export function TradesTab({ result }: Props) {
       <TradeTable trades={scoreTrades} label="◈ SCORE STRATEGY TRADES" color="text-[#00d4ff]" />
       <div className="border-t border-[#1e2d4a] my-3" />
       <TradeTable trades={stTrades} label="◈ SUPERTREND STRATEGY TRADES" color="text-[#ffa502]" />
-      {/* Legend */}
       <div className="mt-3 border border-[#1e2d4a]/50 rounded p-2 text-xs text-[#4a6080]">
-        <span className="text-[#00d4ff]">SCORE</span>: multi-indicator scoring exits (ATR stop / target / trailing / signal) ·{" "}
-        <span className="text-[#ffa502]">ST</span>: SuperTrend reversal exits only (trend IS the stop)
+        <span className="text-[#00d4ff]">SCORE</span>: multi-indicator exits (ATR stop / target / trailing / signal) ·{" "}
+        <span className="text-[#ffa502]">ST</span>: SuperTrend stop/reversal exits · SMA50 entry filter
       </div>
     </div>
   );
@@ -87,18 +99,16 @@ export function TradingPlanTab({ result }: Props) {
   if (!bt) return <div className="p-4 text-[#4a6080] text-xs">No data</div>;
 
   const isSTMode = bt.signal_bars === 0 && (result.comparison?.supertrend.num_trades ?? 0) > 0;
-  const stDir = result.st_direction ?? -1;
-
-  const price = result.current_price;
-  const stop = bt.stop_loss_price;
-  const fib = bt.fib_targets;
-  const risk = stop && price > 0 ? price - stop : null;
+  const stDir    = result.st_direction ?? -1;
+  const price    = result.current_price;
+  const stop     = bt.stop_loss_price;
+  const fib      = bt.fib_targets;
+  const risk     = stop && price > 0 ? price - stop : null;
 
   function rr(target: number | null) {
     if (!target || !risk || risk <= 0) return null;
     return ((target - price) / risk).toFixed(2);
   }
-
   function rrColor(ratio: string | null) {
     if (!ratio) return "text-[#4a6080]";
     const v = parseFloat(ratio);
@@ -107,45 +117,32 @@ export function TradingPlanTab({ result }: Props) {
 
   return (
     <div className="p-3 space-y-4">
-      {/* Entry zone */}
       <div>
         <div className={`text-xs font-bold mb-2 tracking-widest ${isSTMode ? "text-[#ffa502]" : "text-[#00d4ff]"}`}>
           ◈ {isSTMode ? "ST TRADING PLAN" : "TRADING PLAN"}
         </div>
-
         <div className="bg-[#0a0e1a] border border-[#1e2d4a] rounded p-3 space-y-2">
           <div className="flex justify-between items-center">
             <span className="text-[#6b85a0] text-xs">{isSTMode ? "ST Signal" : "Signal"}</span>
             {isSTMode ? (
-              <span className={`text-xs font-bold px-2 py-0.5 rounded border font-mono ${
-                stDir === 1
-                  ? "border-[#00ff88]/50 text-[#00ff88] bg-[#00ff88]/10"
-                  : "border-[#ff4757]/50 text-[#ff4757] bg-[#ff4757]/10"
-              }`}>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded border font-mono ${stDir === 1 ? "border-[#00ff88]/50 text-[#00ff88] bg-[#00ff88]/10" : "border-[#ff4757]/50 text-[#ff4757] bg-[#ff4757]/10"}`}>
                 {stDir === 1 ? "🟢 BULLISH" : "🔴 BEARISH"}
               </span>
             ) : (
-              <span className={`text-xs font-bold px-2 py-0.5 rounded border ${
-                result.signal === "BUY" ? "badge-buy" : result.signal === "SELL" ? "badge-sell" : "badge-hold"
-              }`}>{result.signal}</span>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded border ${result.signal === "BUY" ? "badge-buy" : result.signal === "SELL" ? "badge-sell" : "badge-hold"}`}>{result.signal}</span>
             )}
           </div>
-
           <div className="flex justify-between">
             <span className="text-[#6b85a0] text-xs">Current Price</span>
             <span className="text-[#c8d8f0] text-xs font-mono">{price > 0 ? price.toFixed(2) : "—"}</span>
           </div>
-
           <div className="border-t border-[#1e2d4a] my-1" />
-
           <div className="flex justify-between">
             <span className="text-[#ff4757] text-xs">{isSTMode ? "ST Stop Line" : "Stop Loss"}</span>
             <span className="text-[#ff4757] text-xs font-mono">
-              {stop ? stop.toFixed(2) : "—"}
-              {risk && price > 0 ? ` (${((risk / price) * 100).toFixed(1)}%)` : ""}
+              {stop ? stop.toFixed(2) : "—"}{risk && price > 0 ? ` (${((risk / price) * 100).toFixed(1)}%)` : ""}
             </span>
           </div>
-
           {isSTMode && stDir === 1 && result.st_open_return_pct !== null && result.st_open_return_pct !== undefined && (
             <div className="flex justify-between">
               <span className="text-[#6b85a0] text-xs">Open P&L</span>
@@ -154,16 +151,14 @@ export function TradingPlanTab({ result }: Props) {
               </span>
             </div>
           )}
-
           {isSTMode && (
             <div className="mt-1 pt-2 border-t border-[#1e2d4a]/50 text-[0.6rem] text-[#4a6080] leading-relaxed">
-              ST exits on trend reversal only · No ATR stop · No profit target · No max hold days
+              ST exits on stop/reversal only · SMA50 entry filter · No ATR stop · No profit target · No max hold days
             </div>
           )}
         </div>
       </div>
 
-      {/* Fibonacci targets */}
       {fib && (
         <div>
           <div className="text-[#4a6080] text-xs font-bold mb-2">FIBONACCI TARGETS</div>
@@ -183,17 +178,10 @@ export function TradingPlanTab({ result }: Props) {
                     </div>
                     <div className="text-right">
                       <div className="text-[#00ff88] text-sm font-bold">{t.val?.toFixed(2) ?? "—"}</div>
-                      {ratio && (
-                        <div className={`text-xs ${rrColor(ratio)}`}>R:R {ratio}:1</div>
-                      )}
+                      {ratio && <div className={`text-xs ${rrColor(ratio)}`}>R:R {ratio}:1</div>}
                     </div>
                   </div>
-                  {/* Gain from current price */}
-                  {t.val && price > 0 && (
-                    <div className="mt-1 text-[#4a6080] text-xs">
-                      +{(((t.val - price) / price) * 100).toFixed(1)}% from current
-                    </div>
-                  )}
+                  {t.val && price > 0 && <div className="mt-1 text-[#4a6080] text-xs">+{(((t.val - price) / price) * 100).toFixed(1)}% from current</div>}
                 </div>
               );
             })}
@@ -201,20 +189,17 @@ export function TradingPlanTab({ result }: Props) {
         </div>
       )}
 
-      {/* Support / Resistance */}
       <div>
         <div className="text-[#4a6080] text-xs font-bold mb-1">KEY LEVELS</div>
         <Row label="Resistance" value={bt.resistance_level?.toFixed(2) ?? "—"} color="text-[#ff4757]" />
-        <Row label="Current" value={price > 0 ? price.toFixed(2) : "—"} color="text-[#00d4ff]" />
-        <Row label="Support" value={bt.support_level?.toFixed(2) ?? "—"} color="text-[#00ff88]" />
-        <Row label={isSTMode ? "ST Stop Line" : "Stop Loss"}
-          value={bt.stop_loss_price?.toFixed(2) ?? "—"} color="text-[#ff4757]" />
+        <Row label="Current"    value={price > 0 ? price.toFixed(2) : "—"} color="text-[#00d4ff]" />
+        <Row label="Support"    value={bt.support_level?.toFixed(2) ?? "—"} color="text-[#00ff88]" />
+        <Row label={isSTMode ? "ST Stop Line" : "Stop Loss"} value={bt.stop_loss_price?.toFixed(2) ?? "—"} color="text-[#ff4757]" />
         <Row label="52W High" value={bt.week_52_high?.toFixed(2) ?? "—"} />
-        <Row label="52W Low" value={bt.week_52_low?.toFixed(2) ?? "—"} />
+        <Row label="52W Low"  value={bt.week_52_low?.toFixed(2) ?? "—"} />
         {fib?.swing_low && <Row label="Swing Low (base)" value={fib.swing_low.toFixed(2)} />}
       </div>
 
-      {/* Regime context */}
       <div>
         <div className="text-[#4a6080] text-xs font-bold mb-1">REGIME CONTEXT</div>
         <div className="bg-[#0a0e1a] border border-[#1e2d4a] rounded p-2 text-xs text-[#6b85a0]">
