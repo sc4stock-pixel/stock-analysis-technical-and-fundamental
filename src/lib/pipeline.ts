@@ -138,6 +138,9 @@ export function runPipeline(
   }));
 
   // ── SuperTrend entry signal with EMA filter ──────────────────
+  // Track pending bullish flips to ensure they're not missed due to EMA filter timing
+  let pendingBullishFlip = false;
+  
   for (let i = 1; i < bars.length; i++) {
     const cur = bars[i];
     const prev = bars[i - 1];
@@ -145,18 +148,32 @@ export function runPipeline(
     const isBullishFlip = cur.supertrendDir === 1 && prev.supertrendDir === -1;
     const isBearishFlip = cur.supertrendDir === -1 && prev.supertrendDir === 1;
 
+    // Mark a pending flip when we detect a bullish reversal
+    if (isBullishFlip) {
+      pendingBullishFlip = true;
+    }
+
     if (i + 1 < bars.length) {
-      if (isBullishFlip) {
+      // Check EMA filter on the signal bar (i+1), allowing entry if flip occurred recently
+      if (pendingBullishFlip || isBullishFlip) {
         const emaFilter = stConfig.filter_mode === "ema_only"
           ? cur.close > cur.ema50
           : cur.close > cur.ema50 && cur.adx > 20;
 
         if (emaFilter) {
           bars[i + 1].stEntrySignal = "BUY";
+          pendingBullishFlip = false; // Reset after successful signal
         }
+        // Keep pending flag if filter failed, try again on next bar
       } else if (isBearishFlip) {
         bars[i + 1].stEntrySignal = "SELL";
+        pendingBullishFlip = false; // Cancel any pending bullish flip
       }
+    }
+    
+    // Reset pending flip if trend reverses before entry
+    if (isBearishFlip) {
+      pendingBullishFlip = false;
     }
   }
 
