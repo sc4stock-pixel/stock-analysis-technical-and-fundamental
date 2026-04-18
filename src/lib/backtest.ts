@@ -164,10 +164,6 @@ export function runBacktest(
       }
     }
 
-    // ── ENTRY ──────────────────────────────────────────────────
-    // entrySignal[i] = signalConfirmed[i-1] (shifted in signals.ts)
-    // So cur.entrySignal === 'BUY' means yesterday confirmed BUY → enter today at cur.open
-    // Using prev.entrySignal was a double-shift (2 bars late). Fixed: use cur.entrySignal.
     if (position === null && cur.entrySignal === "BUY" && !killSwitchActive) {
       const entryPrice = cur.open * (1 + slippage);
       const entryAtr = cur.atr;
@@ -191,11 +187,8 @@ export function runBacktest(
       const entryCostPerShare = entryPrice * (1 + commission);
       const entryCostTotal = entryCostPerShare * shares;
 
-      // Vol-Capped Stop: max(ATR-based stop, 15% max loss floor)
-      // Ensures the stop is never wider than 15% of entry price,
-      // while still using the tighter ATR stop when volatility is low.
       const atrStopRaw = entryPrice - entryAtrMult * entryAtr;
-      const volCapStop = entryPrice * 0.85; // 15% max loss floor
+      const volCapStop = entryPrice * 0.85;
       const atrStop = Math.max(atrStopRaw, volCapStop);
 
       const profitTarget = entryPrice + entryProfitTargetAtr * entryAtr;
@@ -209,7 +202,7 @@ export function runBacktest(
         shares,
         entry_equity: runningEquity,
         atr_stop_price: atrStop,
-        original_stop_price: atrStop, // BUG FIX G: immutable reference
+        original_stop_price: atrStop,
         profit_target: profitTarget,
         breakeven_triggered: false,
         breakeven_level_1: false,
@@ -231,7 +224,6 @@ export function runBacktest(
       };
     }
 
-    // ── MANAGE POSITION ────────────────────────────────────────
     else if (position !== null) {
       (position.bars_held as number)++;
       if (cur.high > (position.highest_price as number)) {
@@ -253,7 +245,6 @@ export function runBacktest(
       const trailMult = position.trail_mult as number;
       const trailTrigger = position.trail_trigger as number;
 
-      // BUG FIX V12.5.6 G RESIDUAL: always use original_stop_price for R calc
       const riskDistance = (position.entry_price as number) - (position.original_stop_price as number);
       const profitSoFar = cur.close - (position.entry_price as number);
       const rLevel = riskDistance > 0 ? profitSoFar / riskDistance : 0;
@@ -269,7 +260,7 @@ export function runBacktest(
         position.breakeven_level_1 = true;
       }
 
-      // Trailing stop — only activates after trail_trigger R
+      // Trailing stop
       const trailThreshold = trailTrigger * riskDistance;
       if (profitSoFar >= trailThreshold) {
         const newTrailing = (position.highest_price as number) - trailMult * currentAtr;
@@ -285,7 +276,6 @@ export function runBacktest(
       const trailingStopHit = position.trailing_stop !== null && cur.low <= (position.trailing_stop as number);
       const profitTargetHit = cur.high >= (position.profit_target as number);
 
-      // Ranging mean-reversion exit
       let rangingExit = false;
       if (position.entry_regime === "RANGING" && (position.bars_held as number) >= 3) {
         if (!isNaN(cur.bbMid) && cur.close > cur.bbMid) rangingExit = true;
@@ -324,7 +314,6 @@ export function runBacktest(
 
         runningEquity = (position.entry_equity as number) + totalPnl;
 
-        // R-multiple uses ORIGINAL stop (BUG FIX G)
         const riskPerShare = (position.entry_price as number) - (position.original_stop_price as number);
         const actualRiskPct = position.entry_price as number > 0 ? riskPerShare / (position.entry_price as number) : 0.02;
         const rMultiple = actualRiskPct > 0 ? returnPct / actualRiskPct : 0;
@@ -372,7 +361,6 @@ export function runBacktest(
     equityDates.push(cur.date);
   }
 
-  // ── EMPTY RESULTS ─────────────────────────────────────────────
   if (trades.length === 0) {
     return buildEmptyResults(symbol, bars, config, killSwitchActive, equityCurve, equityDates);
   }
@@ -404,7 +392,6 @@ export function runBacktest(
     : 0;
   const sortino = drDownStd > 0 ? (drMean * 252) / (drDownStd * Math.sqrt(252)) : 0;
 
-  // Max drawdown
   let peak = equitySeries[0];
   let maxDrawdown = 0;
   for (const v of equitySeries) {
@@ -417,14 +404,12 @@ export function runBacktest(
   const grossLoss = Math.abs(losers.reduce((a, t) => a + t.pnl, 0));
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 0;
 
-  // BUG FIX C: use running_equity (realized cash)
   const totalReturn = (runningEquity - initialCapital) / initialCapital;
   const buyHoldReturn = (bars[bars.length - 1].close * buyHoldShares - initialCapital) / initialCapital;
   const alpha = totalReturn - buyHoldReturn;
   const annualizedReturn = totalReturn * (252 / bars.length);
   const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
 
-  // Period returns from equity curve (matches Python total_return_250d logic)
   const ec = equitySeries;
   const totalReturn250d = ec.length > 250
     ? (ec[ec.length - 1] - ec[ec.length - 251]) / ec[ec.length - 251]
@@ -433,27 +418,22 @@ export function runBacktest(
     ? (ec[ec.length - 1] - ec[ec.length - 501]) / ec[ec.length - 501]
     : totalReturn;
 
-  // Ulcer Index
   const squaredDDs = drawdownHistory.map((d) => d ** 2);
   const ulcerIndex = Math.sqrt(mean(squaredDDs)) * 100;
 
-  // Omega Ratio
   const gains = dailyReturns.filter((r) => r > 0).reduce((a, b) => a + b, 0);
   const losses2 = Math.abs(dailyReturns.filter((r) => r <= 0).reduce((a, b) => a + b, 0));
   const omegaRatio = losses2 > 0 ? gains / losses2 : 0;
 
-  // Exit reasons
   const exitReasons: Record<string, number> = {};
   for (const t of trades) {
     exitReasons[t.exit_reason] = (exitReasons[t.exit_reason] ?? 0) + 1;
   }
 
-  // Duration stats
   const holdingPeriods = trades.map((t) => t.bars_held);
   const winnerDurations = winners.map((t) => t.bars_held);
   const loserDurations = losers.map((t) => t.bars_held);
 
-  // Score history (last 20 bars)
   const scoreHistory = bars.slice(-20).map((b) => b.score);
 
   const last = bars[bars.length - 1];
@@ -584,8 +564,8 @@ function buildEmptyResults(
 
 // ============================================================
 // SUPERTREND BACKTEST — exits ONLY on trend reversal
-// NO ATR stop, NO profit target, NO max days, NO trailing stop
-// The SuperTrend line IS the trailing stop (trend reversal = exit)
+// NO ATR stop, NO profit target, NO max days
+// The SuperTrend direction flip IS the exit signal
 // ============================================================
 export function runSupertrendBacktest(
   bars: OHLCVBar[],
@@ -620,9 +600,6 @@ export function runSupertrendBacktest(
     drawdownHistory.push(portfolioDrawdown);
 
     // ── ENTRY ────────────────────────────────────────────────────
-    // stEntrySignal[i] was set in pipeline on the bar AFTER the flip.
-    // cur.stEntrySignal === 'BUY' means the flip happened on prev bar → enter at cur.open.
-    // Using prev.stEntrySignal was a double-shift (2 bars late). Fixed: use cur.stEntrySignal.
     if (position === null) {
       if (cur.stEntrySignal === "BUY") {
         const entryPrice = cur.open * (1 + slippage);
@@ -638,8 +615,10 @@ export function runSupertrendBacktest(
         }
 
         const entryCostPerShare = entryPrice * (1 + commission);
-        // Initial stop = ST line on the entry bar (the bar after the flip)
-        const stStop = cur.supertrend > 0 ? cur.supertrend : entryPrice - 2 * entryAtr;
+        // Initial stop = ST line on the entry bar (lower band = support)
+        const stStop = (!isNaN(cur.supertrend) && cur.supertrend > 0 && cur.supertrendDir === 1)
+          ? cur.supertrend
+          : entryPrice - 2 * entryAtr;
 
         position = {
           entry_date: cur.date,
@@ -654,17 +633,17 @@ export function runSupertrendBacktest(
           mae_pct: 0,
           mfe_pct: 0,
           entry_idx: i,
-          atr_stop_price: stStop, // ST line as initial stop (trails up)
-          original_stop: stStop,  // immutable reference for R-multiple
+          atr_stop_price: stStop,
+          original_stop: stStop,
         };
       }
     }
 
-// ── MANAGE / EXIT ────────────────────────────────────────────
+    // ── MANAGE / EXIT ────────────────────────────────────────────
     else if (position !== null) {
       (position.bars_held as number)++;
       if (cur.high > (position.highest_price as number)) position.highest_price = cur.high;
-    
+
       const adverse = (position.entry_price as number) - cur.low;
       if (adverse > (position.mae as number)) {
         position.mae = adverse;
@@ -674,34 +653,35 @@ export function runSupertrendBacktest(
       if (favorable > (position.mfe as number)) {
         position.mfe = favorable;
         position.mfe_pct = favorable / (position.entry_price as number);
-  }
-
-  // Trail ST line UPWARD — only when supertrendDir===1.
-  // When dir===-1, cur.supertrend is the UPPER band (above price),
-  // trailing it causes immediate false stop hit.
-  const currentST = cur.supertrend;
-  if (!isNaN(currentST) && currentST > (position.atr_stop_price as number)) {
-  position.atr_stop_price = currentST;
-  }
-
-  const stStopHit = cur.low <= (position.atr_stop_price as number);
-  const stSignalSell = prev.supertrendSignal === "SELL";
-
-  if (stStopHit || stSignalSell) {
-    // Python: exit_price = min(position['atr_stop_price'], current_row['Open'])
-    const rawExit = Math.min(position.atr_stop_price as number, cur.open);
-    const exitPrice = rawExit * (1 - slippage);
       }
 
-      // ── ST EXIT: direction flip to bearish = exit ───────────────
-      // The SuperTrend direction IS the trade signal.
-      // Exit on the bar where supertrendDir flips to -1 (bearish).
-      // cur.supertrend is the ST LINE value (upper band during downtrend),
-      // NOT a trailing stop — do NOT trail it manually.
-      const stReversalExit = cur.supertrendDir === -1;
+      // FIX: Only trail the ST line UPWARD and ONLY when still in bullish direction.
+      // When supertrendDir === -1, cur.supertrend is the UPPER band (above price)
+      // — trailing it would set a stop ABOVE price causing immediate false exit.
+      if (cur.supertrendDir === 1 && !isNaN(cur.supertrend) && cur.supertrend > 0) {
+        if (cur.supertrend > (position.atr_stop_price as number)) {
+          position.atr_stop_price = cur.supertrend;
+        }
+      }
 
-      if (stReversalExit) {
-        const exitPrice = cur.open * (1 - slippage);
+      // EXIT: direction flip to bearish = exit at open of reversal bar
+      // This is the primary exit — the SuperTrend direction IS the stop.
+      const stReversalExit = cur.supertrendDir === -1 && prev.supertrendDir === 1;
+
+      // Secondary exit: stop hit (low crosses the trailing ST line)
+      // Only fires in bullish regime (direction guard above keeps stop valid)
+      const stStopHit = cur.supertrendDir === 1 && cur.low <= (position.atr_stop_price as number);
+
+      if (stReversalExit || stStopHit) {
+        let exitPrice: number;
+        if (stReversalExit) {
+          // Exit at open of the reversal bar
+          exitPrice = cur.open * (1 - slippage);
+        } else {
+          // Stop hit — exit at stop price or open, whichever is worse
+          exitPrice = Math.min(position.atr_stop_price as number, cur.open) * (1 - slippage);
+        }
+
         const exitProceedsPerShare = exitPrice * (1 - commission);
         const perSharePnl = exitProceedsPerShare - (position.entry_cost_per_share as number);
         const totalPnl = perSharePnl * (position.shares as number);
@@ -728,7 +708,7 @@ export function runSupertrendBacktest(
           shares: position.shares as number,
           bars_held: position.bars_held as number,
           r_multiple: rMultiple,
-          exit_reason: "SuperTrend Exit",
+          exit_reason: stReversalExit ? "SuperTrend Exit" : "SuperTrend Stop",
           atr_stop_price: position.original_stop as number,
           trailing_stop: null,
           mae_pct: (position.mae_pct as number) * 100,
@@ -755,14 +735,11 @@ export function runSupertrendBacktest(
     equityDates.push(cur.date);
   }
 
-  // ── Close open position at end (mark-to-market) ─────────────
-  // (leave open positions unclosed — same as score backtest)
-
   if (trades.length === 0) {
     return buildEmptyResults(symbol, bars, config, false, equityCurve, equityDates);
   }
 
-  // ── Metrics — identical equity-curve method as runBacktest() ─
+  // ── Metrics ──────────────────────────────────────────────────
   const winners = trades.filter((t) => t.return > 0);
   const losers = trades.filter((t) => t.return <= 0);
   const winRate = winners.length / trades.length;
@@ -770,9 +747,6 @@ export function runSupertrendBacktest(
   const avgLoss = losers.length > 0 ? mean(losers.map((t) => t.return)) : 0;
   const expectancy = winRate * avgWin + (1 - winRate) * avgLoss;
 
-  // Sharpe: use FULL equity curve daily returns, identical to runBacktest().
-  // Do NOT use in-trade-only returns: with 2 uniformly losing trades the
-  // variance collapses → nonsensical positive Sharpe (e.g. -7.5% return, +1.1 Sharpe).
   const dailyReturns: number[] = [];
   for (let i = 1; i < equityCurve.length; i++) {
     const prev = equityCurve[i - 1];
@@ -804,7 +778,6 @@ export function runSupertrendBacktest(
   const annualizedReturn = totalReturn * (252 / bars.length);
   const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
 
-  // Period returns from equity curve
   const ec = equityCurve;
   const totalReturn250d = ec.length > 250
     ? (ec[ec.length - 1] - ec[ec.length - 251]) / ec[ec.length - 251]
@@ -884,7 +857,7 @@ export function runSupertrendBacktest(
     bb_position: last.bbPosition,
     support_level: calcSupport(bars),
     resistance_level: calcResistance(bars),
-    stop_loss_price: last.supertrend, // ST line IS the stop
+    stop_loss_price: last.supertrend,
     fib_targets: calcFibTargets(bars),
     week_52_high: week52High,
     week_52_low: week52Low,
