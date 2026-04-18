@@ -40,7 +40,9 @@ export const DEFAULT_CONFIG: AppConfig = {
     signalConfirmationBars: 3,
     adxThreshold: 28,
     maxHoldingDays: 8,
-    trendGateEnabled: true,
+    // V14: DISABLED — replaced by Velocity Entry filter (matches Python V14 exactly)
+    // Python config: 'trendGateEnabled': False
+    trendGateEnabled: false,
     earningsBufferDays: 5,
   },
   backtest: {
