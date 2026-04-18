@@ -137,45 +137,28 @@ export function runPipeline(
     ema50: ema50Arr[i] ?? 0,
   }));
 
-// ── SuperTrend entry signal with EMA filter ──────────────────
-// Track pending bullish flips to ensure they're not missed due to EMA filter timing
-let pendingBullishFlip = false;
+  // ── SuperTrend entry signal with EMA filter ──────────────────
+  for (let i = 1; i < bars.length; i++) {
+    const cur = bars[i];
+    const prev = bars[i - 1];
 
-for (let i = 1; i < bars.length; i++) {
-  const cur = bars[i];
-  const prev = bars[i - 1];
+    const isBullishFlip = cur.supertrendDir === 1 && prev.supertrendDir === -1;
+    const isBearishFlip = cur.supertrendDir === -1 && prev.supertrendDir === 1;
 
-  const isBullishFlip = cur.supertrendDir === 1 && prev.supertrendDir === -1;
-  const isBearishFlip = cur.supertrendDir === -1 && prev.supertrendDir === 1;
+    if (i + 1 < bars.length) {
+      if (isBullishFlip) {
+        const emaFilter = stConfig.filter_mode === "ema_only"
+          ? cur.close > cur.ema50
+          : cur.close > cur.ema50 && cur.adx > 20;
 
-  // Mark a pending flip when we detect a bullish reversal
-  if (isBullishFlip) {
-    pendingBullishFlip = true;
-  }
-
-  if (i + 1 < bars.length) {
-    // Check EMA filter on the signal bar (i+1), allowing entry if flip occurred recently
-    if (pendingBullishFlip || isBullishFlip) {
-      const emaFilter = stConfig.filter_mode === "ema_only"
-        ? cur.close > cur.ema50
-        : cur.close > cur.ema50 && cur.adx > 20;
-
-      if (emaFilter) {
-        bars[i + 1].stEntrySignal = "BUY";
-        pendingBullishFlip = false; // Reset after successful signal
+        if (emaFilter) {
+          bars[i + 1].stEntrySignal = "BUY";
+        }
+      } else if (isBearishFlip) {
+        bars[i + 1].stEntrySignal = "SELL";
       }
-      // Keep pending flag if filter failed, try again on next bar
-    } else if (isBearishFlip) {
-      bars[i + 1].stEntrySignal = "SELL";
-      pendingBullishFlip = false; // Cancel any pending bullish flip
     }
   }
-  
-  // Reset pending flip if trend reverses before entry
-  if (isBearishFlip) {
-    pendingBullishFlip = false;
-  }
-}
 
   // ── Generate Signals ─────────────────────────────────────────
   generateSignals(bars, config, stockConfig.exchange);
@@ -215,11 +198,9 @@ for (let i = 1; i < bars.length; i++) {
   const lastBar = bars[bars.length - 1];
   const signal = lastBar.signalConfirmed ?? "HOLD";
 
-  // ── Chart bars — FULL history (up to 500 bars) ───────────────
-  // FIX: was bars.slice(-252) which made 2Y toggle show nothing beyond 1Y.
-  // Now we send all available bars (up to lookbackDays worth).
-  // The ChartTab slices client-side using RANGE_BARS for display.
-  const chartBars: ChartBar[] = bars.map((b) => ({
+  // ── Chart bars — send ALL bars (up to 500d) so the 2Y toggle works ──
+  // FIX: was bars.slice(-252) which broke the 2Y range selector
+  const chartBars: ChartBar[] = bars.slice(-500).map((b) => ({
     date: b.date,
     open: b.open,
     high: b.high,
@@ -269,14 +250,14 @@ for (let i = 1; i < bars.length; i++) {
             ? cur.supertrend : null;
         }
       } else {
-        // Only trail upward when ST is in bullish direction
+        // Only trail upward when in bullish direction (dir===1 means lower band = support)
         if (cur.supertrendDir === 1 && !isNaN(cur.supertrend) &&
             (trailingStop === null || cur.supertrend > trailingStop)) {
           trailingStop = cur.supertrend;
         }
-        const stopHit = trailingStop !== null && cur.low <= trailingStop;
-        const sellSignal = cur.supertrendDir === -1; // direction flip = exit
-        if (stopHit || sellSignal) {
+        // Exit on bearish flip
+        const stReversalExit = cur.supertrendDir === -1;
+        if (stReversalExit) {
           openEntryPrice = null;
           trailingStop = null;
         }
