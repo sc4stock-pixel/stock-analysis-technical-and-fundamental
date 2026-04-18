@@ -138,13 +138,6 @@ export function runPipeline(
   }));
 
   // ── SuperTrend entry signal with EMA filter ──────────────────
-  // Matches Python exactly:
-  //   Signal_Confirmed[i] = 'BUY' when SuperTrend_Signal[i]=='BUY' AND close[i] > EMA_50[i]
-  //   Entry_Signal = Signal_Confirmed.shift(1)
-  //   → stEntrySignal[i+1] = 'BUY' when flip at bar i AND close[i] > ema50[i]
-  //
-  // EMA filter is checked on the FLIP BAR (cur = bar i), not the entry bar.
-  // This matches Python's SuperTrend_Signal_EMA_Only computation.
   for (let i = 1; i < bars.length; i++) {
     const cur = bars[i];
     const prev = bars[i - 1];
@@ -154,7 +147,6 @@ export function runPipeline(
 
     if (i + 1 < bars.length) {
       if (isBullishFlip) {
-        // EMA filter on the FLIP BAR (cur), matching Python's column-wise filter
         const emaFilter = stConfig.filter_mode === "ema_only"
           ? cur.close > cur.ema50
           : cur.close > cur.ema50 && cur.adx > 20;
@@ -206,8 +198,11 @@ export function runPipeline(
   const lastBar = bars[bars.length - 1];
   const signal = lastBar.signalConfirmed ?? "HOLD";
 
-  // ── Chart bars (last 252) ─────────────────────────────────────
-  const chartBars: ChartBar[] = bars.slice(-252).map((b) => ({
+  // ── Chart bars — FULL history (up to 500 bars) ───────────────
+  // FIX: was bars.slice(-252) which made 2Y toggle show nothing beyond 1Y.
+  // Now we send all available bars (up to lookbackDays worth).
+  // The ChartTab slices client-side using RANGE_BARS for display.
+  const chartBars: ChartBar[] = bars.map((b) => ({
     date: b.date,
     open: b.open,
     high: b.high,
@@ -241,10 +236,6 @@ export function runPipeline(
     : 0;
 
   // ── SuperTrend open position detection ────────────────────────
-  // Mirrors runSupertrendBacktest exactly (and Python):
-  // Entry: stEntrySignal === 'BUY' → enter at bar.open
-  // Trail: NO direction guard — matches Python which trails any ST value > current stop
-  // Exit: low <= trailingStop OR prev.supertrendSignal === 'SELL'
   let stOpenReturnPct: number | null = null;
   if (stDirection === 1) {
     let openEntryPrice: number | null = null;
@@ -261,13 +252,13 @@ export function runPipeline(
             ? cur.supertrend : null;
         }
       } else {
-        // Trail to any higher ST value — no direction check (matches Python exactly)
-        if (!isNaN(cur.supertrend) &&
+        // Only trail upward when ST is in bullish direction
+        if (cur.supertrendDir === 1 && !isNaN(cur.supertrend) &&
             (trailingStop === null || cur.supertrend > trailingStop)) {
           trailingStop = cur.supertrend;
         }
         const stopHit = trailingStop !== null && cur.low <= trailingStop;
-        const sellSignal = prev.supertrendSignal === "SELL";
+        const sellSignal = cur.supertrendDir === -1; // direction flip = exit
         if (stopHit || sellSignal) {
           openEntryPrice = null;
           trailingStop = null;
