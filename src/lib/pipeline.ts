@@ -137,7 +137,7 @@ export function runPipeline(
     ema50: ema50Arr[i] ?? 0,
   }));
 
-  // ── SuperTrend entry signal with EMA filter ──────────────────
+// ── SuperTrend entry signal with EMA filter ──────────────────
 // Track pending bullish flips to ensure they're not missed due to EMA filter timing
 let pendingBullishFlip = false;
 
