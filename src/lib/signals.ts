@@ -1,8 +1,18 @@
 // ============================================================
-// SIGNAL GENERATOR — exact port of Python V12.5.5 "Aggressive Entry"
-// Fixes applied:
-//   - Force_Entry computed AFTER trend gate (matches Python ordering exactly)
-//   - forceEntry = volumeSurge & (rawSignal === 'BUY') post-gate
+// SIGNAL GENERATOR — exact port of Python V14 generate_signals()
+//
+// V14 FIX: Velocity Entry filter applied to Raw_Signal BEFORE
+// confirm bars loop — matches Python's exact order:
+//   1. Score → Raw_Signal (BUY/SELL/HOLD)
+//   2. RSI divergence blocks BUY
+//   3. Velocity Entry blocks BUY in Raw_Signal  ← BEFORE confirm bars
+//   4. Volume surge = Force Entry
+//   5. Confirm bars applied to (velocity-filtered) Raw_Signal
+//   6. Entry_Signal = Signal_Confirmed.shift(1)
+//
+// Previously Step 3 was applied AFTER confirm bars (to Signal_Confirmed),
+// which caused the confirm window to check unfiltered Raw_Signal,
+// allowing entries that Python would have blocked.
 // ============================================================
 import { AppConfig, OHLCVBar } from "@/types";
 import { EXCHANGE_CONFIRM_BARS } from "./regime";
@@ -12,28 +22,27 @@ export function generateSignals(
   config: AppConfig,
   exchange = "DEFAULT"
 ): void {
-  const entryThreshold = config.signal.entryThreshold;
-  const exitThreshold = config.signal.exitThreshold;
-  const trendGateEnabled = config.signal.trendGateEnabled;
+  const entryThreshold    = config.signal.entryThreshold;
+  const exitThreshold     = config.signal.exitThreshold;
+  const trendGateEnabled  = config.signal.trendGateEnabled;
   const defaultConfirmBars = config.signal.signalConfirmationBars;
+  const VELOCITY_SLOPE_BARS = 3;
 
-  // ── Step 1: Volume Surge detection + Score adjustment ──────────────────
-  // Volume Surge = vol > 2x avg + green candle + bullish regime
+  // ── Step 1: Volume Surge + Score adjustment ───────────────────
   for (let i = 0; i < bars.length; i++) {
     const bar = bars[i];
-    const isBullishCandle = bar.close > bar.open;
-    const isUptrendRegime = /UPTREND|STRENGTHENING|STRONG/i.test(bar.regime ?? "");
-    bar.volumeSurge = bar.volRatio > 2.0 && isBullishCandle && isUptrendRegime ? 1 : 0;
-    // BUG FIX E: store original score, adjust separately
-    bar.scoreAdjusted = bar.volumeSurge ? bar.score + 2.0 : bar.score;
+    const isBullishCandle   = bar.close > bar.open;
+    const isUptrendRegime   = /UPTREND|STRENGTHENING|STRONG/i.test(bar.regime ?? "");
+    bar.volumeSurge         = bar.volRatio > 2.0 && isBullishCandle && isUptrendRegime ? 1 : 0;
+    bar.scoreAdjusted       = bar.volumeSurge ? bar.score + 2.0 : bar.score;
   }
 
-  // ── Step 2: Raw signal from adjusted score ─────────────────────────────
+  // ── Step 2: Raw signal from adjusted score ────────────────────
   for (let i = 0; i < bars.length; i++) {
     const bar = bars[i];
-    if (bar.scoreAdjusted >= entryThreshold) bar.rawSignal = "BUY";
-    else if (bar.scoreAdjusted <= exitThreshold) bar.rawSignal = "SELL";
-    else bar.rawSignal = "HOLD";
+    if      (bar.scoreAdjusted >= entryThreshold) bar.rawSignal = "BUY";
+    else if (bar.scoreAdjusted <= exitThreshold)  bar.rawSignal = "SELL";
+    else                                           bar.rawSignal = "HOLD";
 
     // Block BUY on bearish RSI divergence
     if (bar.rawSignal === "BUY" && bar.rsiDivergence === -1) {
@@ -41,79 +50,76 @@ export function generateSignals(
     }
   }
 
-  // ── Step 3: Relaxed Trend Gate (V12.5.5) ──────────────────────────────
-  // STRONG_UPTREND / STRENGTHENING_UPTREND: price > SMA20 only
-  // All other regimes: full golden cross (trendGate === 1)
+  // ── Step 3: Trend Gate (if enabled) ──────────────────────────
+  // Python V14 has this disabled (trendGateEnabled=false) but keeping
+  // the logic intact for configurability.
   if (trendGateEnabled) {
     for (let i = 0; i < bars.length; i++) {
       const bar = bars[i];
       if (bar.rawSignal !== "BUY") continue;
-
       const isStrongTrend = /STRONG_UPTREND|STRENGTHENING_UPTREND/i.test(bar.regime ?? "");
-      const simpleGate = bar.close > bar.sma20;   // Relaxed gate
-      const fullGate = bar.trendGate === 1;         // Full golden cross
-
-      const allowBuy = isStrongTrend ? simpleGate : fullGate;
+      const allowBuy = isStrongTrend ? bar.close > bar.sma20 : bar.trendGate === 1;
       if (!allowBuy) bar.rawSignal = "HOLD";
     }
   }
 
-  // ── Step 4: Force Entry (AFTER trend gate — matches Python ordering) ───
-  // Force_Entry = volume_surge & (Raw_Signal == 'BUY')  ← post-gate Raw_Signal
+  // ── Step 4: VELOCITY ENTRY FILTER — applied to Raw_Signal ─────
+  // Python: df['Raw_Signal'] = np.where(
+  //   (df['Raw_Signal'] == 'BUY') & ~velocity_entry_pass, 'HOLD', df['Raw_Signal'])
+  // This runs BEFORE the confirm bars loop so the confirm window
+  // only ever sees velocity-validated BUY signals.
+  // Requirements:
+  //   1. Price > EMA20 (trend confirmed)
+  //   2. EMA20 slope > 0 over last 3 bars (EMA rising = acceleration)
+  for (let i = 0; i < bars.length; i++) {
+    const bar = bars[i];
+    if (bar.rawSignal !== "BUY") continue;
+    if (bar.volumeSurge === 1) continue; // force entry bypasses velocity
+
+    const ema20      = bar.ema20 ?? 0;
+    const ema20Prev  = i >= VELOCITY_SLOPE_BARS ? (bars[i - VELOCITY_SLOPE_BARS].ema20 ?? 0) : 0;
+    // Python uses relative slope: (ema_current - ema_prev) / ema_prev
+    const emaSlope   = ema20Prev > 0 ? (ema20 - ema20Prev) / ema20Prev : 0;
+    const velocityPass = bar.close > ema20 && emaSlope > 0;
+
+    if (!velocityPass) bar.rawSignal = "HOLD";
+  }
+
+  // ── Step 5: Force Entry (volume surge overrides everything) ───
   for (let i = 0; i < bars.length; i++) {
     bars[i].forceEntry = bars[i].volumeSurge === 1 && bars[i].rawSignal === "BUY" ? 1 : 0;
   }
 
-  // ── Step 5: Regime-adaptive confirmation + Signal_Confirmed ───────────
-  // BUG FIX D: start from i=0, guard against underflow with actualConfirmBars
+  // ── Step 6: Regime-adaptive confirm bars → Signal_Confirmed ───
+  // Confirm bars window is now checked against velocity-filtered Raw_Signal.
+  // This matches Python exactly.
   for (let i = 0; i < bars.length; i++) {
-    const bar = bars[i];
+    const bar          = bars[i];
     const currentRegime = bar.regime ?? "NEUTRAL";
     const exchangeTable = EXCHANGE_CONFIRM_BARS[exchange] ?? EXCHANGE_CONFIRM_BARS.DEFAULT;
-    const confirmBars = exchangeTable[currentRegime] ?? defaultConfirmBars;
+    const confirmBars   = exchangeTable[currentRegime] ?? defaultConfirmBars;
 
-    // FORCE ENTRY overrides confirmation bars entirely
+    // Force Entry overrides all confirmation
     if (bar.forceEntry === 1) {
       bar.signalConfirmed = "BUY";
       continue;
     }
 
-    // Guard against index underflow (BUG FIX D)
     const actualConfirmBars = Math.min(confirmBars, i);
 
     if (actualConfirmBars === 0) {
-      // 0 confirm bars = instant entry (STRONG_UPTREND, STRENGTHENING_UPTREND on US)
       bar.signalConfirmed = bar.rawSignal;
     } else {
-      // All bars in window must agree
-      const window = bars.slice(i - actualConfirmBars, i + 1).map((b) => b.rawSignal);
-      if (window.every((s) => s === "BUY")) bar.signalConfirmed = "BUY";
-      else if (window.every((s) => s === "SELL")) bar.signalConfirmed = "SELL";
+      const window = bars.slice(i - actualConfirmBars, i + 1).map(b => b.rawSignal);
+      if (window.every(s => s === "BUY"))  bar.signalConfirmed = "BUY";
+      else if (window.every(s => s === "SELL")) bar.signalConfirmed = "SELL";
       else bar.signalConfirmed = "HOLD";
     }
   }
 
-  // ── Step 6: Velocity Entry Filter (Score Alpha) ────────────────────────
-  // Only allow BUY confirmation through if BOTH velocity conditions pass:
-  //   1. Price closes above EMA20 (trend confirmed)
-  //   2. EMA20 slope > 0 over last 3 bars (trend accelerating, not flat/falling)
-  // This ensures we capture momentum runs, not exhausted or flat moves.
-  // SELL signals and HOLD pass through unchanged.
-  // Force entries (volume surge) bypass this filter.
-  for (let i = 0; i < bars.length; i++) {
-    const bar = bars[i];
-    if (bar.signalConfirmed !== "BUY") continue;
-    if (bar.forceEntry === 1) continue; // volume surge bypasses velocity filter
-
-    const velocityPass = bar.close > bar.ema20 && bar.ema20Slope > 0;
-    if (!velocityPass) {
-      bar.signalConfirmed = "HOLD";
-    }
-  }
-
-  // ── Step 7: Entry_Signal = Signal_Confirmed shifted by 1 bar ──────────
+  // ── Step 7: Entry_Signal = Signal_Confirmed.shift(1) ─────────
   // Python: df['Entry_Signal'] = df['Signal_Confirmed'].shift(1)
-  // shift(1) → row 0 gets NaN → we use "HOLD"
+  // Bar 0 gets 'HOLD' (shift fills with NaN → HOLD)
   for (let i = 0; i < bars.length; i++) {
     bars[i].entrySignal = i === 0 ? "HOLD" : bars[i - 1].signalConfirmed;
   }
