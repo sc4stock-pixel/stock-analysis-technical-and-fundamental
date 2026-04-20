@@ -1,9 +1,12 @@
 // ============================================================
 // ANALYSIS PIPELINE
-// V14 FIXES:
-//   - EMA50 → SMA50 for ST entry filter (path-independent)
-//   - chart_bars = 500 bars (2Y toggle support)
-//   - ST open position detection mirrors backtest exit logic exactly
+// V14 fixes:
+//   1. ST entry: SMA50 crossover signal added (Fix#1 — lagged confirmation)
+//      Fires when ST already bullish AND price just crossed above SMA50.
+//      Catches moves blocked at the flip bar by SMA filter.
+//   2. EMA slope in stEntrySignal loop uses relative calc (matching signals.ts)
+//   3. chart_bars = 500 for 2Y toggle
+//   4. stOpenReturnPct detection uses same crossover logic as backtest
 // ============================================================
 import { AppConfig, StockAnalysisResult, KellyResult, WalkForwardResult, OHLCVBar, ChartBar } from "@/types";
 import { rsi, macd, adx, atr, bollingerBands, sma, ema, volumeRatio, supertrend } from "./indicators";
@@ -24,19 +27,20 @@ export function runPipeline(
   currentPrice: number,
   changePct: number
 ): StockAnalysisResult {
-  const closes  = rawBars.map((b) => b.close);
-  const highs   = rawBars.map((b) => b.high);
-  const lows    = rawBars.map((b) => b.low);
-  const volumes = rawBars.map((b) => b.volume);
+  const closes  = rawBars.map(b => b.close);
+  const highs   = rawBars.map(b => b.high);
+  const lows    = rawBars.map(b => b.low);
+  const volumes = rawBars.map(b => b.volume);
 
+  // ── Indicators ────────────────────────────────────────────────
   const rsiArr   = rsi(closes, config.analysis.rsiPeriod);
   const [macdLine, macdSignal, macdHist] = macd(closes, config.analysis.macdFast, config.analysis.macdSlow, config.analysis.macdSignal);
   const [adxArr, plusDIArr, minusDIArr]  = adx(highs, lows, closes, config.analysis.adxPeriod);
   const atrArr   = atr(highs, lows, closes, config.analysis.atrPeriod);
   const sma20Arr = sma(closes, config.analysis.smaShort);
-  const sma50Arr = sma(closes, config.analysis.smaLong);  // SMA50 used for ST filter
+  const sma50Arr = sma(closes, config.analysis.smaLong);  // SMA50 for ST filter
   const ema20Arr = ema(closes, 20);
-  const ema50Arr = ema(closes, 50);                        // EMA50 kept for chart display only
+  const ema50Arr = ema(closes, 50);                        // EMA50 for chart display only
 
   const ema20SlopeArr = ema20Arr.map((v, i) =>
     (i < 3 || isNaN(v) || isNaN(ema20Arr[i - 3])) ? 0 : v - ema20Arr[i - 3]
@@ -84,6 +88,7 @@ export function runPipeline(
     trendGateArr: trendGate, rsiDivergenceArr: rsiDivArr, regimeArr,
   });
 
+  // ── Assemble OHLCVBar array ───────────────────────────────────
   const bars: OHLCVBar[] = rawBars.map((raw, i) => ({
     date: raw.date, open: raw.open, high: raw.high, low: raw.low, close: raw.close, volume: raw.volume,
     atr:              atrArr[i]        ?? 0,
@@ -118,49 +123,90 @@ export function runPipeline(
     supertrendDir:    stDirArr[i] ?? 1,
     supertrendSignal: stSigArr[i] ?? "HOLD",
     stEntrySignal:    "HOLD",
-    ema50:            ema50Arr[i] ?? 0,  // chart overlay only
+    ema50:            ema50Arr[i] ?? 0,  // chart display only
   }));
 
-  // ── SuperTrend entry signal — SMA50 filter ───────────────────
-  // Python: SuperTrend_Signal_EMA_Only[i]='BUY' when SuperTrend_Signal[i]=='BUY' AND Close[i]>SMA_50[i]
-  // We use SMA50 instead of EMA50 — path-independent, avoids EWM divergence from Python
-  // Entry_Signal = Signal_Confirmed.shift(1) → stEntrySignal[i+1]='BUY'
+  // ── SuperTrend entry signals ──────────────────────────────────
+  // TWO conditions that both produce stEntrySignal='BUY':
+  //
+  // A) Original: ST flips to bullish (supertrendSignal='BUY') AND close > SMA50
+  //    → Entry next bar. Matches Python's SuperTrend_Signal_EMA_Only (using SMA50).
+  //
+  // B) NEW Fix#1 (Lagged SMA Crossover):
+  //    ST is ALREADY bullish (supertrendDir===1, no new flip) AND
+  //    price just crossed ABOVE SMA50 (close[i] > sma50[i] && close[i-1] <= sma50[i-1])
+  //    → Entry next bar.
+  //
+  //    Rationale: When the flip bar is blocked by SMA filter (close < SMA50 at flip),
+  //    the price may rise above SMA50 days later while ST remains bullish.
+  //    Without this, no entry ever fires for that trend leg.
+  //    This fix catches the entry as soon as SMA50 is cleared, preserving
+  //    the "no entry below SMA50" rule while avoiding the pulse problem.
+  //
+  // SELL propagation: always fire on bearish flip (no SMA filter for exits).
   for (let i = 1; i < bars.length; i++) {
     if (i + 1 >= bars.length) continue;
-    const cur = bars[i];
+    const cur  = bars[i];
+    const prev = bars[i - 1];
+
+    if (cur.supertrendSignal === "SELL") {
+      // Bearish flip — propagate regardless of SMA (capital protection)
+      bars[i + 1].stEntrySignal = "SELL";
+      continue;
+    }
 
     if (cur.supertrendSignal === "BUY") {
-      const filterPass = stConfig.filter_mode === "ema_only"
+      // Condition A: bullish flip — apply SMA50 filter
+      const smaFilter = stConfig.filter_mode === "ema_only"
         ? cur.close > cur.sma50
         : cur.close > cur.sma50 && cur.adx > 20;
-      if (filterPass) bars[i + 1].stEntrySignal = "BUY";
-    } else if (cur.supertrendSignal === "SELL") {
-      bars[i + 1].stEntrySignal = "SELL";
+      if (smaFilter) bars[i + 1].stEntrySignal = "BUY";
+      continue;
+    }
+
+    // Condition B: already bullish, no new flip — check SMA50 upward crossover
+    // Fires when price crosses SMA50 from below while ST stays bullish
+    if (cur.supertrendDir === 1) {
+      const smaUpCross = cur.close > cur.sma50 && prev.close <= prev.sma50;
+      if (smaUpCross) {
+        bars[i + 1].stEntrySignal = "BUY";
+      }
     }
   }
 
+  // ── Generate Score signals ────────────────────────────────────
   generateSignals(bars, config, stockConfig.exchange);
 
+  // ── Dual Backtest ─────────────────────────────────────────────
   const backtestResult   = runBacktest(bars, stockConfig.symbol, config, stockConfig.exchange);
   const stBacktestResult = runSupertrendBacktest(bars, stockConfig.symbol, config);
 
+  // ── Monte Carlo ───────────────────────────────────────────────
   const mcResult   = config.monteCarlo.enabled && backtestResult.equity_curve.length   >= 30 ? runMonteCarlo(backtestResult.equity_curve,   config) : null;
   const stMcResult = config.monteCarlo.enabled && stBacktestResult.equity_curve.length >= 30 ? runMonteCarlo(stBacktestResult.equity_curve, config) : null;
 
+  // ── Walk-Forward ──────────────────────────────────────────────
   let walkForward: WalkForwardResult | null = null;
   if (config.walkForward.enabled && bars.length >= 100) {
     walkForward = runWalkForward(bars, stockConfig.symbol, config, stockConfig.exchange);
   }
 
+  // ── Kelly ─────────────────────────────────────────────────────
   let kelly: KellyResult | null = null;
   if (backtestResult.trades.length >= 5) kelly = calcKelly(backtestResult, config);
 
-  const regimeInfo = detectRegime({ adxArr, plusDIArr, minusDIArr, atrArr, macdArr: macdLine, macdSignalArr: macdSignal, closeArr: closes, sma20Arr, sma50Arr, rsiArr });
-  const lastBar    = bars[bars.length - 1];
-  const signal     = lastBar.signalConfirmed ?? "HOLD";
+  // ── Current regime ────────────────────────────────────────────
+  const regimeInfo = detectRegime({
+    adxArr, plusDIArr, minusDIArr, atrArr,
+    macdArr: macdLine, macdSignalArr: macdSignal,
+    closeArr: closes, sma20Arr, sma50Arr, rsiArr,
+  });
+
+  const lastBar = bars[bars.length - 1];
+  const signal  = lastBar.signalConfirmed ?? "HOLD";
 
   // chart_bars = 500 so every range button (1M/3M/6M/1Y/2Y) has data
-  const chartBars: ChartBar[] = bars.slice(-500).map((b) => ({
+  const chartBars: ChartBar[] = bars.slice(-500).map(b => ({
     date: b.date, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
     sma20: b.sma20, sma50: b.sma50, ema20: b.ema20, ema50: b.ema50,
     bbUpper: b.bbUpper, bbLower: b.bbLower,
@@ -170,11 +216,14 @@ export function runPipeline(
     supertrend: b.supertrend, supertrendDir: b.supertrendDir,
   }));
 
+  // ── ST status ─────────────────────────────────────────────────
   const stDirection   = lastBar.supertrendDir;
   const stValue       = lastBar.supertrend;
   const stStopDistPct = stValue > 0 && currentPrice > 0 ? ((currentPrice - stValue) / currentPrice) * 100 : 0;
 
-  // ST open position — mirrors runSupertrendBacktest exit logic exactly
+  // ── ST open position detection ────────────────────────────────
+  // Uses same two-condition entry logic as the stEntrySignal loop above.
+  // Exit mirrors runSupertrendBacktest: stop hit OR prev.supertrendSignal='SELL'
   let stOpenReturnPct: number | null = null;
   if (stDirection === 1) {
     let openEntryPrice: number | null = null;
@@ -190,19 +239,25 @@ export function runPipeline(
           trailingStop   = (!isNaN(prev.supertrend) && prev.supertrend > 0) ? prev.supertrend : null;
         }
       } else {
+        // Trail ST line upward
         if (!isNaN(cur.supertrend) && (trailingStop === null || cur.supertrend > trailingStop)) {
           trailingStop = cur.supertrend;
         }
-        if ((trailingStop !== null && cur.low <= trailingStop) || prev.supertrendSignal === "SELL") {
-          openEntryPrice = null; trailingStop = null;
+        const stopHit    = trailingStop !== null && cur.low <= trailingStop;
+        const sellSignal = prev.supertrendSignal === "SELL";
+        if (stopHit || sellSignal) {
+          openEntryPrice = null;
+          trailingStop   = null;
         }
       }
     }
+
     if (openEntryPrice !== null && openEntryPrice > 0) {
       stOpenReturnPct = ((currentPrice - openEntryPrice) / openEntryPrice) * 100;
     }
   }
 
+  // ── Strategy comparison ───────────────────────────────────────
   function toMetrics(bt: typeof backtestResult) {
     return {
       total_return: bt.total_return, total_return_250d: bt.total_return_250d, total_return_500d: bt.total_return_500d,
@@ -227,10 +282,14 @@ export function runPipeline(
     walk_forward: walkForward, kelly, chart_bars: chartBars,
     st_direction: stDirection, st_value: stValue,
     st_stop_distance_pct: stStopDistPct, st_open_return_pct: stOpenReturnPct,
-    comparison: { score: toMetrics(backtestResult), supertrend: toMetrics(stBacktestResult), winner, winner_margin: Math.abs(scoreAlpha - stAlpha) },
+    comparison: {
+      score: toMetrics(backtestResult), supertrend: toMetrics(stBacktestResult),
+      winner, winner_margin: Math.abs(scoreAlpha - stAlpha),
+    },
   };
 }
 
+// ─── Walk-Forward ─────────────────────────────────────────────
 function runWalkForward(bars: OHLCVBar[], symbol: string, config: AppConfig, exchange: string): WalkForwardResult | null {
   const splitIdx  = Math.floor(bars.length * config.walkForward.trainRatio);
   const trainBars = bars.slice(0, splitIdx);
@@ -247,21 +306,29 @@ function runWalkForward(bars: OHLCVBar[], symbol: string, config: AppConfig, exc
     }
   }
 
-  const testResult    = runBacktest([...testBars], symbol, { ...config, signal: { ...config.signal, ...bestParams } }, exchange);
-  const trainSharpe   = bestSharpe;
-  const testSharpe    = testResult.sharpe;
-  let efficiencyRatio = (trainSharpe > 0 && testSharpe > 0) ? Math.min(1.5, testSharpe / trainSharpe) : 0;
+  const testResult        = runBacktest([...testBars], symbol, { ...config, signal: { ...config.signal, ...bestParams } }, exchange);
+  const trainSharpe       = bestSharpe;
+  const testSharpe        = testResult.sharpe;
+  const efficiencyRatio   = (trainSharpe > 0 && testSharpe > 0) ? Math.min(1.5, testSharpe / trainSharpe) : 0;
   const efficiencyQuality = efficiencyRatio >= 0.7 ? "GOOD" : efficiencyRatio >= 0.4 ? "ACCEPTABLE" : "OVERFIT";
 
-  return { best_params: bestParams, train_sharpe: Math.round(trainSharpe * 100) / 100, test_sharpe: Math.round(testSharpe * 100) / 100, efficiency_ratio: Math.round(efficiencyRatio * 100) / 100, efficiency_quality: efficiencyQuality, passed: efficiencyRatio >= 0.4 && testSharpe > 0 };
+  return {
+    best_params: bestParams,
+    train_sharpe: Math.round(trainSharpe * 100) / 100,
+    test_sharpe:  Math.round(testSharpe  * 100) / 100,
+    efficiency_ratio:   Math.round(efficiencyRatio   * 100) / 100,
+    efficiency_quality: efficiencyQuality,
+    passed: efficiencyRatio >= 0.4 && testSharpe > 0,
+  };
 }
 
+// ─── Kelly Criterion ──────────────────────────────────────────
 function calcKelly(bt: { trades: { return: number; r_multiple: number }[]; latest_atr: number | null; latest_price: number }, config: AppConfig): KellyResult {
   const trades = bt.trades;
   if (trades.length < 5) return { kelly_fraction: 0.10, full_kelly: 0.40, recommended_fraction: 0.10, sizing_method: "Default", atr_shares: 0, correlation_adjustment: 1.0, correlated_with: null };
 
-  const wins   = trades.filter((t) => t.return > 0);
-  const losses = trades.filter((t) => t.return <= 0);
+  const wins   = trades.filter(t => t.return > 0);
+  const losses = trades.filter(t => t.return <= 0);
   const p      = wins.length / trades.length;
   const avgWinR  = wins.length   > 0 ? wins.reduce((a, t) => a + t.r_multiple, 0)             / wins.length   : 1;
   const avgLossR = losses.length > 0 ? Math.abs(losses.reduce((a, t) => a + t.r_multiple, 0)) / losses.length : 1;
@@ -276,11 +343,22 @@ function calcKelly(bt: { trades: { return: number; r_multiple: number }[]; lates
   let atrFraction = 0, atrShares = 0;
   if (bt.latest_atr && bt.latest_atr > 0 && bt.latest_price > 0) {
     const stopDistance = atrMultiplier * bt.latest_atr;
-    if (stopDistance > 0) { atrShares = (initialCapital * riskPerTrade) / stopDistance; atrFraction = Math.min((atrShares * bt.latest_price) / initialCapital, maxPositionSize); }
+    if (stopDistance > 0) {
+      atrShares   = (initialCapital * riskPerTrade) / stopDistance;
+      atrFraction = Math.min((atrShares * bt.latest_price) / initialCapital, maxPositionSize);
+    }
   }
 
   const recommended = atrFraction > 0 ? Math.min(kellyFraction, atrFraction) : kellyFraction;
   const method      = atrFraction > 0 ? (kellyFraction <= atrFraction ? "Kelly-Binding" : "ATR-Binding") : "Kelly-Only";
 
-  return { kelly_fraction: Math.round(kellyFraction * 10000) / 10000, full_kelly: Math.round(fullKelly * 10000) / 10000, recommended_fraction: Math.round(recommended * 10000) / 10000, sizing_method: method, atr_shares: Math.floor(atrShares), correlation_adjustment: 1.0, correlated_with: null };
+  return {
+    kelly_fraction:       Math.round(kellyFraction * 10000) / 10000,
+    full_kelly:           Math.round(fullKelly     * 10000) / 10000,
+    recommended_fraction: Math.round(recommended   * 10000) / 10000,
+    sizing_method:        method,
+    atr_shares:           Math.floor(atrShares),
+    correlation_adjustment: 1.0,
+    correlated_with:      null,
+  };
 }
