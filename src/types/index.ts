@@ -273,6 +273,12 @@ export interface StockAnalysisResult {
   st_value: number;             // current SuperTrend line value
   st_stop_distance_pct: number; // distance from price to ST line (%)
   st_open_return_pct: number | null; // open position return (%) or null
+  st_opt_params?: {
+    atrPeriod:  number;
+    multiplier: number;
+    sharpe:     number;
+    numTrades:  number;
+  };
   comparison: StrategyComparison | null;
 }
 
