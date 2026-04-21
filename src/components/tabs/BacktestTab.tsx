@@ -92,6 +92,25 @@ export default function BacktestTab({ result }: Props) {
           <MetricCol label="Avg Win %"   score={cmp.score.avg_win}       st={cmp.supertrend.avg_win} />
           <MetricCol label="Avg Loss %"  score={cmp.score.avg_loss}      st={cmp.supertrend.avg_loss} higherIsBetter={false} />
           <MetricCol label="Max DD %"    score={cmp.score.max_drawdown}  st={cmp.supertrend.max_drawdown} higherIsBetter={false} />
+          {/* ST optimized params */}
+          {result.st_opt_params && (
+            <div className="mt-2 pt-2 border-t border-[#1e2d4a]/40">
+              <div className="flex justify-between text-xs py-1">
+                <span className="text-[#4a6080] w-28">ST Params</span>
+                <span className="text-[#c8d8f0] font-mono w-16 text-right">—</span>
+                <span className="text-[#ffa502] font-mono w-16 text-right text-[0.65rem]">
+                  ATR{result.st_opt_params.atrPeriod}×{result.st_opt_params.multiplier}
+                </span>
+              </div>
+              <div className="flex justify-between text-xs py-1">
+                <span className="text-[#4a6080] w-28">ST Opt Sharpe</span>
+                <span className="text-[#c8d8f0] font-mono w-16 text-right">—</span>
+                <span className={`font-mono w-16 text-right ${result.st_opt_params.sharpe >= 0.5 ? "text-[#00ff88]" : result.st_opt_params.sharpe >= 0 ? "text-[#ffa502]" : "text-[#ff4757]"}`}>
+                  {result.st_opt_params.sharpe.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          )}
           <div className="flex justify-between py-1 border-b border-[#1e2d4a]/30 text-xs">
             <span className="text-[#4a6080] w-28">Trades</span>
             <span className="text-[#c8d8f0] font-mono w-16 text-right">{cmp.score.num_trades}</span>
