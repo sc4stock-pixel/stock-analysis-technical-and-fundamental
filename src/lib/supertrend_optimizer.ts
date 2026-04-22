@@ -24,7 +24,7 @@ export interface STOptResult {
   numTrades:  number;
 }
 
-const ATR_PERIODS  = [10, 11, 12, 13, 14];
+const ATR_PERIODS  = [10, 12, 14];
 const MULTIPLIERS  = [2.5, 2.75, 3.0, 3.25, 3.5];
 const MIN_TRADES   = 2;
 
