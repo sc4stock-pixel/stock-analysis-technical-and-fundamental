@@ -1,284 +1,315 @@
 "use client";
-import { useState, useCallback } from "react";
-import { MacroData, MacroFactor, mbsLabel } from "@/lib/macro";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { AppConfig, StockAnalysisResult } from "@/types";
+import { MacroData, mbsScoreAdjustment } from "@/lib/macro-types";
+import { DEFAULT_CONFIG } from "@/lib/config";
+import ConfigPanel from "@/components/ConfigPanel";
+import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
+import StockCard from "@/components/StockCard";
+import MacroPanel from "@/components/MacroPanel";
 
-interface Props {
-  data: MacroData | null;
-  loading: boolean;
-  onRefresh: () => void;
+// ── helpers ──────────────────────────────────────────────────
+function applyMacroAdjustment(
+  results: StockAnalysisResult[],
+  mbs: number,
+  applyToScore: boolean,
+): StockAnalysisResult[] {
+  if (!applyToScore) return results.map(r => ({ ...r, macro_adjustment: 0 }));
+  const adj = mbsScoreAdjustment(mbs);
+  return results.map(r => ({
+    ...r,
+    score: Math.max(0, Math.min(10, r.score + adj)),
+    macro_adjustment: adj,
+  }));
 }
 
-function signalColor(s: MacroFactor["signal"]): string {
-  if (s === "bullish") return "text-[#00ff88]";
-  if (s === "bearish") return "text-[#ff4757]";
-  return "text-[#ffa502]";
-}
+export default function Dashboard() {
+  const [config, setConfig]           = useState<AppConfig>(DEFAULT_CONFIG);
+  const [results, setResults]         = useState<StockAnalysisResult[]>([]);
+  const [loading, setLoading]         = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [progress, setProgress]       = useState(0);
+  const [progressSymbol, setProgressSymbol] = useState("");
+  const [showConfig, setShowConfig]   = useState(false);
+  const [highlightedSymbol, setHighlightedSymbol] = useState<string | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [macroData, setMacroData]     = useState<MacroData | null>(null);
+  const [macroLoading, setMacroLoading] = useState(false);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-function signalIcon(s: MacroFactor["signal"]): string {
-  if (s === "bullish") return "🟢";
-  if (s === "bearish") return "🔴";
-  return "🟡";
-}
+  // ── Scroll-to-top ─────────────────────────────────────────
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
-function mbsColor(mbs: number): string {
-  if (mbs >= 7.0) return "text-[#00ff88]";
-  if (mbs >= 5.5) return "text-[#ffa502]";
-  if (mbs >= 4.0) return "text-[#ffa502]";
-  return "text-[#ff4757]";
-}
+  const scrollToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
 
-function mbsBorderColor(mbs: number): string {
-  if (mbs >= 7.0) return "border-[#00ff88]/40";
-  if (mbs >= 5.5) return "border-[#ffa502]/40";
-  if (mbs >= 4.0) return "border-[#ffa502]/30";
-  return "border-[#ff4757]/40";
-}
+  // ── Macro fetch ──────────────────────────────────────────
+  const fetchMacro = useCallback(async (): Promise<MacroData | null> => {
+    if (!config.macro?.enabled) return null;
+    setMacroLoading(true);
+    try {
+      const res = await fetch("/api/macro");
+      if (!res.ok) throw new Error(`Macro API ${res.status}`);
+      const data: MacroData = await res.json();
+      setMacroData(data);
+      return data;
+    } catch (e) {
+      console.warn("Macro fetch failed:", e);
+      return null;
+    } finally {
+      setMacroLoading(false);
+    }
+  }, [config.macro?.enabled]);
 
-function mbsBg(mbs: number): string {
-  if (mbs >= 7.0) return "bg-[#00ff88]/5";
-  if (mbs >= 5.5) return "bg-[#ffa502]/5";
-  if (mbs >= 4.0) return "bg-[#ffa502]/5";
-  return "bg-[#ff4757]/5";
-}
+  // ── Macro refresh (standalone) ───────────────────────────
+  const refreshMacro = useCallback(async () => {
+    const macroResult = await fetchMacro();
+    if (macroResult && results.length > 0 && config.macro?.enabled) {
+      setResults(prev =>
+        applyMacroAdjustment(prev, macroResult.mbs, config.macro?.applyToScore ?? false)
+      );
+    }
+  }, [fetchMacro, results.length, config.macro]);
 
-function mbsWarningLabel(label: string): string {
-  if (label === "BULLISH")  return "✅ BULLISH";
-  if (label === "NEUTRAL")  return "— NEUTRAL";
-  if (label === "CAUTION")  return "⚠️ CAUTION";
-  if (label === "RISK-OFF") return "🚨 RISK-OFF";
-  return "🛑 AVOID";
-}
+  // ── Main analysis run ────────────────────────────────────
+  const runAnalysis = useCallback(async () => {
+    setLoading(true);
+    setProgress(0);
+    setProgressSymbol("");
+    setResults([]);
+    setHighlightedSymbol(null);
 
-// SVG Radar Chart for 6 macro factors
-function RadarChart({ factors }: { factors: MacroData["factors"] }) {
-  const vals = [
-    factors.fearGreed.score,
-    factors.vixStructure.score,
-    factors.indexTrends.score,
-    factors.adRatio.score,
-    factors.newsSentiment.score,
-    factors.breadth.score,
-  ];
-  const labels = ["F&G", "VIX", "Idx", "A/D", "News", "Breadth"];
-  const n = vals.length;
-  const cx = 80, cy = 80, r = 60;
-  const maxVal = 10;
+    // Kick off macro fetch in background (non-blocking)
+    const macroPromise = fetchMacro();
 
-  function polarToXY(angle: number, radius: number) {
-    const rad = (angle - 90) * Math.PI / 180;
-    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
-  }
+    const portfolio = config.stocks.PORTFOLIO;
+    const allResults: StockAnalysisResult[] = [];
 
-  const angleStep = 360 / n;
-  const gridLevels = [2, 4, 6, 8, 10];
+    for (let i = 0; i < portfolio.length; i++) {
+      const stock = portfolio[i];
+      setProgressSymbol(stock.symbol);
+      try {
+        const res = await fetch("/api/stocks", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ symbol: stock.symbol, config }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          allResults.push(data);
+          setResults([...allResults]);
+        }
+      } catch (e) {
+        console.error(`Error fetching ${stock.symbol}:`, e);
+      }
+      setProgress(Math.round(((i + 1) / portfolio.length) * 100));
+    }
 
-  // Data polygon
-  const dataPoints = vals.map((v, i) => {
-    const { x, y } = polarToXY(i * angleStep, (v / maxVal) * r);
-    return `${x},${y}`;
-  });
+    // Apply macro adjustment once both complete
+    const macroResult = await macroPromise;
+    if (macroResult && config.macro?.enabled) {
+      const adjusted = applyMacroAdjustment(
+        allResults, macroResult.mbs, config.macro?.applyToScore ?? false
+      );
+      setResults(adjusted);
+    }
 
-  // Grid polygons
-  const gridPolygons = gridLevels.map(level => {
-    const pts = Array.from({ length: n }, (_, i) => {
-      const { x, y } = polarToXY(i * angleStep, (level / maxVal) * r);
-      return `${x},${y}`;
-    });
-    return pts.join(" ");
-  });
+    setLastUpdated(new Date().toLocaleTimeString());
+    setProgressSymbol("");
+    setLoading(false);
+  }, [config, fetchMacro]);
 
-  // Axis lines
-  const axes = Array.from({ length: n }, (_, i) => {
-    const end = polarToXY(i * angleStep, r);
-    return end;
-  });
-
-  // Label positions (slightly outside)
-  const labelPts = Array.from({ length: n }, (_, i) => {
-    return polarToXY(i * angleStep, r + 14);
-  });
+  // ── Scroll to card ───────────────────────────────────────
+  const scrollToCard = useCallback((symbol: string) => {
+    const id = `card-${symbol.replace(/\./g, "-")}`;
+    const el = document.getElementById(id);
+    if (!el) return;
+    const y = el.getBoundingClientRect().top + window.scrollY - 64;
+    window.scrollTo({ top: y, behavior: "smooth" });
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    setHighlightedSymbol(symbol);
+    highlightTimer.current = setTimeout(() => setHighlightedSymbol(null), 2000);
+  }, []);
 
   return (
-    <svg viewBox="0 0 160 160" width="160" height="160">
-      {/* Grid */}
-      {gridPolygons.map((pts, gi) => (
-        <polygon key={gi} points={pts}
-          fill="none" stroke="#1e2d4a" strokeWidth={gi === 4 ? 1 : 0.5} />
-      ))}
-      {/* Axes */}
-      {axes.map((end, i) => (
-        <line key={i} x1={cx} y1={cy} x2={end.x} y2={end.y}
-          stroke="#1e2d4a" strokeWidth={0.8} />
-      ))}
-      {/* Data */}
-      <polygon points={dataPoints.join(" ")}
-        fill="rgba(0,212,255,0.15)" stroke="#00d4ff" strokeWidth={1.5} />
-      {vals.map((v, i) => {
-        const { x, y } = polarToXY(i * angleStep, (v / maxVal) * r);
-        return <circle key={i} cx={x} cy={y} r={2.5}
-          fill={v >= 7 ? "#00ff88" : v >= 5 ? "#ffa502" : "#ff4757"} />;
-      })}
-      {/* Labels */}
-      {labelPts.map((pt, i) => (
-        <text key={i} x={pt.x} y={pt.y} textAnchor="middle" dominantBaseline="middle"
-          fontSize="7" fill="#6b85a0" fontFamily="monospace">
-          {labels[i]}
-        </text>
-      ))}
-    </svg>
-  );
-}
+    <div className="min-h-screen bg-[#0a0e1a]">
 
-function FactorCard({ factor }: { factor: MacroFactor }) {
-  const scoreBar = Math.min(100, (factor.score / 10) * 100);
-  const barColor = factor.score >= 7 ? "#00ff88" : factor.score >= 5 ? "#ffa502" : "#ff4757";
-
-  return (
-    <div className="bg-[#080d1a] border border-[#1e2d4a] rounded p-2 min-w-[120px]">
-      <div className="text-[#4a6080] text-[0.6rem] font-bold mb-1 tracking-wide uppercase">{factor.label}</div>
-      <div className="flex items-center justify-between mb-1">
-        <span className={`text-sm font-bold font-mono ${factor.score >= 7 ? "text-[#00ff88]" : factor.score >= 5 ? "text-[#ffa502]" : "text-[#ff4757]"}`}>
-          {typeof factor.value === "number" ? factor.value : factor.value}
-        </span>
-        <span className="text-xs">{signalIcon(factor.signal)}</span>
-      </div>
-      <div className="h-1 bg-[#1e2d4a] rounded mb-1">
-        <div className="h-1 rounded transition-all" style={{ width: `${scoreBar}%`, background: barColor }} />
-      </div>
-      <div className={`text-[0.6rem] font-mono ${signalColor(factor.signal)}`}>{factor.detail}</div>
-    </div>
-  );
-}
-
-export default function MacroPanel({ data, loading, onRefresh }: Props) {
-  const [collapsed, setCollapsed] = useState(false);
-
-  if (!data && !loading) return null;
-
-  const mbs = data?.mbs ?? 5.0;
-  const label = data?.mbsLabel ?? "NEUTRAL";
-
-  return (
-    <div className={`mx-4 my-3 rounded border ${data ? mbsBorderColor(mbs) : "border-[#1e2d4a]"} ${data ? mbsBg(mbs) : ""}`}>
-
-      {/* ── Header ── */}
-      <div
-        className="flex items-center justify-between px-3 py-2 cursor-pointer"
-        onClick={() => setCollapsed(v => !v)}
-      >
+      {/* ── TOP BAR ── */}
+      <header className="border-b border-[#1e2d4a] bg-[#0f1629] px-4 py-2.5 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
-          <span className="text-[#00d4ff] text-xs font-bold tracking-widest">🌐 MARKET INTELLIGENCE</span>
-          {data && (
-            <>
-              <span className="text-[#1e2d4a]">|</span>
-              <span className={`text-xs font-bold font-mono ${mbsColor(mbs)}`}>
-                MBS {mbs.toFixed(1)}/10
-              </span>
-              <span className={`text-xs font-mono ${mbsColor(mbs)}`}>
-                {mbsWarningLabel(label)}
-              </span>
-              {data.factors && (
-                <div className="hidden sm:flex gap-1.5 ml-2">
-                  {Object.values(data.factors).map((f, i) => (
-                    <span key={i} title={`${f.label}: ${f.score}/10`}>
-                      <span className={`text-[0.55rem] font-mono ${f.score >= 7 ? "text-[#00ff88]" : f.score >= 5 ? "text-[#ffa502]" : "text-[#ff4757]"}`}>
-                        {f.score.toFixed(0)}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </>
+          <span className="text-[#00d4ff] font-bold text-sm tracking-widest">▶ TA DASHBOARD</span>
+          <span className="text-[#4a6080] text-xs">V15</span>
+          {lastUpdated && <span className="text-[#4a6080] text-xs">· Updated {lastUpdated}</span>}
+          {loading && (
+            <span className="text-[#ffa502] text-xs blink">
+              · {progressSymbol ? `Scanning ${progressSymbol}…` : "Scanning…"} {progress}%
+            </span>
           )}
-          {loading && <span className="text-[#ffa502] text-xs blink">· fetching…</span>}
+          {/* MBS badge */}
+          {config.macro?.enabled && (
+            <span className={`text-[0.6rem] font-mono px-2 py-0.5 rounded border transition-colors ${
+              macroData
+                ? macroData.mbs >= 7   ? "text-[#00ff88] border-[#00ff88]/30 bg-[#00ff88]/5"
+                : macroData.mbs >= 5.5 ? "text-[#ffa502] border-[#ffa502]/30 bg-[#ffa502]/5"
+                :                        "text-[#ff4757] border-[#ff4757]/30 bg-[#ff4757]/5"
+                : "text-[#4a6080] border-[#1e2d4a]"
+            }`}>
+              {macroData ? `MBS ${macroData.mbs.toFixed(1)}` : macroLoading ? "MBS…" : "🌐 MBS"}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          {data && (
-            <button
-              onClick={e => { e.stopPropagation(); onRefresh(); }}
-              className="text-[#4a6080] hover:text-[#00d4ff] text-xs transition-colors px-1"
-              title="Refresh macro data"
-            >
-              ↺
-            </button>
-          )}
-          <span className="text-[#4a6080] text-xs">{collapsed ? "▼" : "▲"}</span>
+          <button
+            onClick={() => setShowConfig(!showConfig)}
+            className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#6b85a0] hover:border-[#00d4ff] hover:text-[#00d4ff] rounded transition-all"
+          >
+            {showConfig ? "▲ HIDE CONFIG" : "▼ CONFIG"}
+          </button>
+          <button
+            onClick={runAnalysis}
+            disabled={loading}
+            className="px-4 py-1.5 text-xs font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all"
+          >
+            {loading ? `SCANNING… ${progress}%` : "▶ RUN ANALYSIS"}
+          </button>
         </div>
-      </div>
+      </header>
 
-      {/* ── Body ── */}
-      {!collapsed && data && (
-        <div className="px-3 pb-3 border-t border-[#1e2d4a]/50">
-
-          {/* Factor cards + Radar */}
-          <div className="flex gap-3 mt-3 overflow-x-auto">
-            {/* Factor cards */}
-            <div className="flex gap-2 flex-wrap">
-              {Object.values(data.factors).map((f, i) => (
-                <FactorCard key={i} factor={f} />
-              ))}
-            </div>
-
-            {/* Radar chart */}
-            <div className="shrink-0 flex flex-col items-center justify-center ml-auto">
-              <div className="text-[#4a6080] text-[0.6rem] mb-1 font-bold tracking-widest">FACTOR RADAR</div>
-              <RadarChart factors={data.factors} />
-            </div>
-          </div>
-
-          {/* MBS Score bar */}
-          <div className="mt-3 flex items-center gap-3">
-            <span className="text-[#4a6080] text-xs shrink-0">MACRO SCORE</span>
-            <div className="flex-1 h-2 bg-[#1e2d4a] rounded">
-              <div
-                className="h-2 rounded transition-all"
-                style={{
-                  width: `${(mbs / 10) * 100}%`,
-                  background: mbs >= 7 ? "#00ff88" : mbs >= 5.5 ? "#ffa502" : mbs >= 4 ? "#ffa502" : "#ff4757",
-                }}
-              />
-            </div>
-            <span className={`text-sm font-bold font-mono ${mbsColor(mbs)}`}>{mbs.toFixed(1)}/10</span>
-            <span className={`text-xs font-mono px-2 py-0.5 rounded border ${mbsColor(mbs)} ${mbsBorderColor(mbs)}`}>
-              {mbsWarningLabel(label)}
-            </span>
-          </div>
-
-          {/* Score adjustment note */}
-          <div className="mt-1.5 text-[0.6rem] text-[#4a6080] font-mono">
-            {mbs >= 7.0 && "📈 Macro tailwind — SCR score +0.5 bonus applied"}
-            {mbs >= 5.5 && mbs < 7.0 && "— Neutral macro — no SCR adjustment"}
-            {mbs >= 4.0 && mbs < 5.5 && "⚠️ Caution — SCR score −0.3 penalty applied"}
-            {mbs >= 2.5 && mbs < 4.0 && "🚨 Risk-off — SCR score −0.5 penalty applied"}
-            {mbs < 2.5 && "🛑 Avoid entries — SCR score −1.0 penalty applied"}
-            <span className="ml-2 text-[#1e2d4a]">· SuperTrend unaffected</span>
-          </div>
-
-          {/* Headlines */}
-          {data.headlines.length > 0 && (
-            <div className="mt-3 border-t border-[#1e2d4a]/50 pt-2">
-              <div className="text-[#4a6080] text-xs font-bold mb-1.5 tracking-widest">📰 HEADLINES</div>
-              <div className="space-y-1 max-h-32 overflow-y-auto">
-                {data.headlines.map((h, i) => (
-                  <div key={i} className="flex items-start gap-2 text-[0.65rem]">
-                    <span className="shrink-0 mt-0.5">{signalIcon(h.sentiment)}</span>
-                    <span className={`leading-relaxed ${h.sentiment === "bullish" ? "text-[#c8d8f0]" : h.sentiment === "bearish" ? "text-[#9bacc0]" : "text-[#6b85a0]"}`}>
-                      {h.title}
-                    </span>
-                    <span className="shrink-0 text-[#2a3d5a] text-[0.55rem] ml-auto">{h.source}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Fetch time */}
-          <div className="mt-2 text-[#2a3d5a] text-[0.55rem] text-right">
-            fetched {new Date(data.fetchedAt).toLocaleTimeString()}
-            {data.error && <span className="text-[#ff4757] ml-2">⚠ partial data</span>}
-          </div>
+      {/* ── CONFIG PANEL ── */}
+      {showConfig && (
+        <div className="border-b border-[#1e2d4a] bg-[#0a0e1a]">
+          <ConfigPanel config={config} onChange={setConfig} />
         </div>
       )}
+
+      {/* ── MACRO INTELLIGENCE PANEL ── */}
+      {config.macro?.enabled && (macroData || macroLoading) && (
+        <div className="border-b border-[#1e2d4a]">
+          <MacroPanel
+            data={macroData}
+            loading={macroLoading}
+            onRefresh={refreshMacro}
+          />
+        </div>
+      )}
+
+      {/* ── PORTFOLIO SUMMARY TABLE ── */}
+      {results.length > 0 && (
+        <div className="border-b border-[#1e2d4a]">
+          <PortfolioSummaryBar
+            results={results}
+            onRowClick={scrollToCard}
+          />
+        </div>
+      )}
+
+      {/* ── STOCK CARDS ── */}
+      <main className="p-4">
+        {loading && results.length === 0 && (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {config.stocks.PORTFOLIO.map((s) => (
+              <div key={s.symbol} className="card p-4 h-48 animate-pulse">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="h-4 w-16 bg-[#1e2d4a] rounded" />
+                  <div className="h-4 w-24 bg-[#1e2d4a] rounded" />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-3 w-full bg-[#1e2d4a] rounded" />
+                  <div className="h-3 w-3/4 bg-[#1e2d4a] rounded" />
+                  <div className="h-3 w-1/2 bg-[#1e2d4a] rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {results.map((result) => {
+              const cardId = `card-${result.symbol.replace(/\./g, "-")}`;
+              const isHighlighted = highlightedSymbol === result.symbol;
+              return (
+                <div
+                  key={result.symbol}
+                  id={cardId}
+                  className={`rounded-md transition-all duration-300 ${
+                    isHighlighted
+                      ? "ring-2 ring-[#00d4ff] ring-offset-2 ring-offset-[#0a0e1a] shadow-[0_0_20px_rgba(0,212,255,0.25)]"
+                      : ""
+                  }`}
+                >
+                  <StockCard result={result} config={config} />
+                </div>
+              );
+            })}
+            {loading && config.stocks.PORTFOLIO
+              .filter(s => !results.some(r => r.symbol === s.symbol))
+              .map(s => (
+                <div key={s.symbol} className="card p-4 h-48 animate-pulse">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="h-4 w-16 bg-[#1e2d4a] rounded" />
+                    <span className="text-[#4a6080] text-xs">{s.symbol}</span>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-3 w-full bg-[#1e2d4a] rounded" />
+                    <div className="h-3 w-2/3 bg-[#1e2d4a] rounded" />
+                  </div>
+                  <div className="text-[#ffa502] text-xs mt-3 blink">scanning…</div>
+                </div>
+              ))
+            }
+          </div>
+        )}
+
+        {!loading && results.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-96 text-[#4a6080]">
+            <div className="text-4xl mb-4 opacity-20">◈</div>
+            <div className="text-sm mb-1">No analysis running</div>
+            <div className="text-xs mb-4">Click ▶ RUN ANALYSIS to scan your portfolio</div>
+            <button
+              onClick={runAnalysis}
+              className="px-6 py-2 text-sm font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 rounded transition-all"
+            >
+              ▶ RUN ANALYSIS
+            </button>
+          </div>
+        )}
+      </main>
+
+      {/* ── SCROLL TO TOP ── */}
+      <button
+        onClick={scrollToTop}
+        aria-label="Scroll to top"
+        style={{
+          position: "fixed", bottom: 30, right: 30,
+          width: 44, height: 44, borderRadius: "50%",
+          background: "linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)",
+          border: "none", cursor: "pointer", zIndex: 9999,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 18, color: "#0a0e1a", fontWeight: "bold",
+          boxShadow: "0 4px 16px rgba(0,212,255,0.4)",
+          opacity: showScrollTop ? 1 : 0,
+          pointerEvents: showScrollTop ? "auto" : "none",
+          transform: showScrollTop ? "scale(1)" : "scale(0.8)",
+          transition: "opacity 0.25s ease, transform 0.25s ease, box-shadow 0.2s ease",
+        }}
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.12)";
+          (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 6px 24px rgba(0,212,255,0.6)";
+        }}
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLButtonElement).style.transform = showScrollTop ? "scale(1)" : "scale(0.8)";
+          (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 16px rgba(0,212,255,0.4)";
+        }}
+      >
+        ↑
+      </button>
+
     </div>
   );
 }
