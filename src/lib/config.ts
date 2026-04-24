@@ -40,8 +40,6 @@ export const DEFAULT_CONFIG: AppConfig = {
     signalConfirmationBars: 3,
     adxThreshold: 28,
     maxHoldingDays: 8,
-    // V14: DISABLED — replaced by Velocity Entry filter (matches Python V14 exactly)
-    // Python config: 'trendGateEnabled': False
     trendGateEnabled: false,
     earningsBufferDays: 5,
   },
@@ -84,5 +82,10 @@ export const DEFAULT_CONFIG: AppConfig = {
     atrPeriod: 10,
     multiplier: 3.0,
     filter_mode: "ema_only" as const,
+  },
+  // V15.1 MacroEngine defaults
+  macro: {
+    enabled: true,
+    applyToScore: true,
   },
 };
