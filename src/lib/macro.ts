@@ -8,7 +8,6 @@ import { MacroData, MacroFactor, MacroHeadline, mbsLabel } from "./macro-types";
 
 export type { MacroData, MacroFactor, MacroHeadline };
 
-// ── Weights ──────────────────────────────────────────────────
 const W = {
   fearGreed:     0.20,
   vixStructure:  0.20,
@@ -17,10 +16,6 @@ const W = {
   newsSentiment: 0.10,
   breadth:       0.10,
 };
-
-// ────────────────────────────────────────────────────────────
-// Internal helpers
-// ────────────────────────────────────────────────────────────
 
 async function fetchYahooClose(symbol: string): Promise<number | null> {
   try {
@@ -95,9 +90,9 @@ async function getVixStructure(): Promise<MacroFactor> {
     if (vix3m) {
       const ratio = vix / vix3m;
       if (ratio > 1.05) {
-        structureLabel = "Backwardation ⚠️"; score = vix > 25 ? 2 : 3; signal = "bearish";
+        structureLabel = "Backwardation"; score = vix > 25 ? 2 : 3; signal = "bearish";
       } else if (ratio < 0.95) {
-        structureLabel = "Contango ✅"; score = vix < 15 ? 8 : vix < 20 ? 7 : 5;
+        structureLabel = "Contango"; score = vix < 15 ? 8 : vix < 20 ? 7 : 5;
         signal = vix < 20 ? "bullish" : "neutral";
       } else {
         structureLabel = "Flat"; score = 5; signal = "neutral";
@@ -167,10 +162,10 @@ async function getADRatio(): Promise<MacroFactor> {
     const adTrend = adLines.length >= 2 ? adLines[adLines.length - 1] - adLines[0] : 0;
     const score = ratio >= 0.65 ? 8 : ratio >= 0.55 ? 7 : ratio >= 0.45 ? 5 : ratio >= 0.35 ? 3 : 2;
     const signal: MacroFactor["signal"] = ratio >= 0.55 ? "bullish" : ratio <= 0.40 ? "bearish" : "neutral";
-    const trendStr = adTrend > 0.05 ? "↑improving" : adTrend < -0.05 ? "↓weakening" : "→stable";
+    const trendStr = adTrend > 0.05 ? "improving" : adTrend < -0.05 ? "weakening" : "stable";
     return {
       label: "A/D Ratio", value: `${(ratio * 100).toFixed(0)}% adv`,
-      score, signal, detail: `${adv.toFixed(0)}↑ ${dec.toFixed(0)}↓ ${trendStr}`,
+      score, signal, detail: `${adv.toFixed(0)}up ${dec.toFixed(0)}dn ${trendStr}`,
     };
   } catch {
     return { label: "A/D Ratio", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
@@ -189,6 +184,20 @@ function scoreHeadline(title: string): MacroHeadline["sentiment"] {
   return bull > bear ? "bullish" : bear > bull ? "bearish" : "neutral";
 }
 
+// ES2015-safe RSS title extractor — avoids matchAll spread issue
+function extractTitlesFromRSS(text: string, limit: number): string[] {
+  const titles: string[] = [];
+  const re = /<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/g;
+  let m: RegExpExecArray | null;
+  // eslint-disable-next-line no-cond-assign
+  while ((m = re.exec(text)) !== null) {
+    const title = m[1].trim();
+    if (title.length >= 10) titles.push(title);
+    if (titles.length >= limit) break;
+  }
+  return titles;
+}
+
 async function getNewsSentiment(): Promise<{ factor: MacroFactor; headlines: MacroHeadline[] }> {
   const headlines: MacroHeadline[] = [];
   const feeds = [
@@ -204,13 +213,9 @@ async function getNewsSentiment(): Promise<{ factor: MacroFactor; headlines: Mac
       });
       if (!res.ok) continue;
       const text = await res.text();
-      const matches = [...text.matchAll(/<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/g)];
-      let count = 0;
-      for (const m of matches) {
-        const title = (m[1] || m[2] || "").trim();
-        if (!title || title.length < 10) continue;
+      const titles = extractTitlesFromRSS(text, 6);
+      for (const title of titles) {
         headlines.push({ title, sentiment: scoreHeadline(title), source: feed.source });
-        if (++count >= 6) break;
       }
       if (headlines.length >= 8) break;
     } catch { /* timeout — skip */ }
@@ -224,7 +229,7 @@ async function getNewsSentiment(): Promise<{ factor: MacroFactor; headlines: Mac
   const score = bullPct >= 0.7 ? 8 : bullPct >= 0.55 ? 6 : bullPct <= 0.30 ? 2 : bullPct <= 0.45 ? 4 : 5;
   const signal: MacroFactor["signal"] = bullPct >= 0.55 ? "bullish" : bullPct <= 0.40 ? "bearish" : "neutral";
   return {
-    factor: { label: "News Sentiment", value: `${bull}🟢 ${bear}🔴`, score, signal, detail: `${headlines.length} headlines · ${(bullPct * 100).toFixed(0)}% bullish` },
+    factor: { label: "News Sentiment", value: `${bull}bull ${bear}bear`, score, signal, detail: `${headlines.length} headlines · ${(bullPct * 100).toFixed(0)}% bullish` },
     headlines: headlines.slice(0, 8),
   };
 }
@@ -253,9 +258,7 @@ async function getMarketBreadth(): Promise<MacroFactor> {
   }
 }
 
-// ────────────────────────────────────────────────────────────
-// Main export
-// ────────────────────────────────────────────────────────────
+// ── Main export ───────────────────────────────────────────────
 export async function fetchMacroData(): Promise<MacroData> {
   try {
     const [fearGreed, vixStructure, indexTrends, adRatio, newsResult, breadth] = await Promise.all([
