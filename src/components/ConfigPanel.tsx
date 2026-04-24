@@ -1,288 +1,374 @@
 "use client";
-import { AppConfig } from "@/types";
-import { DEFAULT_CONFIG } from "@/lib/config";
 import { useState } from "react";
+import { AppConfig } from "@/types";
 
 interface Props {
   config: AppConfig;
-  onChange: (c: AppConfig) => void;
+  onChange: (config: AppConfig) => void;
 }
 
-// Signal presets matching Python dashboard exactly
-// Aggressive=5.0 | Moderate=5.5 (Python default) | Conservative=6.0
-const SIGNAL_PRESETS = {
-  aggressive: {
-    entryThreshold: 5.0, exitThreshold: 3.5, signalConfirmationBars: 2,
-    label: "AGGRESSIVE", desc: "Entry ≥5.0 · 2 confirm bars",
-    color: "text-[#ff4757] border-[#ff4757]/40 hover:bg-[#ff4757]/10",
-    activeColor: "bg-[#ff4757]/15 border-[#ff4757] text-[#ff4757]",
-  },
-  moderate: {
-    entryThreshold: 5.5, exitThreshold: 4.0, signalConfirmationBars: 3,
-    label: "MODERATE ★", desc: "Entry ≥5.5 · 3 bars · Python default",
-    color: "text-[#00d4ff] border-[#00d4ff]/40 hover:bg-[#00d4ff]/10",
-    activeColor: "bg-[#00d4ff]/15 border-[#00d4ff] text-[#00d4ff]",
-  },
-  conservative: {
-    entryThreshold: 6.0, exitThreshold: 4.5, signalConfirmationBars: 3,
-    label: "CONSERVATIVE", desc: "Entry ≥6.0 · 3 confirm bars",
-    color: "text-[#00ff88] border-[#00ff88]/40 hover:bg-[#00ff88]/10",
-    activeColor: "bg-[#00ff88]/15 border-[#00ff88] text-[#00ff88]",
-  },
-} as const;
-
-type PresetKey = keyof typeof SIGNAL_PRESETS;
-
-function detectActivePreset(config: AppConfig): PresetKey | null {
-  for (const [key, p] of Object.entries(SIGNAL_PRESETS)) {
-    if (
-      config.signal.entryThreshold === p.entryThreshold &&
-      config.signal.exitThreshold === p.exitThreshold &&
-      config.signal.signalConfirmationBars === p.signalConfirmationBars
-    ) return key as PresetKey;
-  }
-  return null;
-}
-
-function Slider({ label, value, min, max, step, onChange, format }: {
-  label: string; value: number; min: number; max: number; step: number;
-  onChange: (v: number) => void; format?: (v: number) => string;
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <label className="text-[#6b85a0] text-xs w-44 shrink-0">{label}</label>
-      <input type="range" min={min} max={max} step={step} value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="flex-1 h-1 accent-[#00d4ff]" />
-      <span className="text-[#00d4ff] text-xs w-16 text-right font-mono">
-        {format ? format(value) : value}
-      </span>
-    </div>
-  );
-}
-
-function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <div className="flex items-center gap-3">
-      <label className="text-[#6b85a0] text-xs w-44 shrink-0">{label}</label>
-      <button onClick={() => onChange(!value)}
-        className={`px-3 py-0.5 text-xs rounded border transition-all ${value
-          ? "bg-[#00d4ff]/10 border-[#00d4ff]/40 text-[#00d4ff]"
-          : "bg-[#1e2d4a]/40 border-[#1e2d4a] text-[#4a6080]"}`}>
-        {value ? "ON" : "OFF"}
-      </button>
-    </div>
-  );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div className="text-[#00d4ff]/60 text-xs font-bold mb-2 tracking-widest">{children}</div>;
-}
-
-function InfoBox({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="mt-3 text-[0.65rem] text-[#4a6080] leading-relaxed border border-[#1e2d4a]/60 rounded p-2 bg-[#0a0e1a]">
-      {children}
-    </div>
-  );
-}
+type TabId = "portfolio" | "signal" | "backtest" | "risk" | "supertrend" | "macro";
 
 export default function ConfigPanel({ config, onChange }: Props) {
-  const [portfolioInput, setPortfolioInput] = useState(
-    config.stocks.PORTFOLIO.map((s) => `${s.symbol}:${s.name}:${s.exchange}`).join("\n")
-  );
+  const [activeTab, setActiveTab] = useState<TabId>("signal");
+  const [newSymbol, setNewSymbol] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newExchange, setNewExchange] = useState<"US" | "HK">("US");
 
-  const update = (path: string[], value: unknown) => {
-    const nc = JSON.parse(JSON.stringify(config)) as AppConfig;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let obj: any = nc;
-    for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]];
-    obj[path[path.length - 1]] = value;
-    onChange(nc);
-  };
+  function update(path: string, value: unknown) {
+    const keys = path.split(".");
+    const next = JSON.parse(JSON.stringify(config));
+    let obj: Record<string, unknown> = next;
+    for (let i = 0; i < keys.length - 1; i++) obj = obj[keys[i]] as Record<string, unknown>;
+    obj[keys[keys.length - 1]] = value;
+    onChange(next);
+  }
 
-  const applyPreset = (key: PresetKey) => {
-    const p = SIGNAL_PRESETS[key];
+  function addStock() {
+    if (!newSymbol.trim()) return;
+    const sym = newSymbol.toUpperCase().trim();
+    if (config.stocks.PORTFOLIO.some(s => s.symbol === sym)) return;
     onChange({
       ...config,
-      signal: { ...config.signal, entryThreshold: p.entryThreshold, exitThreshold: p.exitThreshold, signalConfirmationBars: p.signalConfirmationBars },
+      stocks: {
+        PORTFOLIO: [...config.stocks.PORTFOLIO, { symbol: sym, name: newName || sym, exchange: newExchange }],
+      },
     });
-  };
+    setNewSymbol(""); setNewName("");
+  }
 
-  const resetAll = () => {
-    onChange(DEFAULT_CONFIG);
-    setPortfolioInput(DEFAULT_CONFIG.stocks.PORTFOLIO.map((s) => `${s.symbol}:${s.name}:${s.exchange}`).join("\n"));
-  };
+  function removeStock(symbol: string) {
+    onChange({
+      ...config,
+      stocks: { PORTFOLIO: config.stocks.PORTFOLIO.filter(s => s.symbol !== symbol) },
+    });
+  }
 
-  const applyPortfolio = () => {
-    const stocks = portfolioInput.split("\n").filter((l) => l.trim()).map((l) => {
-      const [symbol, name, exchange] = l.split(":").map((s) => s.trim());
-      return { symbol: (symbol ?? "").toUpperCase(), name: name ?? symbol ?? "", exchange: (exchange ?? "US") as "US" | "HK" };
-    }).filter((s) => s.symbol);
-    update(["stocks", "PORTFOLIO"], stocks);
-  };
+  const tabs: { id: TabId; label: string }[] = [
+    { id: "portfolio",  label: "Portfolio" },
+    { id: "signal",     label: "Signal" },
+    { id: "backtest",   label: "Backtest" },
+    { id: "risk",       label: "Risk" },
+    { id: "supertrend", label: "SuperTrend" },
+    { id: "macro",      label: "🌐 Macro" },
+  ];
 
-  const activePreset = detectActivePreset(config);
+  const labelCls = "text-[#4a6080] text-xs font-mono mb-1";
+  const inputCls = "w-full bg-[#080d1a] border border-[#1e2d4a] text-[#c8d8f0] text-xs font-mono rounded px-2 py-1.5 focus:outline-none focus:border-[#00d4ff]";
+  const sectionCls = "mb-4";
+  const sectionTitle = "text-[#00d4ff] text-xs font-bold tracking-widest mb-3 border-b border-[#1e2d4a] pb-1";
 
   return (
-    <div className="p-4 space-y-4">
-
-      {/* ── PRESET BUTTONS ── */}
-      <div>
-        <SectionTitle>SIGNAL PRESET</SectionTitle>
-        <div className="flex flex-wrap gap-2 items-start">
-          {(Object.entries(SIGNAL_PRESETS) as [PresetKey, typeof SIGNAL_PRESETS[PresetKey]][]).map(([key, p]) => {
-            const isActive = activePreset === key;
-            return (
-              <button key={key} onClick={() => applyPreset(key)}
-                className={`flex flex-col items-start px-3 py-2 rounded border text-xs transition-all min-w-[148px] ${isActive ? p.activeColor : `border-[#1e2d4a] ${p.color}`}`}>
-                <span className="font-bold tracking-wide">{p.label}</span>
-                <span className="text-[0.65rem] opacity-70 mt-0.5">{p.desc}</span>
-              </button>
-            );
-          })}
-
-          <button onClick={resetAll}
-            className="flex flex-col items-start px-3 py-2 rounded border border-[#1e2d4a] text-[#4a6080] hover:border-[#ffa502]/60 hover:text-[#ffa502] text-xs transition-all min-w-[130px]">
-            <span className="font-bold tracking-wide">↺ RESET ALL</span>
-            <span className="text-[0.65rem] opacity-70 mt-0.5">All defaults</span>
+    <div className="bg-[#0a1628] border border-[#1e2d4a] rounded">
+      {/* Tab bar */}
+      <div className="flex border-b border-[#1e2d4a] overflow-x-auto">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={`px-3 py-2 text-xs font-mono whitespace-nowrap transition-colors ${
+              activeTab === t.id
+                ? "text-[#00d4ff] border-b-2 border-[#00d4ff] bg-[#00d4ff]/5"
+                : "text-[#4a6080] hover:text-[#c8d8f0]"
+            }`}
+          >
+            {t.label}
           </button>
-        </div>
-
-        {/* Active preset status line */}
-        <div className="mt-2 text-[0.65rem] text-[#4a6080]">
-          {activePreset
-            ? `▸ ${SIGNAL_PRESETS[activePreset].label.replace(" ★", "")} — entry ≥${config.signal.entryThreshold}, exit ≤${config.signal.exitThreshold}, confirm ${config.signal.signalConfirmationBars} bars`
-            : `▸ Custom — entry ≥${config.signal.entryThreshold}, exit ≤${config.signal.exitThreshold}, confirm ${config.signal.signalConfirmationBars} bars`}
-        </div>
+        ))}
       </div>
 
-      <div className="border-t border-[#1e2d4a]" />
+      <div className="p-4 max-h-[420px] overflow-y-auto">
 
-      {/* ── PARAM GRID ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-
-        {/* SIGNAL PARAMS */}
-        <div>
-          <SectionTitle>SIGNAL PARAMS</SectionTitle>
-          <div className="space-y-2">
-            <Slider label="Entry Threshold" value={config.signal.entryThreshold}
-              min={4.0} max={8.0} step={0.5} onChange={(v) => update(["signal", "entryThreshold"], v)} />
-            <Slider label="Exit Threshold" value={config.signal.exitThreshold}
-              min={2.0} max={5.5} step={0.5} onChange={(v) => update(["signal", "exitThreshold"], v)} />
-            <Slider label="Default Confirm Bars" value={config.signal.signalConfirmationBars}
-              min={0} max={5} step={1} onChange={(v) => update(["signal", "signalConfirmationBars"], v)} />
-            <Slider label="Max Hold Days" value={config.signal.maxHoldingDays}
-              min={3} max={60} step={1} format={(v) => `${v}d`}
-              onChange={(v) => update(["signal", "maxHoldingDays"], v)} />
-            <Toggle label="Trend Gate" value={config.signal.trendGateEnabled}
-              onChange={(v) => update(["signal", "trendGateEnabled"], v)} />
-          </div>
-          <InfoBox>
-            <span className="text-[#6b85a0] font-bold block mb-1">CONFIRM BARS (US exchange):</span>
-            STRONG_UPTREND → 0 (instant)<br />
-            STRENGTHENING → 0 (instant)<br />
-            UPTREND → 1 bar  ·  RANGING → 2 bars<br />
-            <span className="text-[#ffa502]">Vol Surge 2x+ → FORCE ENTRY</span>
-            <div className="mt-1.5 text-[#00ff88]">
-              ★ Entry Threshold &amp; Confirm Bars directly control<br />
-              trade count — change preset → Run Analysis
+        {/* ── PORTFOLIO ── */}
+        {activeTab === "portfolio" && (
+          <div>
+            <div className={sectionTitle}>PORTFOLIO STOCKS</div>
+            <div className="space-y-1.5 mb-4">
+              {config.stocks.PORTFOLIO.map(s => (
+                <div key={s.symbol} className="flex items-center justify-between bg-[#080d1a] border border-[#1e2d4a] rounded px-2 py-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[#00d4ff] text-xs font-mono font-bold">{s.symbol}</span>
+                    <span className="text-[#4a6080] text-xs">{s.name}</span>
+                    <span className={`text-[0.6rem] px-1 rounded ${s.exchange === "HK" ? "bg-[#ffa502]/10 text-[#ffa502]" : "bg-[#00d4ff]/10 text-[#00d4ff]"}`}>{s.exchange}</span>
+                  </div>
+                  <button onClick={() => removeStock(s.symbol)} className="text-[#ff4757] text-xs hover:text-red-400">✕</button>
+                </div>
+              ))}
             </div>
-          </InfoBox>
-        </div>
-
-        {/* BACKTEST */}
-        <div>
-          <SectionTitle>BACKTEST</SectionTitle>
-          <div className="space-y-2">
-            <Slider label="Initial Capital" value={config.backtest.initialCapital}
-              min={1000} max={100000} step={1000} format={(v) => `$${v.toLocaleString()}`}
-              onChange={(v) => update(["backtest", "initialCapital"], v)} />
-            <Slider label="Lookback Days" value={config.backtest.lookbackDays}
-              min={100} max={504} step={21} format={(v) => `${v}d`}
-              onChange={(v) => update(["backtest", "lookbackDays"], v)} />
-            <Slider label="Commission" value={config.backtest.commissionRate}
-              min={0} max={0.005} step={0.0005} format={(v) => `${(v * 100).toFixed(2)}%`}
-              onChange={(v) => update(["backtest", "commissionRate"], v)} />
-            <Slider label="Slippage" value={config.backtest.slippageRate}
-              min={0} max={0.003} step={0.0005} format={(v) => `${(v * 100).toFixed(2)}%`}
-              onChange={(v) => update(["backtest", "slippageRate"], v)} />
-            <Toggle label="Van Tharp Sizing" value={config.backtest.use_van_tharp}
-              onChange={(v) => update(["backtest", "use_van_tharp"], v)} />
-          </div>
-          <InfoBox>
-            <span className="text-[#6b85a0]">Van Tharp OFF</span> = 100% equity/trade (raw α)<br />
-            <span className="text-[#6b85a0]">Van Tharp ON</span> = ATR risk sizing (portfolio mode)
-          </InfoBox>
-        </div>
-
-        {/* RISK */}
-        <div>
-          <SectionTitle>RISK &amp; KILL SWITCH</SectionTitle>
-          <div className="space-y-2">
-            <Slider label="ATR Mult (stop)" value={config.risk.atrMultiplier}
-              min={1.0} max={5.0} step={0.25}
-              onChange={(v) => update(["risk", "atrMultiplier"], v)} />
-            <Slider label="Trailing ATR Mult" value={config.risk.trailingAtrMultiplier}
-              min={0.5} max={3.0} step={0.25}
-              onChange={(v) => update(["risk", "trailingAtrMultiplier"], v)} />
-            <Slider label="Risk Per Trade" value={config.risk.riskPerTrade}
-              min={0.005} max={0.03} step={0.0025} format={(v) => `${(v * 100).toFixed(2)}%`}
-              onChange={(v) => update(["risk", "riskPerTrade"], v)} />
-            <Slider label="Max Position Size" value={config.risk.maxPositionSize}
-              min={0.05} max={1.0} step={0.05} format={(v) => `${(v * 100).toFixed(0)}%`}
-              onChange={(v) => update(["risk", "maxPositionSize"], v)} />
-            <Toggle label="Kill Switch" value={config.portfolioRisk.killSwitchEnabled}
-              onChange={(v) => update(["portfolioRisk", "killSwitchEnabled"], v)} />
-            <Slider label="Max DD Threshold" value={config.portfolioRisk.maxDrawdownThreshold}
-              min={0.05} max={0.4} step={0.05} format={(v) => `${(v * 100).toFixed(0)}%`}
-              onChange={(v) => update(["portfolioRisk", "maxDrawdownThreshold"], v)} />
-            <Slider label="Cooling Period" value={config.portfolioRisk.coolingPeriodDays}
-              min={1} max={20} step={1} format={(v) => `${v}d`}
-              onChange={(v) => update(["portfolioRisk", "coolingPeriodDays"], v)} />
-          </div>
-          <InfoBox>
-            <span className="text-[#ffa502] font-bold block mb-1">⚠ Regime-Adaptive Overrides (V12.5.3):</span>
-            ATR Mult, Trailing ATR &amp; Max Hold are set per-trade<br />
-            by the regime at entry — not these sliders:<br />
-            <span className="text-[#6b85a0]">STRONG_UP: 60d · 2.0× · 2.0× trail</span><br />
-            <span className="text-[#6b85a0]">UPTREND: 30d · 2.2× · 1.5× trail</span><br />
-            <span className="text-[#6b85a0]">RANGING: 10d · 2.0× · 1.0× trail</span><br />
-            <span className="text-[#00d4ff]">★ Entry Threshold controls trade count directly</span>
-          </InfoBox>
-        </div>
-
-        {/* PORTFOLIO */}
-        <div>
-          <SectionTitle>PORTFOLIO  (symbol:name:exchange)</SectionTitle>
-          <textarea
-            value={portfolioInput}
-            onChange={(e) => setPortfolioInput(e.target.value)}
-            rows={12}
-            className="w-full bg-[#0a0e1a] border border-[#1e2d4a] text-[#c8d8f0] text-xs p-2 rounded font-mono resize-none focus:outline-none focus:border-[#00d4ff]/40 leading-relaxed"
-            spellCheck={false}
-            placeholder={"AAPL:Apple:US\n0700.HK:Tencent:HK"}
-          />
-          <div className="flex gap-2 mt-2">
-            <button onClick={applyPortfolio}
-              className="flex-1 px-3 py-1.5 text-xs bg-[#00d4ff]/10 border border-[#00d4ff]/30 text-[#00d4ff] rounded hover:bg-[#00d4ff]/20 transition-all font-bold">
-              APPLY
-            </button>
-            <button
-              onClick={() => {
-                const def = DEFAULT_CONFIG.stocks.PORTFOLIO.map((s) => `${s.symbol}:${s.name}:${s.exchange}`).join("\n");
-                setPortfolioInput(def);
-                update(["stocks", "PORTFOLIO"], DEFAULT_CONFIG.stocks.PORTFOLIO);
-              }}
-              className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#4a6080] rounded hover:border-[#ffa502]/60 hover:text-[#ffa502] transition-all">
-              ↺ DEFAULT
+            <div className={sectionTitle}>ADD STOCK</div>
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              <div>
+                <div className={labelCls}>Symbol</div>
+                <input className={inputCls} value={newSymbol} onChange={e => setNewSymbol(e.target.value.toUpperCase())} placeholder="AAPL" />
+              </div>
+              <div>
+                <div className={labelCls}>Name</div>
+                <input className={inputCls} value={newName} onChange={e => setNewName(e.target.value)} placeholder="Apple" />
+              </div>
+              <div>
+                <div className={labelCls}>Exchange</div>
+                <select className={inputCls} value={newExchange} onChange={e => setNewExchange(e.target.value as "US" | "HK")}>
+                  <option value="US">US</option>
+                  <option value="HK">HK</option>
+                </select>
+              </div>
+            </div>
+            <button onClick={addStock} className="w-full bg-[#00d4ff]/10 border border-[#00d4ff]/30 text-[#00d4ff] text-xs font-mono py-1.5 rounded hover:bg-[#00d4ff]/20 transition-colors">
+              + ADD STOCK
             </button>
           </div>
-          <div className="mt-2 text-[0.65rem] text-[#4a6080]">
-            One per line · Exchange: US or HK<br />
-            e.g. <span className="text-[#6b85a0]">NVDA:NVIDIA:US</span>
+        )}
+
+        {/* ── SIGNAL ── */}
+        {activeTab === "signal" && (
+          <div>
+            <div className={sectionTitle}>SIGNAL PARAMETERS</div>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: "Entry Threshold", path: "signal.entryThreshold", step: 0.1, min: 3, max: 9 },
+                { label: "Exit Threshold", path: "signal.exitThreshold", step: 0.1, min: 1, max: 7 },
+                { label: "Confirmation Bars", path: "signal.signalConfirmationBars", step: 1, min: 1, max: 10 },
+                { label: "ADX Threshold", path: "signal.adxThreshold", step: 1, min: 10, max: 50 },
+                { label: "Max Holding Days", path: "signal.maxHoldingDays", step: 1, min: 1, max: 60 },
+                { label: "Earnings Buffer Days", path: "signal.earningsBufferDays", step: 1, min: 0, max: 30 },
+              ].map(f => (
+                <div key={f.path}>
+                  <div className={labelCls}>{f.label}</div>
+                  <input type="number" className={inputCls} step={f.step} min={f.min} max={f.max}
+                    value={String(f.path.split(".").reduce((o, k) => (o as Record<string, unknown>)[k], config as unknown))}
+                    onChange={e => update(f.path, parseFloat(e.target.value))} />
+                </div>
+              ))}
+            </div>
+            <div className={`${sectionCls} mt-4`}>
+              <div className={sectionTitle}>FILTERS</div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={config.signal.trendGateEnabled}
+                  onChange={e => update("signal.trendGateEnabled", e.target.checked)}
+                  className="w-3 h-3 accent-[#00d4ff]" />
+                <span className="text-xs font-mono text-[#c8d8f0]">Trend Gate Filter</span>
+              </label>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* ── BACKTEST ── */}
+        {activeTab === "backtest" && (
+          <div>
+            <div className={sectionTitle}>BACKTEST PARAMETERS</div>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: "Initial Capital ($)", path: "backtest.initialCapital", step: 1000, min: 1000, max: 1000000 },
+                { label: "Lookback Days", path: "backtest.lookbackDays", step: 50, min: 100, max: 2000 },
+                { label: "Commission Rate", path: "backtest.commissionRate", step: 0.0001, min: 0, max: 0.01 },
+                { label: "Slippage Rate", path: "backtest.slippageRate", step: 0.0001, min: 0, max: 0.01 },
+              ].map(f => (
+                <div key={f.path}>
+                  <div className={labelCls}>{f.label}</div>
+                  <input type="number" className={inputCls} step={f.step} min={f.min} max={f.max}
+                    value={String(f.path.split(".").reduce((o, k) => (o as Record<string, unknown>)[k], config as unknown))}
+                    onChange={e => update(f.path, parseFloat(e.target.value))} />
+                </div>
+              ))}
+            </div>
+            <div className="mt-3">
+              <div className={labelCls}>Signal Mode</div>
+              <select className={inputCls} value={config.backtest.signal_mode}
+                onChange={e => update("backtest.signal_mode", e.target.value)}>
+                <option value="both">Both Strategies</option>
+                <option value="score">Score Only</option>
+                <option value="supertrend">SuperTrend Only</option>
+              </select>
+            </div>
+            <div className="mt-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={config.backtest.use_van_tharp}
+                  onChange={e => update("backtest.use_van_tharp", e.target.checked)}
+                  className="w-3 h-3 accent-[#00d4ff]" />
+                <span className="text-xs font-mono text-[#c8d8f0]">Van Tharp Position Sizing</span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* ── RISK ── */}
+        {activeTab === "risk" && (
+          <div>
+            <div className={sectionTitle}>RISK PARAMETERS</div>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: "Risk Per Trade", path: "risk.riskPerTrade", step: 0.0025, min: 0.001, max: 0.05 },
+                { label: "ATR Multiplier", path: "risk.atrMultiplier", step: 0.25, min: 0.5, max: 10 },
+                { label: "Trailing ATR Mult", path: "risk.trailingAtrMultiplier", step: 0.25, min: 0.5, max: 5 },
+                { label: "Max Position Size", path: "risk.maxPositionSize", step: 0.05, min: 0.05, max: 1.0 },
+                { label: "Correlation Threshold", path: "risk.correlationThreshold", step: 0.05, min: 0.3, max: 1.0 },
+                { label: "Correlation Penalty", path: "risk.correlationPenalty", step: 0.1, min: 0, max: 1.0 },
+              ].map(f => (
+                <div key={f.path}>
+                  <div className={labelCls}>{f.label}</div>
+                  <input type="number" className={inputCls} step={f.step} min={f.min} max={f.max}
+                    value={String(f.path.split(".").reduce((o, k) => (o as Record<string, unknown>)[k], config as unknown))}
+                    onChange={e => update(f.path, parseFloat(e.target.value))} />
+                </div>
+              ))}
+            </div>
+            <div className="mt-4">
+              <div className={sectionTitle}>PORTFOLIO KILL SWITCH</div>
+              <label className="flex items-center gap-2 cursor-pointer mb-2">
+                <input type="checkbox" checked={config.portfolioRisk.killSwitchEnabled}
+                  onChange={e => update("portfolioRisk.killSwitchEnabled", e.target.checked)}
+                  className="w-3 h-3 accent-[#ff4757]" />
+                <span className="text-xs font-mono text-[#c8d8f0]">Kill Switch Enabled</span>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: "Max Drawdown %", path: "portfolioRisk.maxDrawdownThreshold", step: 0.01, min: 0.05, max: 0.5 },
+                  { label: "Cooling Period Days", path: "portfolioRisk.coolingPeriodDays", step: 1, min: 1, max: 30 },
+                ].map(f => (
+                  <div key={f.path}>
+                    <div className={labelCls}>{f.label}</div>
+                    <input type="number" className={inputCls} step={f.step} min={f.min} max={f.max}
+                      value={String(f.path.split(".").reduce((o, k) => (o as Record<string, unknown>)[k], config as unknown))}
+                      onChange={e => update(f.path, parseFloat(e.target.value))} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── SUPERTREND ── */}
+        {activeTab === "supertrend" && (
+          <div>
+            <div className={sectionTitle}>SUPERTREND PARAMETERS</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <div className={labelCls}>ATR Period</div>
+                <input type="number" className={inputCls} step={1} min={5} max={30}
+                  value={config.supertrend.atrPeriod}
+                  onChange={e => update("supertrend.atrPeriod", parseInt(e.target.value))} />
+              </div>
+              <div>
+                <div className={labelCls}>Multiplier</div>
+                <input type="number" className={inputCls} step={0.25} min={1} max={8}
+                  value={config.supertrend.multiplier}
+                  onChange={e => update("supertrend.multiplier", parseFloat(e.target.value))} />
+              </div>
+            </div>
+            <div className="mt-3">
+              <div className={labelCls}>EMA Filter Mode</div>
+              <select className={inputCls} value={config.supertrend.filter_mode}
+                onChange={e => update("supertrend.filter_mode", e.target.value)}>
+                <option value="ema_only">EMA50 Only</option>
+                <option value="full">Full Filter</option>
+              </select>
+            </div>
+            <div className="mt-4 p-3 bg-[#080d1a] border border-[#1e2d4a] rounded text-[0.65rem] font-mono text-[#4a6080]">
+              <div className="text-[#ffa502] mb-1">ℹ SuperTrend — macro unaffected</div>
+              SuperTrend is a pure trend-following system. The MBS macro adjustment is intentionally not applied to ST entries or scoring. Configure MBS impact on the 🌐 Macro tab.
+            </div>
+          </div>
+        )}
+
+        {/* ── MACRO ── */}
+        {activeTab === "macro" && (
+          <div>
+            <div className={sectionTitle}>🌐 MACROENGINE V15.1</div>
+
+            {/* Master toggle */}
+            <div className="bg-[#080d1a] border border-[#1e2d4a] rounded p-3 mb-4">
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <div className="text-xs font-mono text-[#c8d8f0] font-bold">Enable Market Intelligence</div>
+                  <div className="text-[0.65rem] text-[#4a6080] mt-0.5">Fetch macro data on each analysis run</div>
+                </div>
+                <div
+                  onClick={() => update("macro.enabled", !config.macro.enabled)}
+                  className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${config.macro.enabled ? "bg-[#00d4ff]/40" : "bg-[#1e2d4a]"}`}
+                >
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${config.macro.enabled ? "left-5 bg-[#00d4ff]" : "left-0.5 bg-[#4a6080]"}`} />
+                </div>
+              </label>
+            </div>
+
+            {/* Apply to Score toggle */}
+            <div className={`bg-[#080d1a] border rounded p-3 mb-4 transition-opacity ${config.macro.enabled ? "border-[#1e2d4a] opacity-100" : "border-[#1e2d4a]/30 opacity-40 pointer-events-none"}`}>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <div className="text-xs font-mono text-[#c8d8f0] font-bold">Apply MBS to Score (SCR) Strategy</div>
+                  <div className="text-[0.65rem] text-[#4a6080] mt-0.5">Adjusts SCR entry score based on macro environment</div>
+                </div>
+                <div
+                  onClick={() => update("macro.applyToScore", !config.macro.applyToScore)}
+                  className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${config.macro.applyToScore ? "bg-[#00ff88]/40" : "bg-[#1e2d4a]"}`}
+                >
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${config.macro.applyToScore ? "left-5 bg-[#00ff88]" : "left-0.5 bg-[#4a6080]"}`} />
+                </div>
+              </label>
+            </div>
+
+            {/* SuperTrend info box */}
+            <div className="bg-[#080d1a] border border-[#ffa502]/20 rounded p-3 mb-4">
+              <div className="flex items-start gap-2">
+                <span className="text-[#ffa502] text-sm shrink-0">⚡</span>
+                <div>
+                  <div className="text-xs font-mono text-[#ffa502] font-bold mb-1">SuperTrend — Always Unaffected</div>
+                  <div className="text-[0.65rem] text-[#4a6080] leading-relaxed">
+                    SuperTrend is a pure price-action trend system. MBS adjustments are intentionally excluded to preserve signal integrity. ST entries rely solely on ATR-based band logic and EMA50 filter.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* MBS tier table */}
+            <div className={`transition-opacity ${config.macro.enabled && config.macro.applyToScore ? "opacity-100" : "opacity-40"}`}>
+              <div className="text-[#4a6080] text-xs font-bold tracking-widest mb-2">MBS ADJUSTMENT TIERS</div>
+              <div className="space-y-1">
+                {[
+                  { range: "≥ 7.0", label: "BULLISH",  adj: "+0.5", color: "text-[#00ff88]", bg: "bg-[#00ff88]/5",  border: "border-[#00ff88]/20" },
+                  { range: "5.5–7.0", label: "NEUTRAL", adj: "±0.0", color: "text-[#c8d8f0]", bg: "bg-[#1e2d4a]/30", border: "border-[#1e2d4a]" },
+                  { range: "4.0–5.5", label: "CAUTION", adj: "−0.3", color: "text-[#ffa502]", bg: "bg-[#ffa502]/5",  border: "border-[#ffa502]/20" },
+                  { range: "2.5–4.0", label: "RISK-OFF", adj: "−0.5", color: "text-[#ff6b35]", bg: "bg-[#ff6b35]/5",  border: "border-[#ff6b35]/20" },
+                  { range: "< 2.5",  label: "AVOID",   adj: "−1.0", color: "text-[#ff4757]", bg: "bg-[#ff4757]/5",  border: "border-[#ff4757]/20" },
+                ].map(row => (
+                  <div key={row.range} className={`flex items-center justify-between px-3 py-1.5 rounded border ${row.bg} ${row.border}`}>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[#4a6080] text-xs font-mono w-16">{row.range}</span>
+                      <span className={`text-xs font-mono font-bold ${row.color}`}>{row.label}</span>
+                    </div>
+                    <span className={`text-xs font-mono font-bold ${row.color}`}>{row.adj} SCR</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Data sources */}
+            <div className="mt-4">
+              <div className="text-[#4a6080] text-xs font-bold tracking-widest mb-2">DATA SOURCES</div>
+              <div className="space-y-1">
+                {[
+                  { label: "Fear & Greed", src: "alternative.me", wt: "20%", cost: "Free" },
+                  { label: "VIX Structure", src: "Yahoo Finance", wt: "20%", cost: "Free" },
+                  { label: "Index Trends", src: "Yahoo Finance", wt: "25%", cost: "Free" },
+                  { label: "A/D Ratio", src: "Yahoo ^ADVN/^DECN", wt: "15%", cost: "Free" },
+                  { label: "News Sentiment", src: "Finviz RSS", wt: "10%", cost: "Free" },
+                  { label: "Market Breadth", src: "SPY series proxy", wt: "10%", cost: "Free" },
+                ].map(s => (
+                  <div key={s.label} className="flex items-center justify-between px-2 py-1 bg-[#080d1a] border border-[#1e2d4a] rounded">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#c8d8f0] text-xs font-mono">{s.label}</span>
+                      <span className="text-[#4a6080] text-[0.6rem]">{s.src}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#00d4ff] text-[0.6rem] font-mono">{s.wt}</span>
+                      <span className="text-[#00ff88] text-[0.6rem]">{s.cost}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
