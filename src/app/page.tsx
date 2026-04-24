@@ -6,10 +6,7 @@ import { DEFAULT_CONFIG } from "@/lib/config";
 import ConfigPanel from "@/components/ConfigPanel";
 import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
 import StockCard from "@/components/StockCard";
-
-// Dynamic import avoids any server/client boundary issues with MacroPanel
-import dynamic from "next/dynamic";
-const MacroPanel = dynamic(() => import("@/components/MacroPanel"), { ssr: false });
+import MacroPanel from "@/components/MacroPanel";
 
 // ── helpers ──────────────────────────────────────────────────
 function applyMacroAdjustment(
@@ -58,7 +55,7 @@ export default function Dashboard() {
     try {
       const res = await fetch("/api/macro");
       if (!res.ok) throw new Error(`Macro API ${res.status}`);
-      const data = await res.json() as MacroData;
+      const data: MacroData = await res.json();
       setMacroData(data);
       return data;
     } catch (e) {
@@ -103,7 +100,7 @@ export default function Dashboard() {
           body:    JSON.stringify({ symbol: stock.symbol, config }),
         });
         if (res.ok) {
-          const data = await res.json() as StockAnalysisResult;
+          const data = await res.json();
           allResults.push(data);
           setResults([...allResults]);
         }
@@ -117,9 +114,7 @@ export default function Dashboard() {
     const macroResult = await macroPromise;
     if (macroResult && config.macro?.enabled) {
       const adjusted = applyMacroAdjustment(
-        allResults,
-        macroResult.mbs,
-        config.macro?.applyToScore ?? false,
+        allResults, macroResult.mbs, config.macro?.applyToScore ?? false
       );
       setResults(adjusted);
     }
@@ -193,7 +188,7 @@ export default function Dashboard() {
       )}
 
       {/* ── MACRO INTELLIGENCE PANEL ── */}
-      {config.macro?.enabled && (macroData !== null || macroLoading) && (
+      {config.macro?.enabled && (macroData || macroLoading) && (
         <div className="border-b border-[#1e2d4a]">
           <MacroPanel
             data={macroData}
