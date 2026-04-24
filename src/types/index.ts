@@ -1,5 +1,5 @@
 // ============================================================
-// TYPES — mirrors Python V12.5.6 data structures exactly
+// TYPES — V15.1 + MacroEngine
 // ============================================================
 
 export interface StockConfig {
@@ -74,6 +74,11 @@ export interface AppConfig {
     atrPeriod: number;
     multiplier: number;
     filter_mode: "ema_only" | "full";
+  };
+  // V15.1 MacroEngine
+  macro: {
+    enabled: boolean;          // fetch macro data
+    applyToScore: boolean;     // apply MBS adjustment to SCR score (ST unaffected)
   };
 }
 
@@ -246,7 +251,7 @@ export interface StrategyComparison {
   score: StrategyMetrics;
   supertrend: StrategyMetrics;
   winner: "score" | "supertrend" | "tie";
-  winner_margin: number; // alpha difference
+  winner_margin: number;
 }
 
 export interface StockAnalysisResult {
@@ -268,11 +273,11 @@ export interface StockAnalysisResult {
   fundamentals?: Fundamentals;
   error?: string;
   chart_bars?: ChartBar[];
-  // SuperTrend additions
-  st_direction: number;         // 1 = bullish, -1 = bearish
-  st_value: number;             // current SuperTrend line value
-  st_stop_distance_pct: number; // distance from price to ST line (%)
-  st_open_return_pct: number | null; // open position return (%) or null
+  // SuperTrend
+  st_direction: number;
+  st_value: number;
+  st_stop_distance_pct: number;
+  st_open_return_pct: number | null;
   st_opt_params?: {
     atrPeriod:  number;
     multiplier: number;
@@ -280,8 +285,9 @@ export interface StockAnalysisResult {
     numTrades:  number;
   };
   comparison: StrategyComparison | null;
+  // V15.1 MacroEngine
+  macro_adjustment?: number;   // MBS adjustment applied to score (0 if disabled)
 }
-
 
 export interface Fundamentals {
   pe_ratio: number | null;
@@ -299,7 +305,6 @@ export interface PortfolioResponse {
   config: AppConfig;
 }
 
-// Shared bar type — used by backtest, signals, candlestick, pipeline
 export interface OHLCVBar {
   date: string;
   open: number;
@@ -317,8 +322,8 @@ export interface OHLCVBar {
   minusDI: number;
   sma20: number;
   sma50: number;
-  ema20: number;       // True EMA(20) for Velocity Entry filter
-  ema20Slope: number;  // EMA20 change over 3 bars (positive = accelerating upward)
+  ema20: number;
+  ema20Slope: number;
   bbUpper: number;
   bbMid: number;
   bbLower: number;
@@ -338,15 +343,13 @@ export interface OHLCVBar {
   signalConfirmed: string;
   entrySignal: string;
   forceEntry: number;
-  // SuperTrend fields
   supertrend: number;
-  supertrendDir: number;    // 1 = uptrend, -1 = downtrend
-  supertrendSignal: string; // 'BUY' | 'SELL' | 'HOLD'
-  stEntrySignal: string;    // shifted for backtest entry
+  supertrendDir: number;
+  supertrendSignal: string;
+  stEntrySignal: string;
   ema50: number;
 }
 
-// Lightweight price bar for chart rendering (returned in API response)
 export interface PriceBar {
   date: string;
   open: number;
@@ -359,11 +362,10 @@ export interface PriceBar {
   bbUpper: number;
   bbLower: number;
   score: number;
-  signal: string;       // "BUY" | "SELL" | "HOLD"
-  entrySignal: string;  // shifted signal used by backtest
+  signal: string;
+  entrySignal: string;
 }
 
-// Per-bar chart data returned to client for price/signal chart
 export interface ChartBar {
   date: string;
   close: number;
@@ -377,7 +379,7 @@ export interface ChartBar {
   ema50: number;
   bbUpper: number;
   bbLower: number;
-  signal: string;       // signalConfirmed per bar
+  signal: string;
   score: number;
   rsi: number;
   macd: number;
@@ -390,7 +392,6 @@ export interface ChartBar {
   supertrendDir: number;
 }
 
-// Regime icon/label metadata
 export interface RegimeBadge {
   icon: string;
   label: string;
