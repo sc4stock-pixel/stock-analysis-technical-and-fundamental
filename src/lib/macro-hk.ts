@@ -2,11 +2,11 @@
 // HK MACRO ENGINE — V15.2  (SERVER ONLY)
 // Factors & weights:
 //   VHSI (volatility)      25%
-//   USD/HKD peg            25%
+//   USD/HKD peg            15%
 //   HSI + HSTECH trends    20%
-//   Southbound flow        15%
-//   HIBOR 1M               7.5%
-//   HK breadth proxy       7.5%
+//   Southbound flow        20%
+//   HIBOR 1M               10%
+//   HK breadth proxy       10%
 // ============================================================
 
 import { HKMacroData, MacroFactor, MacroHeadline, hkMbsLabel } from "./macro-types";
@@ -14,11 +14,11 @@ export type { HKMacroData };
 
 const W = {
   vhsi:       0.25,
-  usdHkd:     0.25,
+  usdHkd:     0.15,
   hsiTrends:  0.20,
-  southbound: 0.15,
-  hibor:      0.075,
-  breadth:    0.075,
+  southbound: 0.20,
+  hibor:      0.10,
+  breadth:    0.10,
 };
 
 // ── Yahoo helpers ─────────────────────────────────────────────
@@ -159,42 +159,44 @@ async function getHSITrends(): Promise<MacroFactor> {
 }
 
 // ── 4. Southbound Flow ────────────────────────────────────────
-// Fixed: uses correct EastMoney KAMT kline API
+// Fixed with combined secid and multi-fallback
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  try {
-    const secid = '90.BK0002'; // Combined southbound (Shanghai + Shenzhen)
+  // Helper to fetch KAMT kline net flow for a given secid
+  const fetchKamtNet = async (secid: string): Promise<number[]> => {
     const url = `https://push2.eastmoney.com/api/qt/kamt.kline/get?secid=${secid}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&lmt=10`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/' },
       cache: 'no-store',
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) throw new Error(`EastMoney ${res.status}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const klines: string[] = json?.data?.klines ?? [];
     if (klines.length === 0) throw new Error('no klines');
-
-    // Parse: each kline is "date,netToday,net5d,net10d,..."
+    // Parse last entry for today's net, and sum last 5 for 5d net
     const last = klines[klines.length - 1].split(',');
-    const netToday = parseFloat(last[1] ?? '0');
-    const net5d    = klines.slice(-5).reduce((sum, k) => sum + parseFloat(k.split(',')[1] ?? '0'), 0);
+    const today = parseFloat(last[1] ?? '0');
+    const fiveDay = klines.slice(-5).reduce((sum, k) => sum + parseFloat(k.split(',')[1] ?? '0'), 0);
+    return [today, fiveDay];
+  };
 
-    const score  = net5d >= 50 ? 9 : net5d >= 20 ? 8 : net5d >= 5 ? 6 : net5d >= -5 ? 5 : net5d >= -20 ? 3 : 2;
-    const signal: MacroFactor['signal'] = net5d >= 10 ? 'bullish' : net5d <= -10 ? 'bearish' : 'neutral';
-    const todayStr = netToday >= 0 ? `+${netToday.toFixed(1)}` : `${netToday.toFixed(1)}`;
-    const cumStr   = net5d >= 0 ? `+${net5d.toFixed(1)}` : `${net5d.toFixed(1)}`;
-
-    return {
-      label: 'Southbound',
-      value: `${todayStr}亿`,
-      score, signal,
-      detail: `Today ${todayStr} · 5d ${cumStr}亿CNY`,
-    };
-  } catch { /* fallback below */ }
-
-  // Fallback: summary API
   try {
-    const secid = '90.BK0002';
+    // Try combined southbound first (secid = 90.BK0003)
+    const [today, fiveDay] = await fetchKamtNet('90.BK0003');
+    return scoreSouthbound(today, fiveDay);
+  } catch { /* try sum of Shanghai + Shenzhen */ }
+
+  try {
+    const [shToday, sh5Day] = await fetchKamtNet('90.BK0001'); // Shanghai southbound
+    const [szToday, sz5Day] = await fetchKamtNet('90.BK0002'); // Shenzhen southbound
+    const today = shToday + szToday;
+    const fiveDay = sh5Day + sz5Day;
+    return scoreSouthbound(today, fiveDay);
+  } catch { /* fallback to summary API */ }
+
+  // Final fallback: summary real-time
+  try {
+    const secid = '90.BK0003'; // combined
     const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f169,f170`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/' },
@@ -204,24 +206,40 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
     if (!res.ok) throw new Error('Summary API fail');
     const json = await res.json();
     const data = json?.data ?? {};
+    // Field f62 is net flow in yuan (not hundred million)
     const rawVal = parseFloat(data.f62 ?? '0');
     const netToday = rawVal / 100000000; // convert Yuan to 亿
     const score  = netToday >= 30 ? 8 : netToday >= 10 ? 7 : netToday >= 0 ? 5 : netToday >= -10 ? 4 : 2;
     const signal: MacroFactor['signal'] = netToday >= 5 ? 'bullish' : netToday <= -5 ? 'bearish' : 'neutral';
     const valStr = netToday >= 0 ? `+${netToday.toFixed(1)}` : `${netToday.toFixed(1)}`;
     return {
-      label: 'Southbound', value: `${valStr}亿`,
-      score, signal, detail: 'Net inflow today (summary)',
+      label: 'Southbound',
+      value: `${valStr}亿`,
+      score, signal,
+      detail: 'Net inflow today (summary fallback)',
     };
   } catch { /* ignore */ }
 
   return { label: 'Southbound', value: '—', score: 5, signal: 'neutral', detail: 'unavailable' };
 }
 
+function scoreSouthbound(todayNet: number, fiveDayNet: number): MacroFactor {
+  const score  = fiveDayNet >= 50 ? 9 : fiveDayNet >= 20 ? 8 : fiveDayNet >= 5 ? 6 : fiveDayNet >= -5 ? 5 : fiveDayNet >= -20 ? 3 : 2;
+  const signal: MacroFactor['signal'] = fiveDayNet >= 10 ? 'bullish' : fiveDayNet <= -10 ? 'bearish' : 'neutral';
+  const todayStr = todayNet >= 0 ? `+${todayNet.toFixed(1)}` : `${todayNet.toFixed(1)}`;
+  const cumStr   = fiveDayNet >= 0 ? `+${fiveDayNet.toFixed(1)}` : `${fiveDayNet.toFixed(1)}`;
+  return {
+    label: 'Southbound',
+    value: `${todayStr}亿`,
+    score, signal,
+    detail: `Today ${todayStr} · 5d ${cumStr}亿CNY`,
+  };
+}
+
 // ── 5. HIBOR 1M ───────────────────────────────────────────────
-// Fixed: no external parser, uses row‑based regex scraping
+// Fixed: reliable scraping of 1 Month HIBOR, fallback correctly labeled
 async function getHIBOR(): Promise<MacroFactor> {
-  // Primary: scrape HKAB table rows with string splitting
+  // Primary: scrape HKAB using a regex that captures the number after "1 Month"
   try {
     const res = await fetch('https://www.hkab.org.hk/hibor/listHibor.do', {
       headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html' },
@@ -231,23 +249,17 @@ async function getHIBOR(): Promise<MacroFactor> {
     if (!res.ok) throw new Error(`HKAB ${res.status}`);
     const html = await res.text();
 
-    // Extract all <tr> blocks
-    const rows = html.match(/<tr[^>]*>([\s\S]*?)<\/tr>/g);
-    if (!rows) throw new Error('No table rows');
+    // Find the cell containing "1 Month" and grab the next numeric cell
+    // Pattern: "1 Month" followed by any tags, then a number with up to 6 decimals
+    const re = /1\s*Month\s*<\/td>\s*<td[^>]*>\s*(\d+\.\d+)/i;
+    const m = re.exec(html);
+    if (!m) throw new Error('1 Month HIBOR not found');
+    const rate = parseFloat(m[1]);
+    if (isNaN(rate) || rate <= 0 || rate > 30) throw new Error('Invalid HIBOR');
+    return scoreHIBOR(rate, 'HKAB');
+  } catch { /* fallback to HKMA overnight, but label it */ }
 
-    for (const row of rows) {
-      // Remove HTML tags to get cell texts
-      const cells = row.split(/<\/?(?:td|th)[^>]*>/i).map(s => s.trim()).filter(s => s.length > 0);
-      // Find the row with "1 Month" (case insensitive) in the first cell
-      if (cells.length >= 2 && cells[0].toLowerCase().includes('1 month')) {
-        const rate = parseFloat(cells[1]);
-        if (!isNaN(rate) && rate > 0 && rate < 30) return scoreHIBOR(rate, 'HKAB');
-      }
-    }
-    throw new Error('HIBOR 1M not found in table');
-  } catch { /* fallback */ }
-
-  // Fallback: HKMA daily figures for Interbank Liquidity (O/N HIBOR)
+  // Fallback: HKMA daily figures (overnight HIBOR)
   try {
     const url = 'https://api.hkma.gov.hk/public/market-data-and-statistics/daily-monetary-statistics/daily-figures-interbank-liquidity?pagesize=1&sortby=end_of_date&sortorder=desc';
     const res = await fetch(url, {
@@ -263,13 +275,19 @@ async function getHIBOR(): Promise<MacroFactor> {
     const rateStr = latest.hibor_on ?? latest['hibor_overnight'] ?? '';
     const rate = parseFloat(rateStr);
     if (isNaN(rate) || rate <= 0) throw new Error('invalid HKMA rate');
-    return scoreHIBOR(rate, 'HKMA');
+    // Return with label clarifying it's O/N fallback
+    return {
+      label: 'HIBOR 1M',
+      value: `${rate.toFixed(3)}%`,
+      score: rate < 1.0 ? 8 : rate < 2.5 ? 7 : rate < 4.0 ? 5 : rate < 6.0 ? 3 : 2,
+      signal: rate < 2.0 ? 'bullish' : rate > 4.5 ? 'bearish' : 'neutral',
+      detail: `O/N fallback (${rate.toFixed(2)}%)`,
+    };
   } catch { /* ignore */ }
 
   return { label: 'HIBOR 1M', value: '—', score: 5, signal: 'neutral', detail: 'unavailable' };
 }
 
-// (unchanged scoring helper)
 function scoreHIBOR(rate: number, source: string): MacroFactor {
   const score  = rate < 1.0 ? 8 : rate < 2.5 ? 7 : rate < 4.0 ? 5 : rate < 6.0 ? 3 : 2;
   const signal: MacroFactor["signal"] = rate < 2.0 ? "bullish" : rate > 4.5 ? "bearish" : "neutral";
