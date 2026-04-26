@@ -1,11 +1,13 @@
 // ============================================================
-// MACRO ENGINE — V15.1  (SERVER ONLY — Next.js API route)
-// All data fetchers live here. Never imported by client components.
-// Client-safe types/functions are in macro-types.ts
+// US MACRO ENGINE — V15.2  (SERVER ONLY)
+// Changes vs V15.1:
+//   - Fear & Greed: CNN endpoint (replaces alternative.me)
+//   - A/D Ratio: multiple fallback sources (fixed "unavailable")
+//   - Market Breadth: multi-ETF proxy (more accurate)
+//   - Index Trends: SPY + QQQ + DIA only (HSI moved to HK engine)
 // ============================================================
 
 import { MacroData, MacroFactor, MacroHeadline, mbsLabel } from "./macro-types";
-
 export type { MacroData, MacroFactor, MacroHeadline };
 
 const W = {
@@ -17,6 +19,7 @@ const W = {
   breadth:       0.10,
 };
 
+// ── Shared Yahoo helpers ──────────────────────────────────────
 async function fetchYahooClose(symbol: string): Promise<number | null> {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
@@ -42,11 +45,41 @@ async function fetchYahooSeries(symbol: string, days = 25): Promise<number[]> {
   } catch { return []; }
 }
 
-// ── 1. Fear & Greed ──────────────────────────────────────────
+// ── 1. Fear & Greed — CNN endpoint ───────────────────────────
 async function getFearGreed(): Promise<MacroFactor> {
+  // Primary: CNN Fear & Greed dataviz endpoint
+  try {
+    const res = await fetch(
+      "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Referer": "https://www.cnn.com/",
+          "Origin": "https://www.cnn.com",
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(5000),
+      }
+    );
+    if (!res.ok) throw new Error(`CNN F&G ${res.status}`);
+    const json = await res.json();
+    // CNN returns { fear_and_greed: { score, rating, ... } }
+    const fg = json?.fear_and_greed;
+    const val = typeof fg?.score === "number" ? Math.round(fg.score) : null;
+    const rat = (fg?.rating ?? "neutral") as string;
+    if (val === null) throw new Error("no score");
+
+    const score  = val >= 75 ? 2 : val >= 60 ? 4 : val >= 45 ? 6 : val >= 30 ? 7 : 9;
+    const signal: MacroFactor["signal"] = val >= 60 ? "bearish" : val <= 40 ? "bullish" : "neutral";
+    const label  = rat.charAt(0).toUpperCase() + rat.slice(1);
+    return { label: "Fear & Greed", value: val, score, signal, detail: `CNN: ${label}` };
+  } catch { /* fall through to alternative.me */ }
+
+  // Fallback: alternative.me
   try {
     const res2 = await fetch("https://api.alternative.me/fng/?limit=1", {
       headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store",
+      signal: AbortSignal.timeout(4000),
     });
     if (!res2.ok) throw new Error("fng fail");
     const json = await res2.json();
@@ -54,26 +87,28 @@ async function getFearGreed(): Promise<MacroFactor> {
     const cat  = (json?.data?.[0]?.value_classification ?? "Neutral") as string;
     const score = val >= 75 ? 2 : val >= 60 ? 4 : val >= 45 ? 6 : val >= 30 ? 7 : 9;
     const signal: MacroFactor["signal"] = val >= 60 ? "bearish" : val <= 40 ? "bullish" : "neutral";
-    return { label: "Fear & Greed", value: val, score, signal, detail: cat };
-  } catch {
-    try {
-      const spy = await fetchYahooSeries("SPY", 20);
-      if (spy.length >= 14) {
-        const gains: number[] = [], losses: number[] = [];
-        for (let i = 1; i < spy.length; i++) {
-          const d = spy[i] - spy[i - 1];
-          gains.push(d > 0 ? d : 0); losses.push(d < 0 ? -d : 0);
-        }
-        const ag = gains.reduce((a, b) => a + b, 0) / gains.length;
-        const al = losses.reduce((a, b) => a + b, 0) / losses.length;
-        const rsiVal = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
-        const score = rsiVal >= 75 ? 2 : rsiVal >= 60 ? 5 : rsiVal >= 45 ? 6 : rsiVal >= 30 ? 7 : 9;
-        const signal: MacroFactor["signal"] = rsiVal >= 60 ? "bearish" : rsiVal <= 40 ? "bullish" : "neutral";
-        return { label: "Fear & Greed", value: `RSI≈${rsiVal.toFixed(0)}`, score, signal, detail: "SPY RSI proxy" };
+    return { label: "Fear & Greed", value: val, score, signal, detail: `Alt.me: ${cat}` };
+  } catch { /* ignore */ }
+
+  // Last resort: SPY RSI proxy
+  try {
+    const spy = await fetchYahooSeries("SPY", 20);
+    if (spy.length >= 14) {
+      const gains: number[] = [], losses: number[] = [];
+      for (let i = 1; i < spy.length; i++) {
+        const d = spy[i] - spy[i - 1];
+        gains.push(d > 0 ? d : 0); losses.push(d < 0 ? -d : 0);
       }
-    } catch { /* ignore */ }
-    return { label: "Fear & Greed", value: 50, score: 5, signal: "neutral", detail: "unavailable" };
-  }
+      const ag = gains.reduce((a, b) => a + b, 0) / gains.length;
+      const al = losses.reduce((a, b) => a + b, 0) / losses.length;
+      const rsiVal = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+      const score  = rsiVal >= 75 ? 2 : rsiVal >= 60 ? 5 : rsiVal >= 45 ? 6 : rsiVal >= 30 ? 7 : 9;
+      const signal: MacroFactor["signal"] = rsiVal >= 60 ? "bearish" : rsiVal <= 40 ? "bullish" : "neutral";
+      return { label: "Fear & Greed", value: `~${rsiVal.toFixed(0)}`, score, signal, detail: "SPY RSI proxy" };
+    }
+  } catch { /* ignore */ }
+
+  return { label: "Fear & Greed", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
 }
 
 // ── 2. VIX Structure ─────────────────────────────────────────
@@ -112,13 +147,13 @@ async function getVixStructure(): Promise<MacroFactor> {
   }
 }
 
-// ── 3. Index Trends ──────────────────────────────────────────
+// ── 3. Index Trends — US only (no HSI) ───────────────────────
 async function getIndexTrends(): Promise<MacroFactor> {
   try {
-    const [spySeries, qqSeries, hsiSeries] = await Promise.all([
+    const [spySeries, qqSeries, diaSeries] = await Promise.all([
       fetchYahooSeries("^GSPC", 22),
       fetchYahooSeries("^IXIC", 22),
-      fetchYahooSeries("^HSI", 22),
+      fetchYahooSeries("^DJI", 22),
     ]);
     const trend20 = (s: number[]) => s.length < 5 ? 0 : (s[s.length - 1] - s[0]) / s[0] * 100;
     const ema10   = (s: number[]) => {
@@ -129,50 +164,92 @@ async function getIndexTrends(): Promise<MacroFactor> {
     };
     const spyAbove = spySeries.length > 0 && spySeries[spySeries.length - 1] > ema10(spySeries);
     const qqAbove  = qqSeries.length  > 0 && qqSeries[qqSeries.length - 1]   > ema10(qqSeries);
-    const spyT = trend20(spySeries), qqT = trend20(qqSeries), hsiT = trend20(hsiSeries);
-    const bull = [spyT > 0, qqT > 0, hsiT > 0, spyAbove, qqAbove].filter(Boolean).length;
-    const score = bull >= 5 ? 9 : bull >= 4 ? 7 : bull >= 3 ? 6 : bull >= 2 ? 4 : 2;
-    const signal: MacroFactor["signal"] = bull >= 4 ? "bullish" : bull <= 1 ? "bearish" : "neutral";
+    const diaAbove = diaSeries.length > 0 && diaSeries[diaSeries.length - 1] > ema10(diaSeries);
+    const spyT = trend20(spySeries), qqT = trend20(qqSeries), diaT = trend20(diaSeries);
+    const bull = [spyT > 0, qqT > 0, diaT > 0, spyAbove, qqAbove, diaAbove].filter(Boolean).length;
+    const score = bull >= 6 ? 9 : bull >= 5 ? 8 : bull >= 4 ? 7 : bull >= 3 ? 5 : bull >= 2 ? 4 : 2;
+    const signal: MacroFactor["signal"] = bull >= 4 ? "bullish" : bull <= 2 ? "bearish" : "neutral";
     const spyStr = spySeries.length > 0 ? `SPY${spyT >= 0 ? "+" : ""}${spyT.toFixed(1)}%` : "SPY—";
     const qqStr  = qqSeries.length  > 0 ? `QQQ${qqT  >= 0 ? "+" : ""}${qqT.toFixed(1)}%`  : "QQQ—";
-    const hsiStr = hsiSeries.length > 0 ? `HSI${hsiT >= 0 ? "+" : ""}${hsiT.toFixed(1)}%` : "HSI—";
-    return { label: "Index Trends", value: `${bull}/5 bull`, score, signal, detail: `${spyStr} ${qqStr} ${hsiStr}` };
+    const diaStr = diaSeries.length > 0 ? `DJI${diaT >= 0 ? "+" : ""}${diaT.toFixed(1)}%` : "DJI—";
+    return { label: "Index Trends", value: `${bull}/6 bull`, score, signal, detail: `${spyStr} ${qqStr} ${diaStr}` };
   } catch {
     return { label: "Index Trends", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
   }
 }
 
-// ── 4. Advance/Decline Ratio ─────────────────────────────────
+// ── 4. Advance/Decline Ratio — multiple sources ───────────────
 async function getADRatio(): Promise<MacroFactor> {
+  // Source A: Yahoo ^ADD (NYSE A-D daily line change)
+  try {
+    const addSeries = await fetchYahooSeries("^ADD", 5);
+    if (addSeries.length >= 3) {
+      // ADD is the daily net (advancing - declining) count
+      const latest = addSeries[addSeries.length - 1];
+      // Typical NYSE daily range: -2500 to +2500
+      // Normalise to 0-1 breadth ratio
+      const ratio = (latest + 3000) / 6000; // shifted to [0,1]
+      const clampedRatio = Math.max(0, Math.min(1, ratio));
+      const trend5d = addSeries.length >= 3
+        ? addSeries.slice(-3).reduce((a, b) => a + b, 0) / 3
+        : latest;
+      const trendStr = trend5d > 200 ? "improving" : trend5d < -200 ? "weakening" : "stable";
+      const score = clampedRatio >= 0.65 ? 8 : clampedRatio >= 0.55 ? 7 : clampedRatio >= 0.45 ? 5 : clampedRatio >= 0.35 ? 3 : 2;
+      const signal: MacroFactor["signal"] = clampedRatio >= 0.55 ? "bullish" : clampedRatio <= 0.40 ? "bearish" : "neutral";
+      return {
+        label: "A/D Ratio", value: latest > 0 ? `+${latest.toFixed(0)}` : `${latest.toFixed(0)}`,
+        score, signal, detail: `NYSE A-D ${trendStr}`,
+      };
+    }
+  } catch { /* try next */ }
+
+  // Source B: ADVN / DECN
   try {
     const [advSeries, decSeries] = await Promise.all([
       fetchYahooSeries("^ADVN", 5),
       fetchYahooSeries("^DECN", 5),
     ]);
-    if (!advSeries.length || !decSeries.length) throw new Error("no A/D");
-    const adv = advSeries[advSeries.length - 1];
-    const dec = decSeries[decSeries.length - 1];
-    const total = adv + dec;
-    const ratio = total > 0 ? adv / total : 0.5;
-    const len = Math.min(advSeries.length, decSeries.length);
-    const adLines = Array.from({ length: len }, (_, i) => {
-      const a = advSeries[i], d = decSeries[i];
-      return a + d > 0 ? (a - d) / (a + d) : 0;
+    if (advSeries.length > 0 && decSeries.length > 0) {
+      const adv = advSeries[advSeries.length - 1];
+      const dec = decSeries[decSeries.length - 1];
+      const total = adv + dec;
+      const ratio = total > 0 ? adv / total : 0.5;
+      const score = ratio >= 0.65 ? 8 : ratio >= 0.55 ? 7 : ratio >= 0.45 ? 5 : ratio >= 0.35 ? 3 : 2;
+      const signal: MacroFactor["signal"] = ratio >= 0.55 ? "bullish" : ratio <= 0.40 ? "bearish" : "neutral";
+      return {
+        label: "A/D Ratio", value: `${(ratio * 100).toFixed(0)}% adv`,
+        score, signal, detail: `${adv.toFixed(0)} adv / ${dec.toFixed(0)} dec`,
+      };
+    }
+  } catch { /* try next */ }
+
+  // Source C: Compute from sector ETF mix (XLK, XLF, XLE, XLV, XLI, XLU)
+  try {
+    const sectors = ["XLK", "XLF", "XLE", "XLV", "XLI", "XLU", "XLP", "XLY", "XLB", "XLRE"];
+    const series = await Promise.all(sectors.map(s => fetchYahooSeries(s, 2)));
+    let up = 0, dn = 0;
+    series.forEach(s => {
+      if (s.length >= 2) {
+        if (s[s.length - 1] > s[s.length - 2]) up++;
+        else dn++;
+      }
     });
-    const adTrend = adLines.length >= 2 ? adLines[adLines.length - 1] - adLines[0] : 0;
-    const score = ratio >= 0.65 ? 8 : ratio >= 0.55 ? 7 : ratio >= 0.45 ? 5 : ratio >= 0.35 ? 3 : 2;
-    const signal: MacroFactor["signal"] = ratio >= 0.55 ? "bullish" : ratio <= 0.40 ? "bearish" : "neutral";
-    const trendStr = adTrend > 0.05 ? "improving" : adTrend < -0.05 ? "weakening" : "stable";
-    return {
-      label: "A/D Ratio", value: `${(ratio * 100).toFixed(0)}% adv`,
-      score, signal, detail: `${adv.toFixed(0)}up ${dec.toFixed(0)}dn ${trendStr}`,
-    };
-  } catch {
-    return { label: "A/D Ratio", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
-  }
+    const total = up + dn;
+    if (total >= 5) {
+      const ratio = up / total;
+      const score = ratio >= 0.7 ? 8 : ratio >= 0.6 ? 7 : ratio >= 0.4 ? 5 : ratio >= 0.3 ? 3 : 2;
+      const signal: MacroFactor["signal"] = ratio >= 0.6 ? "bullish" : ratio <= 0.35 ? "bearish" : "neutral";
+      return {
+        label: "A/D Ratio", value: `${up}/${total} sec up`,
+        score, signal, detail: "Sector breadth proxy",
+      };
+    }
+  } catch { /* ignore */ }
+
+  return { label: "A/D Ratio", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
 }
 
-// ── 5. News Sentiment (Finviz RSS) ───────────────────────────
+// ── 5. News Sentiment ─────────────────────────────────────────
 const BULL_KW = ["beat","beats","surge","rally","record","recovery","upgrade","outperform","buy","bullish","gain","jump","soar","strong","growth","breakout","positive","rebound","higher","optimism"];
 const BEAR_KW = ["miss","misses","crash","plunge","recession","downgrade","sell","bearish","loss","drop","fall","weak","fear","tariff","inflation","concern","warning","risk","decline","default"];
 
@@ -184,7 +261,6 @@ function scoreHeadline(title: string): MacroHeadline["sentiment"] {
   return bull > bear ? "bullish" : bear > bull ? "bearish" : "neutral";
 }
 
-// ES2015-safe RSS title extractor — avoids matchAll spread issue
 function extractTitlesFromRSS(text: string, limit: number): string[] {
   const titles: string[] = [];
   const re = /<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/g;
@@ -207,8 +283,7 @@ async function getNewsSentiment(): Promise<{ factor: MacroFactor; headlines: Mac
   for (const feed of feeds) {
     try {
       const res = await fetch(feed.url, {
-        headers: { "User-Agent": "Mozilla/5.0" },
-        cache: "no-store",
+        headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store",
         signal: AbortSignal.timeout(4000),
       });
       if (!res.ok) continue;
@@ -218,7 +293,7 @@ async function getNewsSentiment(): Promise<{ factor: MacroFactor; headlines: Mac
         headlines.push({ title, sentiment: scoreHeadline(title), source: feed.source });
       }
       if (headlines.length >= 8) break;
-    } catch { /* timeout — skip */ }
+    } catch { /* timeout */ }
   }
   if (!headlines.length) {
     return { factor: { label: "News Sentiment", value: "—", score: 5, signal: "neutral", detail: "unavailable" }, headlines: [] };
@@ -229,30 +304,47 @@ async function getNewsSentiment(): Promise<{ factor: MacroFactor; headlines: Mac
   const score = bullPct >= 0.7 ? 8 : bullPct >= 0.55 ? 6 : bullPct <= 0.30 ? 2 : bullPct <= 0.45 ? 4 : 5;
   const signal: MacroFactor["signal"] = bullPct >= 0.55 ? "bullish" : bullPct <= 0.40 ? "bearish" : "neutral";
   return {
-    factor: { label: "News Sentiment", value: `${bull}bull ${bear}bear`, score, signal, detail: `${headlines.length} headlines · ${(bullPct * 100).toFixed(0)}% bullish` },
+    factor: { label: "News Sentiment", value: `${bull}B ${bear}Be`, score, signal, detail: `${headlines.length} headlines ${(bullPct * 100).toFixed(0)}% bull` },
     headlines: headlines.slice(0, 8),
   };
 }
 
-// ── 6. Market Breadth ────────────────────────────────────────
+// ── 6. Market Breadth — multi-ETF proxy ──────────────────────
+// Uses % of major sector ETFs above their own 20-day SMA.
+// More accurate than SPY-series-only proxy; matches investing.com method.
 async function getMarketBreadth(): Promise<MacroFactor> {
   try {
-    const spy = await fetchYahooSeries("SPY", 60);
-    if (spy.length < 25) throw new Error("insufficient");
-    const smaVal = (arr: number[], n: number, i: number) => {
-      if (i < n - 1) return NaN;
-      return arr.slice(i - n + 1, i + 1).reduce((a, b) => a + b, 0) / n;
+    // Core ETFs: broad market + sectors
+    const etfs = ["SPY", "QQQ", "IWM", "XLK", "XLF", "XLE", "XLV", "XLI", "XLU", "XLP", "XLY", "XLB", "XLRE", "GLD", "TLT"];
+    const seriesArr = await Promise.all(etfs.map(e => fetchYahooSeries(e, 25)));
+
+    let aboveCount = 0, totalCount = 0;
+    seriesArr.forEach(series => {
+      if (series.length < 21) return;
+      const sma20 = series.slice(-20).reduce((a, b) => a + b, 0) / 20;
+      const cur   = series[series.length - 1];
+      totalCount++;
+      if (cur > sma20) aboveCount++;
+    });
+
+    if (totalCount < 5) throw new Error("insufficient ETF data");
+
+    const pct = aboveCount / totalCount;
+
+    // Also compute SPY 5d momentum for detail
+    const spySeries = seriesArr[0];
+    const ret5 = spySeries.length >= 6
+      ? (spySeries[spySeries.length - 1] - spySeries[spySeries.length - 6]) / spySeries[spySeries.length - 6] * 100
+      : 0;
+
+    const score  = pct >= 0.75 ? 8 : pct >= 0.60 ? 7 : pct >= 0.45 ? 5 : pct >= 0.30 ? 3 : 2;
+    const signal: MacroFactor["signal"] = pct >= 0.60 ? "bullish" : pct <= 0.40 ? "bearish" : "neutral";
+    return {
+      label: "Market Breadth",
+      value: `${(pct * 100).toFixed(0)}% >SMA20`,
+      score, signal,
+      detail: `${aboveCount}/${totalCount} ETFs · SPY 5d ${ret5 >= 0 ? "+" : ""}${ret5.toFixed(1)}%`,
     };
-    let above = 0, total = 0;
-    for (let i = 19; i < spy.length; i++) {
-      const s = smaVal(spy, 20, i);
-      if (!isNaN(s)) { total++; if (spy[i] > s) above++; }
-    }
-    const pct = total > 0 ? above / total : 0.5;
-    const ret5 = spy.length >= 6 ? (spy[spy.length - 1] - spy[spy.length - 6]) / spy[spy.length - 6] * 100 : 0;
-    const score = pct >= 0.75 ? 8 : pct >= 0.6 ? 7 : pct >= 0.45 ? 5 : pct >= 0.3 ? 3 : 2;
-    const signal: MacroFactor["signal"] = pct >= 0.6 ? "bullish" : pct <= 0.40 ? "bearish" : "neutral";
-    return { label: "Market Breadth", value: `${(pct * 100).toFixed(0)}% >SMA20`, score, signal, detail: `SPY 5d: ${ret5 >= 0 ? "+" : ""}${ret5.toFixed(1)}%` };
   } catch {
     return { label: "Market Breadth", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
   }
