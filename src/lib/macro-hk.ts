@@ -53,8 +53,6 @@ async function getVHSI(): Promise<MacroFactor> {
     const vhsi = await fetchYahooClose("^VHSI");
     if (!vhsi) throw new Error("no VHSI");
 
-    // VHSI scoring: low vol = bullish, high vol = bearish
-    // Typical VHSI ranges: <18 low, 18-25 normal, 25-35 elevated, >35 fear
     const score  = vhsi < 15 ? 9 : vhsi < 18 ? 8 : vhsi < 22 ? 7 : vhsi < 27 ? 5 : vhsi < 33 ? 3 : 2;
     const signal: MacroFactor["signal"] = vhsi < 20 ? "bullish" : vhsi > 28 ? "bearish" : "neutral";
     const label  = vhsi < 18 ? "Low Vol" : vhsi < 25 ? "Normal" : vhsi < 33 ? "Elevated" : "Fear";
@@ -65,7 +63,6 @@ async function getVHSI(): Promise<MacroFactor> {
       detail: label,
     };
   } catch {
-    // Fallback: realized vol from HSI 20-day series
     try {
       const hsi = await fetchYahooSeries("^HSI", 25);
       if (hsi.length >= 21) {
@@ -73,7 +70,7 @@ async function getVHSI(): Promise<MacroFactor> {
         for (let i = 1; i < hsi.length; i++) rets.push(Math.log(hsi[i] / hsi[i - 1]));
         const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
         const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length;
-        const rvol = Math.sqrt(variance * 252) * 100; // annualized %
+        const rvol = Math.sqrt(variance * 252) * 100;
         const score  = rvol < 15 ? 9 : rvol < 20 ? 8 : rvol < 25 ? 6 : rvol < 32 ? 4 : 2;
         const signal: MacroFactor["signal"] = rvol < 20 ? "bullish" : rvol > 30 ? "bearish" : "neutral";
         return {
@@ -89,8 +86,6 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 // ── 2. USD/HKD Peg Stability ──────────────────────────────────
-// HKD peg band: 7.75–7.85. Strong side: 7.75, Weak side: 7.85
-// Green: 7.75–7.77 (strong side, ideal), Orange: 7.77–7.83 (normal), Red: 7.83–7.85 (weak side pressure)
 async function getUSDHKD(): Promise<MacroFactor> {
   try {
     const rate = await fetchYahooClose("USDHKD=X");
@@ -111,7 +106,6 @@ async function getUSDHKD(): Promise<MacroFactor> {
     } else if (rate > 7.85) {
       score = 1; signal = "bearish"; detail = "Above peg ceiling";
     } else {
-      // Below 7.75 — HKMA defends strong side
       score = 6; signal = "neutral"; detail = "Below floor (HKMA intervention)";
     }
 
@@ -165,118 +159,118 @@ async function getHSITrends(): Promise<MacroFactor> {
 }
 
 // ── 4. Southbound Flow ────────────────────────────────────────
-// Uses EastMoney public API for Stock Connect southbound net flow
-// Endpoint returns daily net buy/sell into HK market (southbound = mainland buying HK)
+// Fixed: uses correct EastMoney KAMT kline API
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  // Primary: EastMoney Stock Connect API
   try {
-    // EastMoney public API — returns recent southbound net flow data
-    // fltt=2 = amount in CNY, sz=10 = last 10 days, type=2 = southbound (S→H)
-    const url = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0002&cb=";
+    const secid = '90.BK0002'; // Combined southbound (Shanghai + Shenzhen)
+    const url = `https://push2.eastmoney.com/api/qt/kamt.kline/get?secid=${secid}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&lmt=10`;
     const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
-      cache: "no-store",
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/' },
+      cache: 'no-store',
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error(`EastMoney ${res.status}`);
-    const text = await res.text();
-    const json = JSON.parse(text);
+    const json = await res.json();
     const klines: string[] = json?.data?.klines ?? [];
-    if (klines.length === 0) throw new Error("no klines");
+    if (klines.length === 0) throw new Error('no klines');
 
-    // Each kline: "date,open,close,high,low,amount,volume"
-    // For flow data: f52 = net flow today, f53 = net flow 5d cumulative
-    // Parse last entry
-    const last = klines[klines.length - 1].split(",");
-    const netFlow = parseFloat(last[2] ?? "0"); // net in CNY hundred millions
-    const flow5d  = klines.slice(-5).reduce((sum, k) => sum + parseFloat(k.split(",")[2] ?? "0"), 0);
+    // Parse: each kline is "date,netToday,net5d,net10d,..."
+    const last = klines[klines.length - 1].split(',');
+    const netToday = parseFloat(last[1] ?? '0');
+    const net5d    = klines.slice(-5).reduce((sum, k) => sum + parseFloat(k.split(',')[1] ?? '0'), 0);
 
-    const score  = flow5d >= 50 ? 9 : flow5d >= 20 ? 8 : flow5d >= 5 ? 6 : flow5d >= -5 ? 5 : flow5d >= -20 ? 3 : 2;
-    const signal: MacroFactor["signal"] = flow5d >= 10 ? "bullish" : flow5d <= -10 ? "bearish" : "neutral";
-    const todayStr = netFlow >= 0 ? `+${netFlow.toFixed(1)}` : `${netFlow.toFixed(1)}`;
-    const cumStr   = flow5d >= 0 ? `+${flow5d.toFixed(1)}` : `${flow5d.toFixed(1)}`;
+    const score  = net5d >= 50 ? 9 : net5d >= 20 ? 8 : net5d >= 5 ? 6 : net5d >= -5 ? 5 : net5d >= -20 ? 3 : 2;
+    const signal: MacroFactor['signal'] = net5d >= 10 ? 'bullish' : net5d <= -10 ? 'bearish' : 'neutral';
+    const todayStr = netToday >= 0 ? `+${netToday.toFixed(1)}` : `${netToday.toFixed(1)}`;
+    const cumStr   = net5d >= 0 ? `+${net5d.toFixed(1)}` : `${net5d.toFixed(1)}`;
 
     return {
-      label: "Southbound",
+      label: 'Southbound',
       value: `${todayStr}亿`,
       score, signal,
       detail: `Today ${todayStr} · 5d ${cumStr}亿CNY`,
     };
-  } catch { /* try fallback */ }
+  } catch { /* fallback below */ }
 
-  // Fallback: EastMoney summary API (simpler endpoint)
+  // Fallback: summary API
   try {
-    const url2 = "https://push2.eastmoney.com/api/qt/stock/get?ut=b2884a393a59ad64002292a3e90d46a5&fltt=2&invt=2&fields=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&secid=90.BK0002&cb=";
-    const res2 = await fetch(url2, {
-      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(4000),
+    const secid = '90.BK0002';
+    const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f169,f170`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
     });
-    if (!res2.ok) throw new Error("fallback fail");
-    const json2 = JSON.parse(await res2.text());
-    const data = json2?.data ?? {};
-    // f62 or similar net flow field
-    const netToday = (data.f62 ?? data.f184 ?? 0) / 1e8; // convert to 亿
+    if (!res.ok) throw new Error('Summary API fail');
+    const json = await res.json();
+    const data = json?.data ?? {};
+    const rawVal = parseFloat(data.f62 ?? '0');
+    const netToday = rawVal / 100000000; // convert Yuan to 亿
     const score  = netToday >= 30 ? 8 : netToday >= 10 ? 7 : netToday >= 0 ? 5 : netToday >= -10 ? 4 : 2;
-    const signal: MacroFactor["signal"] = netToday >= 5 ? "bullish" : netToday <= -5 ? "bearish" : "neutral";
+    const signal: MacroFactor['signal'] = netToday >= 5 ? 'bullish' : netToday <= -5 ? 'bearish' : 'neutral';
     const valStr = netToday >= 0 ? `+${netToday.toFixed(1)}` : `${netToday.toFixed(1)}`;
     return {
-      label: "Southbound", value: `${valStr}亿`,
-      score, signal, detail: `Net inflow today`,
+      label: 'Southbound', value: `${valStr}亿`,
+      score, signal, detail: 'Net inflow today (summary)',
     };
   } catch { /* ignore */ }
 
-  return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
+  return { label: 'Southbound', value: '—', score: 5, signal: 'neutral', detail: 'unavailable' };
 }
 
 // ── 5. HIBOR 1M ───────────────────────────────────────────────
-// Primary: scrape HKAB (hkab.org.hk), Fallback: HKMA API
+// Fixed: no external parser, uses row‑based regex scraping
 async function getHIBOR(): Promise<MacroFactor> {
-  // Primary: HKAB scrape
+  // Primary: scrape HKAB table rows with string splitting
   try {
-    const res = await fetch("https://www.hkab.org.hk/hibor/listHibor.do", {
-      headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(5000),
+    const res = await fetch('https://www.hkab.org.hk/hibor/listHibor.do', {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) throw new Error(`HKAB ${res.status}`);
     const html = await res.text();
 
-    // Regex for 1-month HIBOR — table row with "1 Month" or "1M"
-    // HKAB table format: <td>1 Month</td><td>X.XXXXX</td>
-    const re = /1\s*[Mm]onth[\s\S]*?(\d+\.\d+)/;
-    const m  = re.exec(html);
-    if (!m) throw new Error("no HIBOR in HTML");
-    const rate = parseFloat(m[1]);
-    if (isNaN(rate) || rate <= 0 || rate > 30) throw new Error("invalid HIBOR");
-    return scoreHIBOR(rate, "HKAB");
+    // Extract all <tr> blocks
+    const rows = html.match(/<tr[^>]*>([\s\S]*?)<\/tr>/g);
+    if (!rows) throw new Error('No table rows');
+
+    for (const row of rows) {
+      // Remove HTML tags to get cell texts
+      const cells = row.split(/<\/?(?:td|th)[^>]*>/i).map(s => s.trim()).filter(s => s.length > 0);
+      // Find the row with "1 Month" (case insensitive) in the first cell
+      if (cells.length >= 2 && cells[0].toLowerCase().includes('1 month')) {
+        const rate = parseFloat(cells[1]);
+        if (!isNaN(rate) && rate > 0 && rate < 30) return scoreHIBOR(rate, 'HKAB');
+      }
+    }
+    throw new Error('HIBOR 1M not found in table');
   } catch { /* fallback */ }
 
-  // Fallback: HKMA Exchange Fund Bills stats API
+  // Fallback: HKMA daily figures for Interbank Liquidity (O/N HIBOR)
   try {
-    const url = "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/money/hibor?pagesize=5&sortby=end_of_date&sortorder=desc";
+    const url = 'https://api.hkma.gov.hk/public/market-data-and-statistics/daily-monetary-statistics/daily-figures-interbank-liquidity?pagesize=1&sortby=end_of_date&sortorder=desc';
     const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      cache: "no-store",
+      headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+      cache: 'no-store',
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error(`HKMA ${res.status}`);
     const json = await res.json();
-    // HKMA returns array of monthly records with hibor_1m field
-    const records: Array<Record<string, unknown>> = json?.result?.records ?? [];
-    if (!records.length) throw new Error("no records");
+    const records = json?.result?.records ?? [];
+    if (!records.length) throw new Error('no HKMA records');
     const latest = records[0];
-    const rate = parseFloat(String(latest?.hibor_1m ?? latest?.["1m"] ?? "0"));
-    if (isNaN(rate) || rate <= 0) throw new Error("invalid HKMA HIBOR");
-    return scoreHIBOR(rate, "HKMA");
+    const rateStr = latest.hibor_on ?? latest['hibor_overnight'] ?? '';
+    const rate = parseFloat(rateStr);
+    if (isNaN(rate) || rate <= 0) throw new Error('invalid HKMA rate');
+    return scoreHIBOR(rate, 'HKMA');
   } catch { /* ignore */ }
 
-  return { label: "HIBOR 1M", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
+  return { label: 'HIBOR 1M', value: '—', score: 5, signal: 'neutral', detail: 'unavailable' };
 }
 
+// (unchanged scoring helper)
 function scoreHIBOR(rate: number, source: string): MacroFactor {
-  // HIBOR interpretation: low = accommodative (bullish for equities), high = tightening (bearish)
-  // Historical HK HIBOR 1M ranges: 0.1–1% (low), 1–3% (normal), 3–5% (high), >5% (very high)
   const score  = rate < 1.0 ? 8 : rate < 2.5 ? 7 : rate < 4.0 ? 5 : rate < 6.0 ? 3 : 2;
   const signal: MacroFactor["signal"] = rate < 2.0 ? "bullish" : rate > 4.5 ? "bearish" : "neutral";
   const label  = rate < 1.0 ? "Very Low" : rate < 2.5 ? "Low" : rate < 4.0 ? "Moderate" : rate < 6.0 ? "High" : "Very High";
@@ -289,23 +283,14 @@ function scoreHIBOR(rate: number, source: string): MacroFactor {
 }
 
 // ── 6. HK Market Breadth proxy ────────────────────────────────
-// Uses major HK ETFs and blue chips above 20-day SMA
 async function getHKBreadth(): Promise<MacroFactor> {
   try {
-    // Key HK ETFs + major blue chips via Yahoo
     const symbols = [
       "^HSI", "^HSTECH",
-      "2800.HK", // Tracker Fund (HSI ETF)
-      "3032.HK", // CSOP Hang Seng TECH
-      "9988.HK", // Alibaba
-      "0700.HK", // Tencent
-      "1211.HK", // BYD
-      "1810.HK", // Xiaomi
-      "0005.HK", // HSBC
-      "0941.HK", // China Mobile
+      "2800.HK", "3032.HK",
+      "9988.HK", "0700.HK", "1211.HK", "1810.HK", "0005.HK", "0941.HK",
     ];
     const seriesArr = await Promise.all(symbols.map(s => fetchYahooSeries(s, 25)));
-
     let above = 0, total = 0;
     seriesArr.forEach(series => {
       if (series.length < 21) return;
@@ -314,9 +299,7 @@ async function getHKBreadth(): Promise<MacroFactor> {
       total++;
       if (cur > sma20) above++;
     });
-
     if (total < 4) throw new Error("insufficient");
-
     const pct    = above / total;
     const score  = pct >= 0.75 ? 8 : pct >= 0.60 ? 7 : pct >= 0.45 ? 5 : pct >= 0.30 ? 3 : 2;
     const signal: MacroFactor["signal"] = pct >= 0.60 ? "bullish" : pct <= 0.40 ? "bearish" : "neutral";
@@ -347,7 +330,6 @@ export async function fetchHKMacroData(): Promise<HKMacroData> {
       hibor.score      * W.hibor      +
       breadth.score    * W.breadth;
 
-    // HK-specific headlines: Finviz filter for HK/China news
     const headlines: MacroHeadline[] = [];
     try {
       const res = await fetch("https://feeds.finance.yahoo.com/rss/2.0/headline?s=^HSI&region=HK&lang=zh-Hant-HK", {
@@ -361,7 +343,6 @@ export async function fetchHKMacroData(): Promise<HKMacroData> {
         let count = 0;
         const BULL_HK = ["上涨","升","买入","强势","增持","看好","回升","反弹","资金流入"];
         const BEAR_HK = ["下跌","跌","卖出","弱势","减持","看淡","回落","下行","资金流出"];
-        // eslint-disable-next-line no-cond-assign
         while ((m = re.exec(text)) !== null && count < 6) {
           const title = m[1].trim();
           if (title.length < 5) continue;
