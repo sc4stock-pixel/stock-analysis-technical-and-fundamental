@@ -1,26 +1,35 @@
 "use client";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { AppConfig, StockAnalysisResult } from "@/types";
-import { MacroData, mbsScoreAdjustment } from "@/lib/macro-types";
+import { MacroData, HKMacroData, mbsScoreAdjustment } from "@/lib/macro-types";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import ConfigPanel from "@/components/ConfigPanel";
 import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
 import StockCard from "@/components/StockCard";
-import MacroPanel from "@/components/MacroPanel";
+import dynamic from "next/dynamic";
 
-// ── helpers ──────────────────────────────────────────────────
-function applyMacroAdjustment(
+const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
+const MacroPanelHK = dynamic(() => import("@/components/MacroPanelHK"), { ssr: false });
+
+// ── Apply macro adjustments — US adj to US stocks, HK adj to HK stocks ──
+function applyDualMacroAdjustment(
   results: StockAnalysisResult[],
-  mbs: number,
+  usMbs:  number | null,
+  hkMbs:  number | null,
   applyToScore: boolean,
 ): StockAnalysisResult[] {
   if (!applyToScore) return results.map(r => ({ ...r, macro_adjustment: 0 }));
-  const adj = mbsScoreAdjustment(mbs);
-  return results.map(r => ({
-    ...r,
-    score: Math.max(0, Math.min(10, r.score + adj)),
-    macro_adjustment: adj,
-  }));
+  return results.map(r => {
+    const isHK  = r.exchange === "HK";
+    const mbs   = isHK ? hkMbs : usMbs;
+    if (mbs === null) return { ...r, macro_adjustment: 0 };
+    const adj = mbsScoreAdjustment(mbs);
+    return {
+      ...r,
+      score: Math.max(0, Math.min(10, r.score + adj)),
+      macro_adjustment: adj,
+    };
+  });
 }
 
 export default function Dashboard() {
@@ -33,8 +42,15 @@ export default function Dashboard() {
   const [showConfig, setShowConfig]   = useState(false);
   const [highlightedSymbol, setHighlightedSymbol] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
-  const [macroData, setMacroData]     = useState<MacroData | null>(null);
+
+  // US macro state
+  const [macroData, setMacroData]       = useState<MacroData | null>(null);
   const [macroLoading, setMacroLoading] = useState(false);
+
+  // HK macro state
+  const [hkMacroData, setHKMacroData]       = useState<HKMacroData | null>(null);
+  const [hkMacroLoading, setHKMacroLoading] = useState(false);
+
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Scroll-to-top ─────────────────────────────────────────
@@ -44,39 +60,73 @@ export default function Dashboard() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const scrollToTop = useCallback(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+  const scrollToTop = useCallback(() => window.scrollTo({ top: 0, behavior: "smooth" }), []);
 
-  // ── Macro fetch ──────────────────────────────────────────
-  const fetchMacro = useCallback(async (): Promise<MacroData | null> => {
+  // ── Fetch US macro ────────────────────────────────────────
+  const fetchUSMacro = useCallback(async (): Promise<MacroData | null> => {
     if (!config.macro?.enabled) return null;
     setMacroLoading(true);
     try {
       const res = await fetch("/api/macro");
-      if (!res.ok) throw new Error(`Macro API ${res.status}`);
-      const data: MacroData = await res.json();
+      if (!res.ok) throw new Error(`US Macro ${res.status}`);
+      const data = await res.json() as MacroData;
       setMacroData(data);
       return data;
     } catch (e) {
-      console.warn("Macro fetch failed:", e);
+      console.warn("US Macro fetch failed:", e);
       return null;
     } finally {
       setMacroLoading(false);
     }
   }, [config.macro?.enabled]);
 
-  // ── Macro refresh (standalone) ───────────────────────────
-  const refreshMacro = useCallback(async () => {
-    const macroResult = await fetchMacro();
-    if (macroResult && results.length > 0 && config.macro?.enabled) {
-      setResults(prev =>
-        applyMacroAdjustment(prev, macroResult.mbs, config.macro?.applyToScore ?? false)
-      );
+  // ── Fetch HK macro ────────────────────────────────────────
+  const fetchHKMacro = useCallback(async (): Promise<HKMacroData | null> => {
+    if (!config.macro?.enabled) return null;
+    // Only fetch HK macro if portfolio has HK stocks
+    const hasHK = config.stocks.PORTFOLIO.some(s => s.exchange === "HK");
+    if (!hasHK) return null;
+    setHKMacroLoading(true);
+    try {
+      const res = await fetch("/api/macro-hk");
+      if (!res.ok) throw new Error(`HK Macro ${res.status}`);
+      const data = await res.json() as HKMacroData;
+      setHKMacroData(data);
+      return data;
+    } catch (e) {
+      console.warn("HK Macro fetch failed:", e);
+      return null;
+    } finally {
+      setHKMacroLoading(false);
     }
-  }, [fetchMacro, results.length, config.macro]);
+  }, [config.macro?.enabled, config.stocks.PORTFOLIO]);
 
-  // ── Main analysis run ────────────────────────────────────
+  // ── Refresh macros (standalone) ───────────────────────────
+  const refreshUSMacro = useCallback(async () => {
+    const usResult = await fetchUSMacro();
+    if (results.length > 0 && config.macro?.enabled) {
+      setResults(prev => applyDualMacroAdjustment(
+        prev,
+        usResult?.mbs ?? null,
+        hkMacroData?.mbs ?? null,
+        config.macro?.applyToScore ?? false,
+      ));
+    }
+  }, [fetchUSMacro, results.length, config.macro, hkMacroData]);
+
+  const refreshHKMacro = useCallback(async () => {
+    const hkResult = await fetchHKMacro();
+    if (results.length > 0 && config.macro?.enabled) {
+      setResults(prev => applyDualMacroAdjustment(
+        prev,
+        macroData?.mbs ?? null,
+        hkResult?.mbs ?? null,
+        config.macro?.applyToScore ?? false,
+      ));
+    }
+  }, [fetchHKMacro, results.length, config.macro, macroData]);
+
+  // ── Main analysis run ─────────────────────────────────────
   const runAnalysis = useCallback(async () => {
     setLoading(true);
     setProgress(0);
@@ -84,10 +134,10 @@ export default function Dashboard() {
     setResults([]);
     setHighlightedSymbol(null);
 
-    // Kick off macro fetch in background (non-blocking)
-    const macroPromise = fetchMacro();
+    // Fetch both macro engines in parallel (non-blocking)
+    const [usPromise, hkPromise] = [fetchUSMacro(), fetchHKMacro()];
 
-    const portfolio = config.stocks.PORTFOLIO;
+    const portfolio    = config.stocks.PORTFOLIO;
     const allResults: StockAnalysisResult[] = [];
 
     for (let i = 0; i < portfolio.length; i++) {
@@ -100,7 +150,7 @@ export default function Dashboard() {
           body:    JSON.stringify({ symbol: stock.symbol, config }),
         });
         if (res.ok) {
-          const data = await res.json();
+          const data = await res.json() as StockAnalysisResult;
           allResults.push(data);
           setResults([...allResults]);
         }
@@ -110,11 +160,14 @@ export default function Dashboard() {
       setProgress(Math.round(((i + 1) / portfolio.length) * 100));
     }
 
-    // Apply macro adjustment once both complete
-    const macroResult = await macroPromise;
-    if (macroResult && config.macro?.enabled) {
-      const adjusted = applyMacroAdjustment(
-        allResults, macroResult.mbs, config.macro?.applyToScore ?? false
+    // Apply dual macro adjustments once both resolve
+    const [usResult, hkResult] = await Promise.all([usPromise, hkPromise]);
+    if (config.macro?.enabled) {
+      const adjusted = applyDualMacroAdjustment(
+        allResults,
+        usResult?.mbs ?? null,
+        hkResult?.mbs ?? null,
+        config.macro?.applyToScore ?? false,
       );
       setResults(adjusted);
     }
@@ -122,9 +175,9 @@ export default function Dashboard() {
     setLastUpdated(new Date().toLocaleTimeString());
     setProgressSymbol("");
     setLoading(false);
-  }, [config, fetchMacro]);
+  }, [config, fetchUSMacro, fetchHKMacro]);
 
-  // ── Scroll to card ───────────────────────────────────────
+  // ── Scroll to card ────────────────────────────────────────
   const scrollToCard = useCallback((symbol: string) => {
     const id = `card-${symbol.replace(/\./g, "-")}`;
     const el = document.getElementById(id);
@@ -136,6 +189,8 @@ export default function Dashboard() {
     highlightTimer.current = setTimeout(() => setHighlightedSymbol(null), 2000);
   }, []);
 
+  const hasHKStocks = config.stocks.PORTFOLIO.some(s => s.exchange === "HK");
+
   return (
     <div className="min-h-screen bg-[#0a0e1a]">
 
@@ -143,14 +198,14 @@ export default function Dashboard() {
       <header className="border-b border-[#1e2d4a] bg-[#0f1629] px-4 py-2.5 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <span className="text-[#00d4ff] font-bold text-sm tracking-widest">▶ TA DASHBOARD</span>
-          <span className="text-[#4a6080] text-xs">V15</span>
+          <span className="text-[#4a6080] text-xs">V15.2</span>
           {lastUpdated && <span className="text-[#4a6080] text-xs">· Updated {lastUpdated}</span>}
           {loading && (
             <span className="text-[#ffa502] text-xs blink">
               · {progressSymbol ? `Scanning ${progressSymbol}…` : "Scanning…"} {progress}%
             </span>
           )}
-          {/* MBS badge */}
+          {/* US MBS badge */}
           {config.macro?.enabled && (
             <span className={`text-[0.6rem] font-mono px-2 py-0.5 rounded border transition-colors ${
               macroData
@@ -159,22 +214,29 @@ export default function Dashboard() {
                 :                        "text-[#ff4757] border-[#ff4757]/30 bg-[#ff4757]/5"
                 : "text-[#4a6080] border-[#1e2d4a]"
             }`}>
-              {macroData ? `MBS ${macroData.mbs.toFixed(1)}` : macroLoading ? "MBS…" : "🌐 MBS"}
+              {macroData ? `US ${macroData.mbs.toFixed(1)}` : macroLoading ? "US…" : "🌐 US"}
+            </span>
+          )}
+          {/* HK MBS badge */}
+          {config.macro?.enabled && hasHKStocks && (
+            <span className={`text-[0.6rem] font-mono px-2 py-0.5 rounded border transition-colors ${
+              hkMacroData
+                ? hkMacroData.mbs >= 7   ? "text-[#00ff88] border-[#00ff88]/30 bg-[#00ff88]/5"
+                : hkMacroData.mbs >= 5.5 ? "text-[#ffa502] border-[#ffa502]/30 bg-[#ffa502]/5"
+                :                          "text-[#ff4757] border-[#ff4757]/30 bg-[#ff4757]/5"
+                : "text-[#4a6080] border-[#1e2d4a]"
+            }`}>
+              {hkMacroData ? `HK ${hkMacroData.mbs.toFixed(1)}` : hkMacroLoading ? "HK…" : "🇭🇰 HK"}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowConfig(!showConfig)}
-            className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#6b85a0] hover:border-[#00d4ff] hover:text-[#00d4ff] rounded transition-all"
-          >
+          <button onClick={() => setShowConfig(!showConfig)}
+            className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#6b85a0] hover:border-[#00d4ff] hover:text-[#00d4ff] rounded transition-all">
             {showConfig ? "▲ HIDE CONFIG" : "▼ CONFIG"}
           </button>
-          <button
-            onClick={runAnalysis}
-            disabled={loading}
-            className="px-4 py-1.5 text-xs font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all"
-          >
+          <button onClick={runAnalysis} disabled={loading}
+            className="px-4 py-1.5 text-xs font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
             {loading ? `SCANNING… ${progress}%` : "▶ RUN ANALYSIS"}
           </button>
         </div>
@@ -187,24 +249,24 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── MACRO INTELLIGENCE PANEL ── */}
-      {config.macro?.enabled && (macroData || macroLoading) && (
+      {/* ── US MACRO PANEL ── */}
+      {config.macro?.enabled && (macroData !== null || macroLoading) && (
         <div className="border-b border-[#1e2d4a]">
-          <MacroPanel
-            data={macroData}
-            loading={macroLoading}
-            onRefresh={refreshMacro}
-          />
+          <MacroPanel data={macroData} loading={macroLoading} onRefresh={refreshUSMacro} />
+        </div>
+      )}
+
+      {/* ── HK MACRO PANEL ── */}
+      {config.macro?.enabled && hasHKStocks && (hkMacroData !== null || hkMacroLoading) && (
+        <div className="border-b border-[#1e2d4a]">
+          <MacroPanelHK data={hkMacroData} loading={hkMacroLoading} onRefresh={refreshHKMacro} />
         </div>
       )}
 
       {/* ── PORTFOLIO SUMMARY TABLE ── */}
       {results.length > 0 && (
         <div className="border-b border-[#1e2d4a]">
-          <PortfolioSummaryBar
-            results={results}
-            onRowClick={scrollToCard}
-          />
+          <PortfolioSummaryBar results={results} onRowClick={scrollToCard} />
         </div>
       )}
 
@@ -234,15 +296,12 @@ export default function Dashboard() {
               const cardId = `card-${result.symbol.replace(/\./g, "-")}`;
               const isHighlighted = highlightedSymbol === result.symbol;
               return (
-                <div
-                  key={result.symbol}
-                  id={cardId}
+                <div key={result.symbol} id={cardId}
                   className={`rounded-md transition-all duration-300 ${
                     isHighlighted
                       ? "ring-2 ring-[#00d4ff] ring-offset-2 ring-offset-[#0a0e1a] shadow-[0_0_20px_rgba(0,212,255,0.25)]"
                       : ""
-                  }`}
-                >
+                  }`}>
                   <StockCard result={result} config={config} />
                 </div>
               );
@@ -271,10 +330,8 @@ export default function Dashboard() {
             <div className="text-4xl mb-4 opacity-20">◈</div>
             <div className="text-sm mb-1">No analysis running</div>
             <div className="text-xs mb-4">Click ▶ RUN ANALYSIS to scan your portfolio</div>
-            <button
-              onClick={runAnalysis}
-              className="px-6 py-2 text-sm font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 rounded transition-all"
-            >
+            <button onClick={runAnalysis}
+              className="px-6 py-2 text-sm font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 rounded transition-all">
               ▶ RUN ANALYSIS
             </button>
           </div>
@@ -282,13 +339,10 @@ export default function Dashboard() {
       </main>
 
       {/* ── SCROLL TO TOP ── */}
-      <button
-        onClick={scrollToTop}
-        aria-label="Scroll to top"
+      <button onClick={scrollToTop} aria-label="Scroll to top"
         style={{
-          position: "fixed", bottom: 30, right: 30,
-          width: 44, height: 44, borderRadius: "50%",
-          background: "linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)",
+          position: "fixed", bottom: 30, right: 30, width: 44, height: 44,
+          borderRadius: "50%", background: "linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)",
           border: "none", cursor: "pointer", zIndex: 9999,
           display: "flex", alignItems: "center", justifyContent: "center",
           fontSize: 18, color: "#0a0e1a", fontWeight: "bold",
@@ -306,10 +360,7 @@ export default function Dashboard() {
           (e.currentTarget as HTMLButtonElement).style.transform = showScrollTop ? "scale(1)" : "scale(0.8)";
           (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 16px rgba(0,212,255,0.4)";
         }}
-      >
-        ↑
-      </button>
-
+      >↑</button>
     </div>
   );
 }
