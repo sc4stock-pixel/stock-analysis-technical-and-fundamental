@@ -159,10 +159,41 @@ async function getHSITrends(): Promise<MacroFactor> {
 }
 
 // ── 4. Southbound Flow ────────────────────────────────────────
-// Fixed: uses KAMT kline API only – no more false zero
+// Fixed: uses real‑time KAMT summary API (no history) + fallback to KAMT kline
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  // Fetch net flow from KAMT kline for a given secid
-  async function fetchKamtNet(secid: string): Promise<[number, number]> {
+  // Primary: real‑time summary (KAMT)
+  try {
+    const secid = '90.BK0003'; // combined southbound
+    const url = `https://push2.eastmoney.com/api/qt/kamt/get?secid=${secid}&fields=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,f17,f18`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const data = json?.data;
+    if (!data) throw new Error('no data');
+    // f2 = today net flow in 万元 (ten-thousand yuan)
+    const netTodayWan = parseFloat(data.f2 ?? '0');
+    const netToday = netTodayWan / 10000; // convert to 亿
+    // Real‑time has no historical 5d, so we use today as an approximation for 5d
+    const score  = netToday >= 30 ? 8 : netToday >= 10 ? 7 : netToday >= 0 ? 5 : netToday >= -10 ? 4 : 2;
+    const signal: MacroFactor['signal'] = netToday >= 5 ? 'bullish' : netToday <= -5 ? 'bearish' : 'neutral';
+    const valStr = netToday >= 0 ? `+${netToday.toFixed(1)}` : `${netToday.toFixed(1)}`;
+    return {
+      label: 'Southbound',
+      value: `${valStr}亿`,
+      score, signal,
+      detail: `Today ${valStr}亿CNY (real‑time)`,
+    };
+  } catch (e) {
+    console.error('Southbound real‑time failed:', e);
+  }
+
+  // Fallback: KAMT kline for 5‑day data
+  try {
+    const secid = '90.BK0003';
     const url = `https://push2.eastmoney.com/api/qt/kamt.kline/get?secid=${secid}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&lmt=5`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/' },
@@ -174,12 +205,8 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
     const klines: string[] = json?.data?.klines ?? [];
     if (klines.length === 0) throw new Error('no klines');
     const last = klines[klines.length - 1].split(',');
-    const today = parseFloat(last[1] ?? '0');   // f52 = net today (CNY 亿)
+    const today = parseFloat(last[1] ?? '0');
     const fiveDay = klines.slice(-5).reduce((sum, k) => sum + parseFloat(k.split(',')[1] ?? '0'), 0);
-    return [today, fiveDay];
-  }
-
-  const buildResult = (today: number, fiveDay: number): MacroFactor => {
     const score  = fiveDay >= 50 ? 9 : fiveDay >= 20 ? 8 : fiveDay >= 5 ? 6 : fiveDay >= -5 ? 5 : fiveDay >= -20 ? 3 : 2;
     const signal: MacroFactor['signal'] = fiveDay >= 10 ? 'bullish' : fiveDay <= -10 ? 'bearish' : 'neutral';
     const todayStr = today >= 0 ? `+${today.toFixed(1)}` : `${today.toFixed(1)}`;
@@ -190,64 +217,62 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
       score, signal,
       detail: `Today ${todayStr} · 5d ${cumStr}亿CNY`,
     };
-  };
-
-  try {
-    // Try combined southbound first
-    const [today, fiveDay] = await fetchKamtNet('90.BK0003');
-    return buildResult(today, fiveDay);
-  } catch { /* ignore, try sum of SH + SZ */ }
-
-  try {
-    const [shToday, sh5d] = await fetchKamtNet('90.BK0001'); // Shanghai southbound
-    const [szToday, sz5d] = await fetchKamtNet('90.BK0002'); // Shenzhen southbound
-    return buildResult(shToday + szToday, sh5d + sz5d);
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.error('Southbound kline fallback failed:', e);
+  }
 
   return { label: 'Southbound', value: '—', score: 5, signal: 'neutral', detail: 'unavailable' };
 }
 
 // ── 5. HIBOR 1M ───────────────────────────────────────────────
-// Fixed: robust scraping, fallback uses HKMA Monthly HIBOR (1M)
+// Fixed: uses HKMA Monthly HIBOR as primary (reliable JSON), then scrape HKAB
 async function getHIBOR(): Promise<MacroFactor> {
-  // Primary: scrape HKAB with improved regex
-  try {
-    const res = await fetch('https://www.hkab.org.hk/hibor/listHibor.do', {
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html' },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) throw new Error(`HKAB ${res.status}`);
-    const html = await res.text();
-
-    // Regex: find "1 Month" (maybe with tags inside) then the next table cell with a float
-    const re = /1\s*Month\s*<\/td>[\s\S]*?<td[^>]*>\s*(\d+\.\d{1,6})\s*<\/td>/i;
-    const m = re.exec(html);
-    if (!m) throw new Error('1 Month HIBOR not found');
-    const rate = parseFloat(m[1]);
-    if (isNaN(rate) || rate <= 0 || rate > 30) throw new Error('Invalid HIBOR');
-    return scoreHIBOR(rate, 'HKAB');
-  } catch { /* fallback to HKMA monthly */ }
-
-  // Fallback: HKMA Monthly Statistical Bulletin – HIBOR (1M)
+  // Primary: HKMA Monthly Statistical Bulletin – HIBOR 1M
   try {
     const url = 'https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/money/hibor?pagesize=1&sortby=end_of_date&sortorder=desc';
     const res = await fetch(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
       cache: 'no-store',
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) throw new Error(`HKMA ${res.status}`);
     const json = await res.json();
     const records = json?.result?.records ?? [];
     if (!records.length) throw new Error('no HKMA records');
     const latest = records[0];
-    // Look for the 1‑month field (could be "hibor_1m", "1m", "hibor_one_month")
-    const rateStr = latest.hibor_1m ?? latest['1m'] ?? latest.hibor_one_month ?? '';
+    // Field names may vary: try 'hibor_1_month', 'hibor_1m', '1m'
+    const rateStr = latest.hibor_1_month ?? latest.hibor_1m ?? latest['1m'] ?? '';
     const rate = parseFloat(rateStr);
     if (isNaN(rate) || rate <= 0) throw new Error('invalid HKMA HIBOR');
     return scoreHIBOR(rate, 'HKMA');
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.error('HKMA HIBOR failed:', e);
+  }
+
+  // Fallback: scrape HKAB
+  try {
+    const res = await fetch('https://www.hkab.org.hk/hibor/listHibor.do', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html',
+        'Referer': 'https://www.hkab.org.hk/',
+      },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`HKAB ${res.status}`);
+    const html = await res.text();
+
+    // Flexible regex: find "1 Month" (case‑insensitive) then the next number
+    const re = /1\s*Month\s*<\/td>[\s\S]*?<td[^>]*>\s*(\d+\.\d{1,6})\s*<\/td>/i;
+    const m = re.exec(html);
+    if (!m) throw new Error('1 Month HIBOR not found');
+    const rate = parseFloat(m[1]);
+    if (isNaN(rate) || rate <= 0 || rate > 30) throw new Error('Invalid HIBOR');
+    return scoreHIBOR(rate, 'HKAB');
+  } catch (e) {
+    console.error('HKAB scrape failed:', e);
+  }
 
   return { label: 'HIBOR 1M', value: '—', score: 5, signal: 'neutral', detail: 'unavailable' };
 }
