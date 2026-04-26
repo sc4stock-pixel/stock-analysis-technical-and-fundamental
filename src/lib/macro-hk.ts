@@ -159,41 +159,11 @@ async function getHSITrends(): Promise<MacroFactor> {
 }
 
 // ── 4. Southbound Flow ────────────────────────────────────────
-// Fixed: uses real‑time KAMT summary API (no history) + fallback to KAMT kline
+// Fixed: uses correct secid "1.000005" for combined southbound
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  // Primary: real‑time summary (KAMT)
+  // Primary: KAMT kline for combined southbound (secid=1.000005)
   try {
-    const secid = '90.BK0003'; // combined southbound
-    const url = `https://push2.eastmoney.com/api/qt/kamt/get?secid=${secid}&fields=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,f17,f18`;
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/' },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    const data = json?.data;
-    if (!data) throw new Error('no data');
-    // f2 = today net flow in 万元 (ten-thousand yuan)
-    const netTodayWan = parseFloat(data.f2 ?? '0');
-    const netToday = netTodayWan / 10000; // convert to 亿
-    // Real‑time has no historical 5d, so we use today as an approximation for 5d
-    const score  = netToday >= 30 ? 8 : netToday >= 10 ? 7 : netToday >= 0 ? 5 : netToday >= -10 ? 4 : 2;
-    const signal: MacroFactor['signal'] = netToday >= 5 ? 'bullish' : netToday <= -5 ? 'bearish' : 'neutral';
-    const valStr = netToday >= 0 ? `+${netToday.toFixed(1)}` : `${netToday.toFixed(1)}`;
-    return {
-      label: 'Southbound',
-      value: `${valStr}亿`,
-      score, signal,
-      detail: `Today ${valStr}亿CNY (real‑time)`,
-    };
-  } catch (e) {
-    console.error('Southbound real‑time failed:', e);
-  }
-
-  // Fallback: KAMT kline for 5‑day data
-  try {
-    const secid = '90.BK0003';
+    const secid = '1.000005'; // combined southbound (港股通沪+深)
     const url = `https://push2.eastmoney.com/api/qt/kamt.kline/get?secid=${secid}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&lmt=5`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/' },
@@ -205,7 +175,7 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
     const klines: string[] = json?.data?.klines ?? [];
     if (klines.length === 0) throw new Error('no klines');
     const last = klines[klines.length - 1].split(',');
-    const today = parseFloat(last[1] ?? '0');
+    const today = parseFloat(last[1] ?? '0');   // f52 = net today (CNY 亿)
     const fiveDay = klines.slice(-5).reduce((sum, k) => sum + parseFloat(k.split(',')[1] ?? '0'), 0);
     const score  = fiveDay >= 50 ? 9 : fiveDay >= 20 ? 8 : fiveDay >= 5 ? 6 : fiveDay >= -5 ? 5 : fiveDay >= -20 ? 3 : 2;
     const signal: MacroFactor['signal'] = fiveDay >= 10 ? 'bullish' : fiveDay <= -10 ? 'bearish' : 'neutral';
@@ -218,60 +188,79 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
       detail: `Today ${todayStr} · 5d ${cumStr}亿CNY`,
     };
   } catch (e) {
-    console.error('Southbound kline fallback failed:', e);
+    console.error('Southbound combined failed:', e);
+  }
+
+  // Fallback: sum SH + SZ
+  try {
+    const fetchOne = async (secid: string) => {
+      const url = `https://push2.eastmoney.com/api/qt/kamt.kline/get?secid=${secid}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53&klt=101&lmt=5`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, cache: 'no-store', signal: AbortSignal.timeout(5000) });
+      const json = await res.json();
+      const klines: string[] = json?.data?.klines ?? [];
+      if (!klines.length) return [0, 0];
+      const last = klines[klines.length - 1].split(',');
+      const today = parseFloat(last[1] ?? '0');
+      const fiveDay = klines.slice(-5).reduce((sum, k) => sum + parseFloat(k.split(',')[1] ?? '0'), 0);
+      return [today, fiveDay];
+    };
+    const [shToday, sh5d] = await fetchOne('1.000003'); // 沪走港
+    const [szToday, sz5d] = await fetchOne('1.000004'); // 深走港
+    const today = shToday + szToday;
+    const fiveDay = sh5d + sz5d;
+    if (today === 0 && fiveDay === 0) throw new Error('zero flow');
+    const score  = fiveDay >= 50 ? 9 : fiveDay >= 20 ? 8 : fiveDay >= 5 ? 6 : fiveDay >= -5 ? 5 : fiveDay >= -20 ? 3 : 2;
+    const signal: MacroFactor['signal'] = fiveDay >= 10 ? 'bullish' : fiveDay <= -10 ? 'bearish' : 'neutral';
+    const todayStr = today >= 0 ? `+${today.toFixed(1)}` : `${today.toFixed(1)}`;
+    const cumStr   = fiveDay >= 0 ? `+${fiveDay.toFixed(1)}` : `${fiveDay.toFixed(1)}`;
+    return {
+      label: 'Southbound',
+      value: `${todayStr}亿`,
+      score, signal,
+      detail: `Today ${todayStr} · 5d ${cumStr}亿CNY`,
+    };
+  } catch (e) {
+    console.error('Southbound sum fallback failed:', e);
   }
 
   return { label: 'Southbound', value: '—', score: 5, signal: 'neutral', detail: 'unavailable' };
 }
 
 // ── 5. HIBOR 1M ───────────────────────────────────────────────
-// Fixed: uses HKMA Monthly HIBOR as primary (reliable JSON), then scrape HKAB
+// Fixed: HKAB CSV export as primary (reliable), fallback Yahoo Finance "HIBOR1M="
 async function getHIBOR(): Promise<MacroFactor> {
-  // Primary: HKMA Monthly Statistical Bulletin – HIBOR 1M
+  // Primary: HKAB CSV export (always returns clean data)
   try {
-    const url = 'https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/money/hibor?pagesize=1&sortby=end_of_date&sortorder=desc';
+    const url = 'https://www.hkab.org.hk/hibor/listHiborExport.do?type=1'; // CSV format
     const res = await fetch(url, {
-      headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+      headers: { 'User-Agent': 'Mozilla/5.0' },
       cache: 'no-store',
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) throw new Error(`HKMA ${res.status}`);
-    const json = await res.json();
-    const records = json?.result?.records ?? [];
-    if (!records.length) throw new Error('no HKMA records');
-    const latest = records[0];
-    // Field names may vary: try 'hibor_1_month', 'hibor_1m', '1m'
-    const rateStr = latest.hibor_1_month ?? latest.hibor_1m ?? latest['1m'] ?? '';
+    if (!res.ok) throw new Error(`HKAB CSV ${res.status}`);
+    const csv = await res.text();
+    // CSV columns: Date, O/N, 1 Wk, 2 Wk, 1 Mth, 2 Mth, 3 Mth, 6 Mth, 12 Mth
+    const lines = csv.trim().split('\n');
+    if (lines.length < 2) throw new Error('no data');
+    const lastLine = lines[lines.length - 1].split(',');
+    // 1Mth is the 5th column (index 4)
+    const rateStr = lastLine[4]?.trim();
+    if (!rateStr) throw new Error('missing 1m');
     const rate = parseFloat(rateStr);
-    if (isNaN(rate) || rate <= 0) throw new Error('invalid HKMA HIBOR');
-    return scoreHIBOR(rate, 'HKMA');
+    if (isNaN(rate) || rate <= 0 || rate > 30) throw new Error('invalid HIBOR');
+    return scoreHIBOR(rate, 'HKAB CSV');
   } catch (e) {
-    console.error('HKMA HIBOR failed:', e);
+    console.error('HKAB CSV failed:', e);
   }
 
-  // Fallback: scrape HKAB
+  // Fallback: Yahoo Finance 1-month HIBOR (ticker HIBOR1M=X)
   try {
-    const res = await fetch('https://www.hkab.org.hk/hibor/listHibor.do', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html',
-        'Referer': 'https://www.hkab.org.hk/',
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) throw new Error(`HKAB ${res.status}`);
-    const html = await res.text();
-
-    // Flexible regex: find "1 Month" (case‑insensitive) then the next number
-    const re = /1\s*Month\s*<\/td>[\s\S]*?<td[^>]*>\s*(\d+\.\d{1,6})\s*<\/td>/i;
-    const m = re.exec(html);
-    if (!m) throw new Error('1 Month HIBOR not found');
-    const rate = parseFloat(m[1]);
-    if (isNaN(rate) || rate <= 0 || rate > 30) throw new Error('Invalid HIBOR');
-    return scoreHIBOR(rate, 'HKAB');
+    const rate = await fetchYahooClose("HIBOR1M=X");
+    if (rate && !isNaN(rate) && rate > 0 && rate < 30) {
+      return scoreHIBOR(rate, 'Yahoo');
+    }
   } catch (e) {
-    console.error('HKAB scrape failed:', e);
+    console.error('Yahoo HIBOR failed:', e);
   }
 
   return { label: 'HIBOR 1M', value: '—', score: 5, signal: 'neutral', detail: 'unavailable' };
