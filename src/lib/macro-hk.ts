@@ -103,84 +103,89 @@ async function getVHSI(): Promise<MacroFactor> {
 
 // ── 2. Southbound Flow ────────────────────────────────────────
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  // BK0707 is the consolidated Southbound Net Buy code
+  // URLs for consolidated Southbound flow
   const rtUrl = "https://push2.eastmoney.com/api/qt/stock/get?secid=90.BK0707&fields=f62,f159";
   const histUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=6&klt=101&fields2=f51,f56&secid=90.BK0707";
+
+  const fetchOptions = {
+    headers: { 
+      "User-Agent": "Mozilla/5.0", 
+      "Referer": "https://data.eastmoney.com/" 
+    },
+    cache: "no-store" as RequestCache,
+  };
 
   // --- SOURCE A: EASTMONEY (Primary) ---
   try {
     const [rtRes, histRes] = await Promise.all([
-      fetch(rtUrl, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" }),
-      fetch(histUrl, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" })
+      fetch(rtUrl, fetchOptions),
+      fetch(histUrl, fetchOptions)
     ]);
 
-    const rtJson = await rtRes.json();
-    const histJson = await histRes.json();
+    if (rtRes.ok && histRes.ok) {
+      const rtText = await rtRes.text();
+      const histText = await histRes.text();
 
-    // Field f62 is the specific "Net Buy Turnover" shown on EastMoney's header
-    let todayFlowRaw = rtJson?.data?.f62 ?? rtJson?.data?.f159 ?? 0;
-    const klines: string[] = histJson?.data?.klines ?? [];
-    
-    // If RT is 0 (after hours), use the last finalized Kline
-    if (todayFlowRaw === 0 && klines.length > 0) {
-      const lastKlineParts = klines[klines.length - 1].split(",");
-      todayFlowRaw = parseFloat(lastKlineParts[1]) || 0;
-    }
+      // CLEANING LOGIC: Remove potential JSONP padding (e.g. jQuery123(...))
+      const cleanRt = rtText.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
+      const cleanHist = histText.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
 
-    if (todayFlowRaw !== 0 || klines.length > 0) {
-      const todayFlow = todayFlowRaw / 1e8; // Convert to Billion (亿)
+      const rtJson = JSON.parse(cleanRt);
+      const histJson = JSON.parse(cleanHist);
+
+      // f62 is Net Buy Turnover. If 0 (after hours), fallback to the last Kline in history.
+      let todayFlowRaw = rtJson?.data?.f62 ?? rtJson?.data?.f159 ?? 0;
+      const klines: string[] = histJson?.data?.klines ?? [];
       
-      // Calculate 5-day: sum of previous 4 days + today's live value
-      const pastFlows = klines.slice(0, -1).map(k => (parseFloat(k.split(",")[1]) || 0) / 1e8);
-      const flow5d = pastFlows.reduce((a, b) => a + b, 0) + todayFlow;
+      if (todayFlowRaw === 0 && klines.length > 0) {
+        const lastParts = klines[klines.length - 1].split(",");
+        todayFlowRaw = parseFloat(lastParts[1]) || 0; 
+      }
 
-      const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
-      const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
+      // Convert from raw Yuan to Billion (亿)
+      const todayFlow = todayFlowRaw / 1e8;
       
-      const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
-      const cumStr = flow5d >= 0 ? `+${flow5d.toFixed(2)}` : `${flow5d.toFixed(2)}`;
+      if (todayFlow !== 0 || klines.length > 0) {
+        // Calculate 5-day trend: Sum previous 4 days + Today's value
+        const pastFlows = klines.slice(0, -1).map(k => (parseFloat(k.split(",")[1]) || 0) / 1e8);
+        const flow5d = pastFlows.reduce((a, b) => a + b, 0) + todayFlow;
 
-      return {
-        label: "Southbound",
-        value: `${todayStr}亿`,
-        score,
-        signal,
-        detail: `Today ${todayStr}亿 · 5d ${cumStr}亿 CNY`,
-      };
+        const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
+        const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
+        
+        const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
+        const cumStr = flow5d >= 0 ? `+${flow5d.toFixed(2)}` : `${flow5d.toFixed(2)}`;
+
+        return {
+          label: "Southbound",
+          value: `${todayStr}亿`,
+          score,
+          signal,
+          detail: `Today ${todayStr}亿 · 5d ${cumStr}亿 CNY`,
+        };
+      }
     }
   } catch (e) {
-    console.warn("Southbound Source A failed, falling back to Yahoo:", e);
+    console.warn("Southbound Source A failed:", e);
   }
 
-  // --- SOURCE B: YAHOO FALLBACK (Only if Source A fails) ---
+  // --- SOURCE B: YAHOO FALLBACK (Only runs if Source A crashes) ---
   try {
-    const [tracker, hstech] = await Promise.all([
-      fetchYahooOHLCV("2800.HK", 25),
-      fetchYahooOHLCV("3033.HK", 25),
-    ]);
-
+    const tracker = await fetchYahooOHLCV("2800.HK", 25);
     if (tracker.length >= 21) {
-      const vols20 = tracker.slice(-21, -1).map(b => b.volume);
-      const avgVol20 = vols20.reduce((a, b) => a + b, 0) / vols20.length;
-      const todayVol = tracker[tracker.length - 1].volume;
-      const volRatio = avgVol20 > 0 ? todayVol / avgVol20 : 1;
-
-      const close5d = tracker.length >= 6 ? tracker[tracker.length - 6].close : tracker[0].close;
-      const ret5d = close5d > 0 ? ((tracker[tracker.length - 1].close - close5d) / close5d) * 100 : 0;
-
-      const bull = [volRatio > 1.3, ret5d > 0].filter(Boolean).length;
-      const score = bull === 2 ? 8 : bull === 1 ? 5 : 2;
+      const close5d = tracker[tracker.length - 6]?.close ?? tracker[0].close;
+      const ret5d = ((tracker[tracker.length - 1].close - close5d) / close5d) * 100;
 
       return {
         label: "Southbound",
         value: `${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
-        score,
-        signal: ret5d >= 0 ? "bullish" : "bearish",
-        detail: `2800.HK Vol ${volRatio.toFixed(1)}x · 5d ${ret5d.toFixed(1)}%`,
+        score: ret5d > 0 ? 7 : 3,
+        signal: ret5d > 0 ? "bullish" : "bearish",
+        detail: `Fallback: 2800.HK 5d ${ret5d.toFixed(1)}%`,
       };
     }
   } catch (e) {
-    console.error("Southbound Fallback Error:", e);
+    console.error("Southbound Source B Error:", e);
   }
 
   return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
