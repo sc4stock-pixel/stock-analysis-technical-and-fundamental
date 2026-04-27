@@ -144,9 +144,6 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
     console.error("Southbound RT Error:", e);
   }
 
-  return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "Data unavailable" };
-}
-
   // Source B: Yahoo Finance ETF volume proxy (Fallback)
   try {
     const [tracker, hstech] = await Promise.all([
