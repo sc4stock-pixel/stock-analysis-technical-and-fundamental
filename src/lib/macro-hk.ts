@@ -140,7 +140,7 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
       for (const k of klines.slice(-5)) {
         const parts = k.split(",");
         // Try column index 2 (net flow column, in 元)
-        const flow = parseFloat(parts[2] ?? "0") / 1e8; // convert to 亿
+        const flow = parseFloat(parts[5] ?? "0") / 1e8; // convert to 亿
         if (!isNaN(flow)) recentFlows.push(flow);
       }
       if (recentFlows.length < 3) continue;
