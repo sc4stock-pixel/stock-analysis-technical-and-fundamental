@@ -102,116 +102,99 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 // ── 2. Southbound Flow ────────────────────────────────────────
-// Strategy:
-//   Primary A: Yahoo Finance ETF volume proxy
-//     - 2800.HK (Tracker Fund) volume surge vs 20d avg = mainland buying signal
-//     - 3033.HK (HSTECH ETF) relative volume vs 2800.HK momentum
-//   Primary B: EastMoney push2 API (correct secid = 90.BK0002 for southbound)
-//   Secondary: Price momentum of 3033.HK vs ^HSI (HSTECH outperforms = risk-on)
 async function getSouthboundFlow(): Promise<MacroFactor> {
+  // Real-time API for combined Southbound (BK0707) - Targets field f62 (Net Buy)
+  const rtUrl = "https://push2.eastmoney.com/api/qt/stock/get?secid=90.BK0707&fields=f62,f159";
+  // Historical API for 5-day trend (BK0707) - Targets field f56 (Net Buy)
+  const histUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=6&klt=101&fields2=f51,f56&secid=90.BK0707";
 
-  // ── Source A: EastMoney southbound net flow (primary when accessible) ──
-  // BK0002 = "港股通(沪深)" — combined SH+SZ southbound board
-  const emUrls = [
-    // Daily kline net flow endpoint
-    "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0002",
-    // Alternative: BK0707 (another southbound aggregate code)
-    "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0707",
-  ];
+  // ── Source A: EastMoney (Primary) ──────────────────
+  try {
+    const [rtRes, histRes] = await Promise.all([
+      fetch(rtUrl, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" }),
+      fetch(histUrl, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" })
+    ]);
 
-  for (const emUrl of emUrls) {
-    try {
-      const res = await fetch(emUrl, {
-        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
-        cache: "no-store",
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!res.ok) continue;
-      const text = await res.text();
-      // Remove JSONP wrapper if present
-      const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
-      const json = JSON.parse(jsonStr || text);
-      const klines: string[] = json?.data?.klines ?? [];
-      if (klines.length < 3) continue;
+    if (rtRes.ok && histRes.ok) {
+      const rtJson = await rtRes.json();
+      const histJson = await histRes.json();
 
-      // kline format: "date,f52(main large),f53(main small),f54(retail large),f55(retail small),f56(net)"
-      // f52 = today net main force flow (+ = inflow to HK)
-      const recentFlows: number[] = [];
-      for (const k of klines.slice(-5)) {
-        const parts = k.split(",");
-        // Try column index 2 (net flow column, in 元)
-        const flow = parseFloat(parts[2] ?? "0") / 1e8; // convert to 亿
-        if (!isNaN(flow)) recentFlows.push(flow);
+      // 1. Get Live Value (f62). If market is closed or 0, fallback to last Kline.
+      let todayFlowRaw = rtJson?.data?.f62 ?? rtJson?.data?.f159 ?? 0;
+      const klines: string[] = histJson?.data?.klines ?? [];
+      
+      if (todayFlowRaw === 0 && klines.length > 0) {
+        // parts[1] is f56 in the histUrl fields2 mapping
+        todayFlowRaw = parseFloat(klines[klines.length - 1].split(",")[1]) || 0;
       }
-      if (recentFlows.length < 3) continue;
 
-      const todayFlow = recentFlows[recentFlows.length - 1];
-      const flow5d    = recentFlows.reduce((a, b) => a + b, 0);
-      const score  = flow5d >= 50 ? 9 : flow5d >= 20 ? 8 : flow5d >= 5 ? 6 : flow5d >= -5 ? 5 : flow5d >= -20 ? 3 : 2;
-      const signal: MacroFactor["signal"] = flow5d >= 10 ? "bullish" : flow5d <= -10 ? "bearish" : "neutral";
-      const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(1)}` : `${todayFlow.toFixed(1)}`;
-      const cumStr   = flow5d    >= 0 ? `+${flow5d.toFixed(1)}`    : `${flow5d.toFixed(1)}`;
+      const todayFlow = todayFlowRaw / 1e8; // Convert raw Yuan to Billion (亿)
+
+      // 2. Calculate 5-Day Cumulative (Past 4 days from history + Today's live)
+      const pastFlows = klines.slice(0, -1).map(k => parseFloat(k.split(",")[1]) / 1e8);
+      const flow5d = pastFlows.reduce((a, b) => a + b, 0) + todayFlow;
+
+      // 3. Scoring & Signal logic
+      const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
+      const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
+      
+      const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
+      const cumStr = flow5d >= 0 ? `+${flow5d.toFixed(2)}` : `${flow5d.toFixed(2)}`;
+
       return {
-        label: "Southbound", value: `${todayStr}亿`,
-        score, signal, detail: `Today ${todayStr} · 5d ${cumStr}亿 CNY`,
+        label: "Southbound",
+        value: `${todayStr}亿`,
+        score,
+        signal,
+        detail: `Today ${todayStr}亿 · 5d ${cumStr}亿 CNY`,
       };
-    } catch { /* try next */ }
+    }
+  } catch (e) {
+    console.error("Southbound Source A (EM) Error:", e);
   }
 
-  // ── Source B: Yahoo Finance ETF volume proxy ──────────────────
-  // 2800.HK (Tracker Fund) = best proxy for mainland buying sentiment
-  // High volume relative to 20d avg + positive price = southbound inflow
+  // ── Source B: Yahoo Finance ETF volume proxy (Fallback) ──────────────────
   try {
     const [tracker, hstech] = await Promise.all([
       fetchYahooOHLCV("2800.HK", 25),
       fetchYahooOHLCV("3033.HK", 25),
     ]);
 
-    if (tracker.length < 21) throw new Error("insufficient tracker data");
+    if (tracker.length >= 21) {
+      const vols20 = tracker.slice(-21, -1).map(b => b.volume);
+      const avgVol20 = vols20.reduce((a, b) => a + b, 0) / vols20.length;
+      const todayVol = tracker[tracker.length - 1].volume;
+      const volRatio = avgVol20 > 0 ? todayVol / avgVol20 : 1;
 
-    // Compute 20-day average volume for 2800.HK
-    const vols20   = tracker.slice(-21, -1).map(b => b.volume);
-    const avgVol20 = vols20.reduce((a, b) => a + b, 0) / vols20.length;
-    const todayVol  = tracker[tracker.length - 1].volume;
-    const volRatio  = avgVol20 > 0 ? todayVol / avgVol20 : 1;
+      const close5d = tracker.length >= 6 ? tracker[tracker.length - 6].close : tracker[0].close;
+      const ret5d = close5d > 0 ? ((tracker[tracker.length - 1].close - close5d) / close5d) * 100 : 0;
 
-    // Price momentum: 5d return of 2800.HK vs 10d return
-    const close5d  = tracker.length >= 6  ? tracker[tracker.length - 6].close  : tracker[0].close;
-    const close10d = tracker.length >= 11 ? tracker[tracker.length - 11].close : tracker[0].close;
-    const ret5d    = close5d  > 0 ? (tracker[tracker.length - 1].close - close5d)  / close5d  * 100 : 0;
-    const ret10d   = close10d > 0 ? (tracker[tracker.length - 1].close - close10d) / close10d * 100 : 0;
+      let hstechRelStr = 0;
+      if (hstech.length >= 6) {
+        const hs5d = hstech[hstech.length - 6].close;
+        const hstechRet5 = hs5d > 0 ? ((hstech[hstech.length - 1].close - hs5d) / hs5d) * 100 : 0;
+        hstechRelStr = hstechRet5 - ret5d;
+      }
 
-    // HSTECH relative strength vs Tracker (HSTECH outperforming = tech risk-on = southbound buying)
-    let hstechRelStr = 0;
-    if (hstech.length >= 6) {
-      const hs5d = hstech[hstech.length - 6].close;
-      const hstechRet5 = hs5d > 0 ? (hstech[hstech.length - 1].close - hs5d) / hs5d * 100 : 0;
-      hstechRelStr = hstechRet5 - ret5d; // HSTECH outperformance vs Tracker
+      const bull = [volRatio > 1.3, ret5d > 0, hstechRelStr > 0].filter(Boolean).length;
+      const score = bull === 3 ? 8 : bull === 2 ? 6 : bull === 1 ? 4 : 2;
+      const signal: MacroFactor["signal"] = bull >= 2 ? "bullish" : bull === 0 ? "bearish" : "neutral";
+
+      return {
+        label: "Southbound",
+        value: `${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
+        score,
+        signal,
+        detail: `2800.HK Vol ${volRatio.toFixed(1)}x · 5d ${ret5d.toFixed(1)}%`,
+      };
     }
+  } catch (e) {
+    console.error("Southbound Source B (Yahoo) Error:", e);
+  }
 
-    // Composite signal: vol surge + price momentum + tech relative strength
-    const bull = [
-      volRatio > 1.3,       // above-average volume
-      ret5d > 0,            // positive 5d return
-      ret10d > 0,           // positive 10d return
-      hstechRelStr > 0,     // HSTECH outperforming
-    ].filter(Boolean).length;
-
-    const score  = bull >= 4 ? 9 : bull === 3 ? 7 : bull === 2 ? 5 : bull === 1 ? 3 : 2;
-    const signal: MacroFactor["signal"] = bull >= 3 ? "bullish" : bull <= 1 ? "bearish" : "neutral";
-    const volStr = volRatio >= 1 ? `Vol ${volRatio.toFixed(1)}x avg` : `Vol ${volRatio.toFixed(1)}x avg`;
-
-    return {
-      label: "Southbound",
-      value: `${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
-      score, signal,
-      detail: `2800.HK ${volStr} · 5d ${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
-    };
-  } catch { /* fall through */ }
-
-  return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
+  // Final Default
+  return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "Data unavailable" };
 }
-
 
 // ── 3. HSI & HSTECH Trends ────────────────────────────────────
 async function getHSITrends(): Promise<MacroFactor> {
