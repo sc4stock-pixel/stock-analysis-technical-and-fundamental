@@ -102,52 +102,38 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 // ── 2. Southbound Flow ────────────────────────────────────────
-// Primary:   EastMoney datacenter-web API (SOUTH_NET_AMT in 万元)
+// Primary:   Scrape data.eastmoney.com/hsgt/index.html (server-rendered)
 // Secondary: Yahoo ETF proxy (fallback)
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: EastMoney datacenter-web (reliable JSON) ───────
+  // ── Source A: EastMoney server-rendered HSGT page ────────────
   try {
-    // Build filter for the latest trading day (today – 2 days to be safe)
-    const date = new Date();
-    date.setDate(date.getDate() - 2);
-    const dateStr = date.toISOString().slice(0, 10);
-
-    const apiUrl = `https://datacenter-web.eastmoney.com/api/data/v1/get` +
-      `?reportName=RPT_MUTUAL_DEALAMT` +
-      `&columns=ALL` +
-      `&filter=(TRADE_DATE='${dateStr}')` +
-      `&pageNumber=1&pageSize=1` +
-      `&sortTypes=-1&sortColumns=TRADE_DATE` +
-      `&source=WEB&client=WEB`;
-
-    const res = await fetch(apiUrl, {
-      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
+    const res = await fetch("https://data.eastmoney.com/hsgt/index.html", {
+      headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html" },
       cache: "no-store",
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) throw new Error("API failed");
-    const json = await res.json();
-    const data = json?.result?.data;
-    if (!data || !data.length) throw new Error("no data");
+    if (!res.ok) throw new Error("fetch failed");
+    const html = await res.text();
 
-    const latest = data[0];
-    // SOUTH_NET_AMT is net buy in 万元 (10000 CNY). Convert to 亿元 (100m CNY).
-    const netWan = parseFloat(String(latest.SOUTH_NET_AMT ?? "0"));
-    if (isNaN(netWan) || netWan === 0) throw new Error("zero net flow");
-
-    const netYi = netWan / 10000;
-    const score  = netYi >= 50 ? 9 : netYi >= 20 ? 8 : netYi >= 5 ? 6 : netYi >= -5 ? 5 : netYi >= -20 ? 3 : 2;
-    const signal: MacroFactor["signal"] = netYi >= 10 ? "bullish" : netYi <= -10 ? "bearish" : "neutral";
-    const todayStr = netYi >= 0 ? `+${netYi.toFixed(1)}` : `${netYi.toFixed(1)}`;
-
-    return {
-      label: "Southbound",
-      value: `${todayStr}亿`,
-      score,
-      signal,
-      detail: `Today ${todayStr}亿 CNY (官方)`,
-    };
+    // The page embeds southbound net flow in its server HTML:
+    //   ... 南向资金 净买额-40.92亿买入额510.94亿卖出额551.86亿 ...
+    const match = html.match(/南向资金\s+净买额([+\-]?[0-9]+(?:\.[0-9]+)?)亿/);
+    if (match) {
+      const netYi = parseFloat(match[1]);   // value in 亿元
+      if (!isNaN(netYi)) {
+        const score  = netYi >= 50 ? 9 : netYi >= 20 ? 8 : netYi >= 5 ? 6 : netYi >= -5 ? 5 : netYi >= -20 ? 3 : 2;
+        const signal: MacroFactor["signal"] = netYi >= 10 ? "bullish" : netYi <= -10 ? "bearish" : "neutral";
+        const todayStr = netYi >= 0 ? `+${netYi.toFixed(1)}` : `${netYi.toFixed(1)}`;
+        return {
+          label: "Southbound",
+          value: `${todayStr}亿`,
+          score,
+          signal,
+          detail: `Today ${todayStr}亿 CNY (官方)`,
+        };
+      }
+    }
   } catch { /* fall through to ETF proxy */ }
 
   // ── Source B: Yahoo ETF proxy (unchanged) ────────────────────
