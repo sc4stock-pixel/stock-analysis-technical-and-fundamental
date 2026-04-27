@@ -110,53 +110,47 @@ async function getVHSI(): Promise<MacroFactor> {
 //   Secondary: Price momentum of 3033.HK vs ^HSI (HSTECH outperforms = risk-on)
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: EastMoney southbound net flow (primary when accessible) ──
-  // BK0002 = "港股通(沪深)" — combined SH+SZ southbound board
-  const emUrls = [
-    // Daily kline net flow endpoint
-    "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0002",
-    // Alternative: BK0707 (another southbound aggregate code)
-    "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0707",
-  ];
+// ── Source A: EastMoney southbound net flow (primary when accessible) ──
+const emUrls = [
+  "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0002",
+  "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0707",
+];
 
-  for (const emUrl of emUrls) {
-    try {
-      const res = await fetch(emUrl, {
-        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
-        cache: "no-store",
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!res.ok) continue;
-      const text = await res.text();
-      // Remove JSONP wrapper if present
-      const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
-      const json = JSON.parse(jsonStr || text);
-      const klines: string[] = json?.data?.klines ?? [];
-      if (klines.length < 3) continue;
+for (const emUrl of emUrls) {
+  try {
+    const res = await fetch(emUrl, {
+      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) continue;
+    const text = await res.text();
+    const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
+    const json = JSON.parse(jsonStr || text);
+    const klines: string[] = json?.data?.klines ?? [];
+    if (klines.length < 3) continue;
 
-      // kline format: "date,f52(main large),f53(main small),f54(retail large),f55(retail small),f56(net)"
-      // f52 = today net main force flow (+ = inflow to HK)
-      const recentFlows: number[] = [];
-      for (const k of klines.slice(-5)) {
-        const parts = k.split(",");
-        // Try column index 2 (net flow column, in 元)
-        const flow = parseFloat(parts[5] ?? "0") / 1e8; // convert to 亿
-        if (!isNaN(flow)) recentFlows.push(flow);
-      }
-      if (recentFlows.length < 3) continue;
+    // kline format: "date,f52(main large),f53(main small),f54(retail large),f55(retail small),f56(net)"
+    const recentFlows: number[] = [];
+    for (const k of klines.slice(-5)) {
+      const parts = k.split(",");
+      const flow = parseFloat(parts[5] ?? "0") / 1e8;   // *** FIXED ***
+      if (!isNaN(flow)) recentFlows.push(flow);
+    }
+    if (recentFlows.length < 3) continue;
 
-      const todayFlow = recentFlows[recentFlows.length - 1];
-      const flow5d    = recentFlows.reduce((a, b) => a + b, 0);
-      const score  = flow5d >= 50 ? 9 : flow5d >= 20 ? 8 : flow5d >= 5 ? 6 : flow5d >= -5 ? 5 : flow5d >= -20 ? 3 : 2;
-      const signal: MacroFactor["signal"] = flow5d >= 10 ? "bullish" : flow5d <= -10 ? "bearish" : "neutral";
-      const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(1)}` : `${todayFlow.toFixed(1)}`;
-      const cumStr   = flow5d    >= 0 ? `+${flow5d.toFixed(1)}`    : `${flow5d.toFixed(1)}`;
-      return {
-        label: "Southbound", value: `${todayStr}亿`,
-        score, signal, detail: `Today ${todayStr} · 5d ${cumStr}亿 CNY`,
-      };
-    } catch { /* try next */ }
-  }
+    const todayFlow = recentFlows[recentFlows.length - 1];
+    const flow5d    = recentFlows.reduce((a, b) => a + b, 0);
+    const score  = flow5d >= 50 ? 9 : flow5d >= 20 ? 8 : flow5d >= 5 ? 6 : flow5d >= -5 ? 5 : flow5d >= -20 ? 3 : 2;
+    const signal: MacroFactor["signal"] = flow5d >= 10 ? "bullish" : flow5d <= -10 ? "bearish" : "neutral";
+    const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(1)}` : `${todayFlow.toFixed(1)}`;
+    const cumStr   = flow5d    >= 0 ? `+${flow5d.toFixed(1)}`    : `${flow5d.toFixed(1)}`;
+    return {
+      label: "Southbound", value: `${todayStr}亿`,
+      score, signal, detail: `Today ${todayStr} · 5d ${cumStr}亿 CNY`,
+    };
+  } catch { /* try next */ }
+}
 
   // ── Source B: Yahoo Finance ETF volume proxy ──────────────────
   // 2800.HK (Tracker Fund) = best proxy for mainland buying sentiment
