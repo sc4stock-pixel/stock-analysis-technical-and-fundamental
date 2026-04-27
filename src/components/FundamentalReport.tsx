@@ -44,7 +44,6 @@ export default function FundamentalReport({ ticker }: Props) {
       setCopied(label);
       setTimeout(() => setCopied(null), 2000);
     } catch {
-      // fallback
       const ta = document.createElement('textarea');
       ta.value = text;
       document.body.appendChild(ta);
@@ -55,6 +54,22 @@ export default function FundamentalReport({ ticker }: Props) {
       setTimeout(() => setCopied(null), 2000);
     }
   };
+
+  // Build combined prompt when prompts are available
+  const combinedPrompt = prompts
+    ? `You are a fundamental analyst. Generate the following three reports for ${prompts.ticker}:
+
+--- DEEP DIVE ---
+${prompts.deepDivePrompt}
+
+--- PEER COMPARISON ---
+${prompts.peerComparisonPrompt}
+
+--- BEAR CASE ---
+${prompts.bearCasePrompt}
+
+Produce all three reports in order, separated by clear headings (e.g., "# Deep Dive", "# Peer Comparison", "# Bear Case").`
+    : '';
 
   return (
     <div className="p-4 space-y-4">
@@ -72,7 +87,8 @@ export default function FundamentalReport({ ticker }: Props) {
         <div className="space-y-4">
           <p className="text-[#4a6080] text-xs">
             Data fetched at {new Date(prompts.fetchedAt).toLocaleString()}.
-            Copy each prompt and paste into{' '}
+            Use the buttons below to copy individual prompts or the combined prompt.
+            Paste into{' '}
             <a
               href="https://chat.deepseek.com"
               target="_blank"
@@ -84,32 +100,56 @@ export default function FundamentalReport({ ticker }: Props) {
             {' '}(free).
           </p>
 
-          {/* Deep Dive */}
-          <PromptBlock
-            title="🧠 Deep Dive"
-            prompt={prompts.deepDivePrompt}
-            copied={copied}
-            onCopy={copyToClipboard}
-            index={1}
-          />
+          {/* Combined Copy Button – most convenient */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => copyToClipboard(combinedPrompt, 'combined')}
+              className={`text-xs px-4 py-2 rounded border font-bold transition-all ${
+                copied === 'combined'
+                  ? 'border-[#00ff88] text-[#00ff88] bg-[#00ff88]/10'
+                  : 'border-[#00d4ff] text-[#00d4ff] bg-[#00d4ff]/10 hover:bg-[#00d4ff]/20'
+              }`}
+            >
+              {copied === 'combined' ? '✅ Copied!' : '📋 Copy Combined Prompt (All 3 Reports)'}
+            </button>
+            <span className="text-[#4a6080] text-xs">
+              ({combinedPrompt.length.toLocaleString()} chars)
+            </span>
+          </div>
 
-          {/* Peer Comparison */}
-          <PromptBlock
-            title="📊 Peer Comparison"
-            prompt={prompts.peerComparisonPrompt}
-            copied={copied}
-            onCopy={copyToClipboard}
-            index={2}
-          />
+          <p className="text-[#4a6080] text-xs">
+            After copying, run your macOS shortcut (⌘⇧D) to send directly to DeepSeek.
+          </p>
 
-          {/* Bear Case */}
-          <PromptBlock
-            title="🐻 Bear Case"
-            prompt={prompts.bearCasePrompt}
-            copied={copied}
-            onCopy={copyToClipboard}
-            index={3}
-          />
+          {/* Individual prompts – still available */}
+          <details className="border border-[#1e2d4a] rounded" open>
+            <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-[#c8d8f0] hover:text-[#00d4ff] transition-colors bg-[#0f1629]">
+              Individual Prompts
+            </summary>
+            <div className="p-3 space-y-4">
+              <PromptBlock
+                title="🧠 Deep Dive"
+                prompt={prompts.deepDivePrompt}
+                copied={copied}
+                onCopy={copyToClipboard}
+                index={1}
+              />
+              <PromptBlock
+                title="📊 Peer Comparison"
+                prompt={prompts.peerComparisonPrompt}
+                copied={copied}
+                onCopy={copyToClipboard}
+                index={2}
+              />
+              <PromptBlock
+                title="🐻 Bear Case"
+                prompt={prompts.bearCasePrompt}
+                copied={copied}
+                onCopy={copyToClipboard}
+                index={3}
+              />
+            </div>
+          </details>
         </div>
       )}
 
@@ -137,25 +177,23 @@ function PromptBlock({
   const charCount = prompt.length;
 
   return (
-    <details className="border border-[#1e2d4a] rounded" open>
-      <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-[#c8d8f0] hover:text-[#00d4ff] transition-colors bg-[#0f1629]">
-        {title} <span className="text-[#4a6080] text-xs font-normal">({charCount.toLocaleString()} chars)</span>
-      </summary>
-      <div className="p-3 space-y-2">
-        <pre className="text-xs text-[#c8d8f0] bg-[#0a0e1a] p-3 rounded border border-[#1e2d4a] overflow-auto max-h-96 whitespace-pre-wrap">
-          {prompt}
-        </pre>
-        <button
-          onClick={() => onCopy(prompt, label)}
-          className={`text-xs px-3 py-1 rounded border transition-all ${
-            copied === label
-              ? 'border-[#00ff88] text-[#00ff88] bg-[#00ff88]/10'
-              : 'border-[#1e2d4a] text-[#4a6080] hover:border-[#00d4ff] hover:text-[#00d4ff]'
-          }`}
-        >
-          {copied === label ? '✅ Copied!' : '📋 Copy Prompt'}
-        </button>
-      </div>
-    </details>
+    <div className="space-y-2">
+      <p className="text-xs font-semibold text-[#c8d8f0]">
+        {title} <span className="text-[#4a6080] font-normal">({charCount.toLocaleString()} chars)</span>
+      </p>
+      <pre className="text-xs text-[#c8d8f0] bg-[#0a0e1a] p-3 rounded border border-[#1e2d4a] overflow-auto max-h-48 whitespace-pre-wrap">
+        {prompt}
+      </pre>
+      <button
+        onClick={() => onCopy(prompt, label)}
+        className={`text-xs px-3 py-1 rounded border transition-all ${
+          copied === label
+            ? 'border-[#00ff88] text-[#00ff88] bg-[#00ff88]/10'
+            : 'border-[#1e2d4a] text-[#4a6080] hover:border-[#00d4ff] hover:text-[#00d4ff]'
+        }`}
+      >
+        {copied === label ? '✅ Copied!' : '📋 Copy'}
+      </button>
+    </div>
   );
 }
