@@ -1,11 +1,7 @@
-'use client';
-import { useState } from 'react';
+// src/lib/fundamental/generateReport.ts
+import * as fetchers from './fetchers';
 
-interface Props {
-  ticker: string;
-}
-
-interface PromptsData {
+export interface FundamentalPrompts {
   ticker: string;
   deepDivePrompt: string;
   peerComparisonPrompt: string;
@@ -13,187 +9,98 @@ interface PromptsData {
   fetchedAt: string;
 }
 
-export default function FundamentalReport({ ticker }: Props) {
-  const [prompts, setPrompts] = useState<PromptsData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [copied, setCopied] = useState<string | null>(null);
+export async function generateFundamentalPrompts(ticker: string): Promise<FundamentalPrompts> {
+  // 1. Gather all data (unchanged)
+  const [profile, keyStats, financials, peers, insiders, marginData, concentration] =
+    await Promise.all([
+      fetchers.getCompanyProfile(ticker),
+      fetchers.getKeyStatistics(ticker),
+      fetchers.getFinancialData(ticker),
+      fetchers.getPeers(ticker),
+      fetchers.getLatestInsiderTrades(ticker),
+      fetchers.getMarginAndGrowth(ticker),
+      fetchers.checkCustomerConcentration(ticker),
+    ]);
 
-  const fetchPrompts = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/fundamental', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker }),
-      });
-      const json = await res.json();
-      if (json.error) setError(json.error);
-      else setPrompts(json.prompts);
-    } catch {
-      setError('Failed to fetch prompts');
-    } finally {
-      setLoading(false);
-    }
+  const description = profile?.longBusinessSummary ?? 'No description available.';
+  const sector = profile?.sector ?? 'Unknown';
+  const industry = profile?.industry ?? 'Unknown';
+
+  const peerSymbols = peers.slice(0, 2);
+  const peerFinancials: any[] = [];
+  for (const p of peerSymbols) {
+    const [pKey, pFin] = await Promise.all([
+      fetchers.getKeyStatistics(p),
+      fetchers.getFinancialData(p),
+    ]);
+    peerFinancials.push({
+      symbol: p,
+      psTTM: pKey?.psTrailing12Months?.raw?.toFixed(2) ?? 'N/A',
+      psForward: pKey?.psForward?.raw?.toFixed(2) ?? 'N/A',
+      pfcf: pKey?.priceToFreeCashFlows?.raw?.toFixed(2) ?? 'N/A',
+      evEbitda: pKey?.enterpriseToEbitda?.raw?.toFixed(2) ?? 'N/A',
+      grossMargin: pFin?.grossMargins?.raw ? (pFin.grossMargins.raw * 100).toFixed(1) : 'N/A',
+      revenueGrowth: pFin?.revenueGrowth?.raw ? (pFin.revenueGrowth.raw * 100).toFixed(1) : 'N/A',
+    });
+  }
+
+  // ── 2. Abbreviated Deep Dive prompt ──────────────────────────
+  const deepDivePrompt = `You are a fundamental analyst. Give an **abbreviated** Deep Dive on ${ticker}.
+Use **bullet points** only — no paragraphs. Keep each bullet to one line.
+
+1. **Business Model** (2-3 bullets):
+   - Core product & how ${ticker} makes money.
+2. **Moat** (3 bullets max):
+   - Top 3 competitors, and whether ${ticker} has a durable edge (patent, switching cost, network effect, cost structure).
+3. **Catalysts** (3 bullets max):
+   - Upcoming launches, earnings, regulatory events, partnerships (next 12 months).
+4. **Asymmetry** (2 bullets):
+   - Valuation floor vs growth ceiling.
+
+Use data below:
+- Description: ${description}
+- Sector: ${sector}, Industry: ${industry}
+- Peers: ${peers.join(', ')}
+- P/S TTM: ${keyStats?.psTrailing12Months?.raw ?? 'N/A'}, P/FCF: ${keyStats?.priceToFreeCashFlows?.raw ?? 'N/A'}, EV/EBITDA: ${keyStats?.enterpriseToEbitda?.raw ?? 'N/A'}, GM: ${financials?.grossMargins?.raw ? (financials.grossMargins.raw * 100).toFixed(1) + '%' : 'N/A'}, RevGr: ${financials?.revenueGrowth?.raw ? (financials.revenueGrowth.raw * 100).toFixed(1) + '%' : 'N/A'}
+- Insider trades (5 most recent): ${JSON.stringify(insiders.slice(0, 5))}
+- Customer concentration: ${concentration}
+
+Format: bullet points, **no more than 10 bullets total**.`;
+
+  // ── 3. Abbreviated Peer Comparison prompt ────────────────────
+  const peerTable = `| Metric | ${ticker} | ${peerSymbols[0] ?? 'N/A'} | ${peerSymbols[1] ?? 'N/A'} |
+|--------|----------|-----------------|-----------------|
+| P/S TTM | ${keyStats?.psTrailing12Months?.raw?.toFixed(2) ?? 'N/A'} | ${peerFinancials[0]?.psTTM ?? 'N/A'} | ${peerFinancials[1]?.psTTM ?? 'N/A'} |
+| P/S Fwd | ${keyStats?.psForward?.raw?.toFixed(2) ?? 'N/A'} | ${peerFinancials[0]?.psForward ?? 'N/A'} | ${peerFinancials[1]?.psForward ?? 'N/A'} |
+| P/FCF   | ${keyStats?.priceToFreeCashFlows?.raw?.toFixed(2) ?? 'N/A'} | ${peerFinancials[0]?.pfcf ?? 'N/A'} | ${peerFinancials[1]?.pfcf ?? 'N/A'} |
+| EV/EBITDA | ${keyStats?.enterpriseToEbitda?.raw?.toFixed(2) ?? 'N/A'} | ${peerFinancials[0]?.evEbitda ?? 'N/A'} | ${peerFinancials[1]?.evEbitda ?? 'N/A'} |
+| Gross Margin | ${financials?.grossMargins?.raw ? (financials.grossMargins.raw * 100).toFixed(1) + '%' : 'N/A'} | ${peerFinancials[0]?.grossMargin ?? 'N/A'}% | ${peerFinancials[1]?.grossMargin ?? 'N/A'}% |
+| YoY Rev Growth | ${financials?.revenueGrowth?.raw ? (financials.revenueGrowth.raw * 100).toFixed(1) + '%' : 'N/A'} | ${peerFinancials[0]?.revenueGrowth ?? 'N/A'}% | ${peerFinancials[1]?.revenueGrowth ?? 'N/A'}% |`;
+
+  const peerComparisonPrompt = `Analyse the valuation of ${ticker} vs peers. **Be concise**.
+- Show the **Value/Growth Score** = P/S TTM + revenue growth % (lowest = best).
+- State if the valuation makes sense relative to growth.
+- **Max 5 bullet points** and the table from the data.
+
+${peerTable}`;
+
+  // ── 4. Abbreviated Bear Case prompt ─────────────────────────
+  const bearCasePrompt = `Act as a skeptical short-seller. List the **3 most serious red flags** for ${ticker}, ranked by severity.
+**Bullet points only, one per flag**, with a one‑sentence source citation from the data below.
+If you can't find 3, keep researching but still produce the top 3 you find.
+
+Data:
+- Customer concentration: ${concentration}
+- Margin trend (last 4Q): ${JSON.stringify(marginData?.margins)}
+- Insider sells (last 12m): ${JSON.stringify(insiders.slice(0, 10))}
+- Revenue growth YoY: ${financials?.revenueGrowth?.raw ? (financials.revenueGrowth.raw * 100).toFixed(1) + '%' : 'N/A'}
+- Gross margin: ${financials?.grossMargins?.raw ? (financials.grossMargins.raw * 100).toFixed(1) + '%' : 'N/A'}`;
+
+  return {
+    ticker,
+    deepDivePrompt,
+    peerComparisonPrompt,
+    bearCasePrompt,
+    fetchedAt: new Date().toISOString(),
   };
-
-  const copyToClipboard = async (text: string, label: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(label);
-      setTimeout(() => setCopied(null), 2000);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      setCopied(label);
-      setTimeout(() => setCopied(null), 2000);
-    }
-  };
-
-  // Build combined prompt when prompts are available
-  const combinedPrompt = prompts
-    ? `You are a fundamental analyst. Generate the following three reports for ${prompts.ticker}:
-
---- DEEP DIVE ---
-${prompts.deepDivePrompt}
-
---- PEER COMPARISON ---
-${prompts.peerComparisonPrompt}
-
---- BEAR CASE ---
-${prompts.bearCasePrompt}
-
-Produce all three reports in order, separated by clear headings (e.g., "# Deep Dive", "# Peer Comparison", "# Bear Case").`
-    : '';
-
-  return (
-    <div className="p-4 space-y-4">
-      <button
-        onClick={fetchPrompts}
-        disabled={loading}
-        className="bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] px-4 py-2 rounded text-sm font-bold hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-      >
-        {loading ? '⏳ Fetching data...' : '📋 Generate Prompts'}
-      </button>
-
-      {error && <p className="text-[#ff4757] text-xs">{error}</p>}
-
-      {prompts && (
-        <div className="space-y-4">
-          <p className="text-[#4a6080] text-xs">
-            Data fetched at {new Date(prompts.fetchedAt).toLocaleString()}.
-            Use the buttons below to copy individual prompts or the combined prompt.
-            Paste into{' '}
-            <a
-              href="https://chat.deepseek.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[#00d4ff] underline hover:text-[#00ff88]"
-            >
-              chat.deepseek.com
-            </a>
-            {' '}(free).
-          </p>
-
-          {/* Combined Copy Button – most convenient */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => copyToClipboard(combinedPrompt, 'combined')}
-              className={`text-xs px-4 py-2 rounded border font-bold transition-all ${
-                copied === 'combined'
-                  ? 'border-[#00ff88] text-[#00ff88] bg-[#00ff88]/10'
-                  : 'border-[#00d4ff] text-[#00d4ff] bg-[#00d4ff]/10 hover:bg-[#00d4ff]/20'
-              }`}
-            >
-              {copied === 'combined' ? '✅ Copied!' : '📋 Copy Combined Prompt (All 3 Reports)'}
-            </button>
-            <span className="text-[#4a6080] text-xs">
-              ({combinedPrompt.length.toLocaleString()} chars)
-            </span>
-          </div>
-
-          <p className="text-[#4a6080] text-xs">
-            After copying, run your macOS shortcut (⌘⇧D) to send directly to DeepSeek.
-          </p>
-
-          {/* Individual prompts – still available */}
-          <details className="border border-[#1e2d4a] rounded" open>
-            <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-[#c8d8f0] hover:text-[#00d4ff] transition-colors bg-[#0f1629]">
-              Individual Prompts
-            </summary>
-            <div className="p-3 space-y-4">
-              <PromptBlock
-                title="🧠 Deep Dive"
-                prompt={prompts.deepDivePrompt}
-                copied={copied}
-                onCopy={copyToClipboard}
-                index={1}
-              />
-              <PromptBlock
-                title="📊 Peer Comparison"
-                prompt={prompts.peerComparisonPrompt}
-                copied={copied}
-                onCopy={copyToClipboard}
-                index={2}
-              />
-              <PromptBlock
-                title="🐻 Bear Case"
-                prompt={prompts.bearCasePrompt}
-                copied={copied}
-                onCopy={copyToClipboard}
-                index={3}
-              />
-            </div>
-          </details>
-        </div>
-      )}
-
-      {!prompts && !loading && !error && (
-        <p className="text-[#4a6080] text-xs">Click the button to generate research prompts for {ticker}.</p>
-      )}
-    </div>
-  );
-}
-
-function PromptBlock({
-  title,
-  prompt,
-  copied,
-  onCopy,
-  index,
-}: {
-  title: string;
-  prompt: string;
-  copied: string | null;
-  onCopy: (text: string, label: string) => void;
-  index: number;
-}) {
-  const label = `prompt-${index}`;
-  const charCount = prompt.length;
-
-  return (
-    <div className="space-y-2">
-      <p className="text-xs font-semibold text-[#c8d8f0]">
-        {title} <span className="text-[#4a6080] font-normal">({charCount.toLocaleString()} chars)</span>
-      </p>
-      <pre className="text-xs text-[#c8d8f0] bg-[#0a0e1a] p-3 rounded border border-[#1e2d4a] overflow-auto max-h-48 whitespace-pre-wrap">
-        {prompt}
-      </pre>
-      <button
-        onClick={() => onCopy(prompt, label)}
-        className={`text-xs px-3 py-1 rounded border transition-all ${
-          copied === label
-            ? 'border-[#00ff88] text-[#00ff88] bg-[#00ff88]/10'
-            : 'border-[#1e2d4a] text-[#4a6080] hover:border-[#00d4ff] hover:text-[#00d4ff]'
-        }`}
-      >
-        {copied === label ? '✅ Copied!' : '📋 Copy'}
-      </button>
-    </div>
-  );
 }
