@@ -141,7 +141,7 @@ export async function getMarginAndGrowth(symbol: string) {
   const quarters = await getIncomeStatementQuarterly(symbol);
   if (!quarters || quarters.length < 4) return null;
   const latest = quarters.slice(0, 4).reverse(); // oldest->newest
-  const margins = latest.map(q => {
+  const margins = latest.map((q: any) => {
     const rev = q.totalRevenue?.raw ?? 0;
     const gp = q.grossProfit?.raw ?? 0;
     const op = q.operatingIncome?.raw ?? 0;
