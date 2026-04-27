@@ -151,45 +151,6 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
   } catch (e) {
     console.error("Southbound Logic Error:", e);
 
-  // Source B: Yahoo Finance ETF volume proxy (Fallback)
-  try {
-    const [tracker, hstech] = await Promise.all([
-      fetchYahooOHLCV("2800.HK", 25),
-      fetchYahooOHLCV("3033.HK", 25),
-    ]);
-
-    if (tracker.length >= 21) {
-      const vols20 = tracker.slice(-21, -1).map(b => b.volume);
-      const avgVol20 = vols20.reduce((a, b) => a + b, 0) / vols20.length;
-      const todayVol = tracker[tracker.length - 1].volume;
-      const volRatio = avgVol20 > 0 ? todayVol / avgVol20 : 1;
-
-      const close5d = tracker.length >= 6 ? tracker[tracker.length - 6].close : tracker[0].close;
-      const ret5d = close5d > 0 ? ((tracker[tracker.length - 1].close - close5d) / close5d) * 100 : 0;
-
-      let hstechRelStr = 0;
-      if (hstech.length >= 6) {
-        const hs5d = hstech[hstech.length - 6].close;
-        const hstechRet5 = hs5d > 0 ? ((hstech[hstech.length - 1].close - hs5d) / hs5d) * 100 : 0;
-        hstechRelStr = hstechRet5 - ret5d;
-      }
-
-      const bullCount = [volRatio > 1.2, ret5d > 0, hstechRelStr > 0].filter(Boolean).length;
-      const score = bullCount === 3 ? 8 : bullCount === 2 ? 6 : bullCount === 1 ? 4 : 2;
-      const signal: MacroFactor["signal"] = bullCount >= 2 ? "bullish" : bullCount === 0 ? "bearish" : "neutral";
-
-      return {
-        label: "Southbound",
-        value: `${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
-        score,
-        signal,
-        detail: `2800.HK Vol ${volRatio.toFixed(1)}x · 5d ${ret5d.toFixed(1)}%`,
-      };
-    }
-  } catch (e) {
-    console.error("Southbound Yahoo Fallback Error:", e);
-  }
-
   // Final Resort: Neutral fallback
   return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "Data unavailable" };
 }
