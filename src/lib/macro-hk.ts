@@ -102,94 +102,55 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 // ── 2. Southbound Flow ────────────────────────────────────────
-// Primary:   EastMoney kamt.kline API (correct southbound secid)
+// Primary:   EastMoney datacenter-web API (SOUTH_NET_AMT in 万元)
 // Secondary: Yahoo ETF proxy (fallback)
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: EastMoney HSGT kline API (Southbound Combined) ──
-  // secid=90.BK0675 = 港股通(沪深) net flow
+  // ── Source A: EastMoney datacenter-web (reliable JSON) ───────
   try {
-    const url = "https://push2his.eastmoney.com/api/qt/kamt.kline/get?fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&klt=101&lmt=10&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0675";
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://data.eastmoney.com/",
-      },
+    // Build filter for the latest trading day (today – 2 days to be safe)
+    const date = new Date();
+    date.setDate(date.getDate() - 2);
+    const dateStr = date.toISOString().slice(0, 10);
+
+    const apiUrl = `https://datacenter-web.eastmoney.com/api/data/v1/get` +
+      `?reportName=RPT_MUTUAL_DEALAMT` +
+      `&columns=ALL` +
+      `&filter=(TRADE_DATE='${dateStr}')` +
+      `&pageNumber=1&pageSize=1` +
+      `&sortTypes=-1&sortColumns=TRADE_DATE` +
+      `&source=WEB&client=WEB`;
+
+    const res = await fetch(apiUrl, {
+      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
       cache: "no-store",
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error("API failed");
-    const text = await res.text();
-    const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
-    const json = JSON.parse(jsonStr || text);
-    const klines: string[] = json?.data?.klines ?? [];
-    if (klines.length < 3) throw new Error("no kline data");
+    const json = await res.json();
+    const data = json?.result?.data;
+    if (!data || !data.length) throw new Error("no data");
 
-    const flows: number[] = [];
-    for (const k of klines.slice(-5)) {
-      const parts = k.split(",");
-      // parts[1] = f52 = net buy in 万元 (CNY)
-      const netWan = parseFloat(parts[1] ?? "0");
-      if (!isNaN(netWan)) {
-        flows.push(netWan / 10000);   // convert 万元 → 亿元
-      }
-    }
+    const latest = data[0];
+    // SOUTH_NET_AMT is net buy in 万元 (10000 CNY). Convert to 亿元 (100m CNY).
+    const netWan = parseFloat(String(latest.SOUTH_NET_AMT ?? "0"));
+    if (isNaN(netWan) || netWan === 0) throw new Error("zero net flow");
 
-    if (flows.length >= 3) {
-      const today = flows[flows.length - 1];
-      const sum5 = flows.reduce((a, b) => a + b, 0);
-      const score  = sum5 >= 50 ? 9 : sum5 >= 20 ? 8 : sum5 >= 5 ? 6 : sum5 >= -5 ? 5 : sum5 >= -20 ? 3 : 2;
-      const signal: MacroFactor["signal"] = sum5 >= 10 ? "bullish" : sum5 <= -10 ? "bearish" : "neutral";
-      const todayStr = today >= 0 ? `+${today.toFixed(1)}` : `${today.toFixed(1)}`;
-      const sumStr   = sum5   >= 0 ? `+${sum5.toFixed(1)}`   : `${sum5.toFixed(1)}`;
-      return {
-        label: "Southbound",
-        value: `${todayStr}亿`,
-        score,
-        signal,
-        detail: `Today ${todayStr} · 5d ${sumStr}亿 CNY`,
-      };
-    }
-  } catch {
-    // If SECID BK0675 fails, try the alternative southbound codes
-    const fallbackIds = ["90.BK0707", "90.BK0004", "90.BK0540"];
-    for (const secid of fallbackIds) {
-      try {
-        const url = `https://push2his.eastmoney.com/api/qt/kamt.kline/get?fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&klt=101&lmt=10&ut=b2884a393a59ad64002292a3e90d46a5&secid=${secid}`;
-        const res = await fetch(url, {
-          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
-          cache: "no-store",
-          signal: AbortSignal.timeout(5000),
-        });
-        if (!res.ok) continue;
-        const text = await res.text();
-        const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
-        const json = JSON.parse(jsonStr || text);
-        const klines: string[] = json?.data?.klines ?? [];
-        if (klines.length < 3) continue;
+    const netYi = netWan / 10000;
+    const score  = netYi >= 50 ? 9 : netYi >= 20 ? 8 : netYi >= 5 ? 6 : netYi >= -5 ? 5 : netYi >= -20 ? 3 : 2;
+    const signal: MacroFactor["signal"] = netYi >= 10 ? "bullish" : netYi <= -10 ? "bearish" : "neutral";
+    const todayStr = netYi >= 0 ? `+${netYi.toFixed(1)}` : `${netYi.toFixed(1)}`;
 
-        const flows: number[] = [];
-        for (const k of klines.slice(-5)) {
-          const parts = k.split(",");
-          const netWan = parseFloat(parts[1] ?? "0");
-          if (!isNaN(netWan)) flows.push(netWan / 10000);
-        }
-        if (flows.length >= 3) {
-          const today = flows[flows.length - 1];
-          const sum5 = flows.reduce((a, b) => a + b, 0);
-          return {
-            label: "Southbound",
-            value: `${today >= 0 ? "+" : ""}${today.toFixed(1)}亿`,
-            score: sum5 >= 50 ? 9 : sum5 >= 20 ? 8 : sum5 >= 5 ? 6 : sum5 >= -5 ? 5 : sum5 >= -20 ? 3 : 2,
-            signal: sum5 >= 10 ? "bullish" : sum5 <= -10 ? "bearish" : "neutral",
-            detail: `Today ${today >= 0 ? "+" : ""}${today.toFixed(1)} · 5d ${sum5 >= 0 ? "+" : ""}${sum5.toFixed(1)}亿 CNY`,
-          };
-        }
-      } catch { /* try next */ }
-    }
-  }
+    return {
+      label: "Southbound",
+      value: `${todayStr}亿`,
+      score,
+      signal,
+      detail: `Today ${todayStr}亿 CNY (官方)`,
+    };
+  } catch { /* fall through to ETF proxy */ }
 
-  // ── Source B: Yahoo ETF proxy (fallback) ─────────────────────
+  // ── Source B: Yahoo ETF proxy (unchanged) ────────────────────
   try {
     const [tracker, hstech] = await Promise.all([
       fetchYahooOHLCV("2800.HK", 25),
