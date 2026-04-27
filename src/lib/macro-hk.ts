@@ -102,33 +102,54 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 // ── 2. Southbound Flow ────────────────────────────────────────
-// Primary:   EastMoney kamt.rtmin API (correct daily net flow)
-// Secondary: Yahoo ETF proxy (fallback)
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: EastMoney real‑time minute K-line (correct data) ──
+  // ── Source A: EastMoney per‑board fflow/daykline ────────────
   try {
-    // secid=90.BK0675 = Southbound combined  (港股通沪深)
-    // fields2:f56 = cumulative net buy in CNY (元)
-    const url = "https://push2.eastmoney.com/api/qt/kamt.rtmin/get" +
-      "?fields1=f1,f2,f3,f4" +
-      "&fields2=f51,f52,f53,f54,f55,f56" +
-      "&ut=b2884a393a59ad64002292a3e90d46a5" +
-      "&secid=90.BK0675";
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    const raw = json?.data?.f56;   // net flow in yuan (元)
-    if (raw === undefined || raw === null) throw new Error("missing f56");
-    const netYuan = Number(raw);
-    if (isNaN(netYuan)) throw new Error("invalid number");
+    // 90.BK0002 = SH southbound, 90.BK0003 = SZ southbound
+    const boards = ["90.BK0002", "90.BK0003"];
+    let totalNetYuan = 0;
+    let daysCount = 0;
+    let todayNetYuan = 0;
+    let todayBoardCount = 0;
 
-    // Convert yuan → 亿元 (1亿 = 100,000,000元)
-    const netYi = netYuan / 1e8;
+    for (const secid of boards) {
+      try {
+        const url = `https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get` +
+          `?lmt=2&klt=101` +
+          `&fields1=f1,f2,f3,f7` +
+          `&fields2=f51,f52,f53,f54,f55,f56` +
+          `&ut=b2884a393a59ad64002292a3e90d46a5` +
+          `&secid=${secid}`;
+        const res = await fetch(url, {
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
+          cache: "no-store",
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!res.ok) continue;
+        const text = await res.text();
+        const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
+        const json = JSON.parse(jsonStr || text);
+        const klines: string[] = json?.data?.klines ?? [];
+        if (klines.length < 1) continue;
+
+        // most recent kline = latest trading day
+        const parts = klines[klines.length - 1].split(",");
+        // parts[5] = f56 = net flow in yuan (元)
+        const netYuan = parseFloat(parts[5] ?? "0");
+        if (!isNaN(netYuan)) {
+          totalNetYuan += netYuan;
+          todayNetYuan += netYuan;
+          daysCount++;
+          todayBoardCount++;
+        }
+      } catch { /* skip this board */ }
+    }
+
+    if (todayBoardCount < 1) throw new Error("no board data");
+
+    // Convert total net yuan → 亿元 (1亿 = 100,000,000元)
+    const netYi = todayNetYuan / 1e8;
 
     const score  = netYi >= 50 ? 9 : netYi >= 20 ? 8 : netYi >= 5 ? 6 : netYi >= -5 ? 5 : netYi >= -20 ? 3 : 2;
     const signal: MacroFactor["signal"] = netYi >= 10 ? "bullish" : netYi <= -10 ? "bearish" : "neutral";
@@ -139,10 +160,10 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
       value: `${todayStr}亿`,
       score,
       signal,
-      detail: `Today ${todayStr}亿 CNY`,
+      detail: `Today ${todayStr}亿 CNY (SH+SZ)`,
     };
   } catch (err) {
-    console.error("[Southbound] EastMoney real‑time API failed:", err);
+    console.error("[Southbound] fflow/daykline failed:", err);
     // fall through to ETF proxy
   }
 
