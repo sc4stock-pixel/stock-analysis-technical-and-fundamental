@@ -102,80 +102,57 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 // ── 2. Southbound Flow ────────────────────────────────────────
-// Strategy:
-//   Primary:   Scrape the actual eastmoney hsgt page for net buy turnover
-//   Secondary: EastMoney push2 API (if accessible)
-//   Fallback:  Yahoo ETF volume proxy
+// Primary:   aastocks.com Hong Kong Stock Connect overview (server-rendered)
+// Secondary: Yahoo ETF volume proxy (fallback)
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: Direct page scraping (most reliable) ────────────
+  // ── Source A: aastocks southbound overview page ───────────────
   try {
-    const res = await fetch("https://data.eastmoney.com/hsgt/hsgtV2.html", {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html",
-      },
+    // The page shows "Southbound Net Flow" in the HTML (server‑rendered).
+    const res = await fetch("https://www.aastocks.com/en/stocks/market/southbound/overview", {
+      headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html" },
       cache: "no-store",
       signal: AbortSignal.timeout(8000),
     });
     if (res.ok) {
       const html = await res.text();
-      // The page embeds southbound data directly in the HTML.
-      // Pattern: 南向资金 净买额-40.92亿 or 南向资金 净买额48.82亿
-      const southMatch = html.match(/南向资金[^净]*净买额([+\-]?[0-9]+(?:\.[0-9]+)?)亿/);
-      if (southMatch) {
-        const netFlow = parseFloat(southMatch[1]);
-        if (!isNaN(netFlow)) {
-          const score  = netFlow >= 50 ? 9 : netFlow >= 20 ? 8 : netFlow >= 5 ? 6 : netFlow >= -5 ? 5 : netFlow >= -20 ? 3 : 2;
-          const signal: MacroFactor["signal"] = netFlow >= 10 ? "bullish" : netFlow <= -10 ? "bearish" : "neutral";
-          const todayStr = netFlow >= 0 ? `+${netFlow.toFixed(1)}` : `${netFlow.toFixed(1)}`;
+      // Typical structure:
+      //   <div class="val">-4.092B</div>   or   <td class="cls">-4.092B</td>
+      // We search for a number followed by "B" near the phrase "Net Flow".
+      // First try a direct pattern for a value like "-4.092B"
+      let match = html.match(/([+\-]?[0-9]+(?:\.[0-9]+)?)\s*B/);
+      if (!match) {
+        // If no B, look for 亿 (100 million)
+        match = html.match(/([+\-]?[0-9]+(?:\.[0-9]+)?)\s*亿/);
+        if (match) {
+          const val = parseFloat(match[1]);
+          if (!isNaN(val)) {
+            const score  = val >= 50 ? 9 : val >= 20 ? 8 : val >= 5 ? 6 : val >= -5 ? 5 : val >= -20 ? 3 : 2;
+            const signal: MacroFactor["signal"] = val >= 10 ? "bullish" : val <= -10 ? "bearish" : "neutral";
+            const todayStr = val >= 0 ? `+${val.toFixed(1)}` : `${val.toFixed(1)}`;
+            return {
+              label: "Southbound", value: `${todayStr}亿`,
+              score, signal, detail: `Today ${todayStr}亿 CNY (aastocks)`,
+            };
+          }
+        }
+      } else {
+        // B suffix – value is in billions HKD/CNY
+        const val = parseFloat(match[1]);
+        if (!isNaN(val)) {
+          const score  = val >= 5 ? 9 : val >= 2 ? 8 : val >= 0.5 ? 6 : val >= -0.5 ? 5 : val >= -2 ? 3 : 2;
+          const signal: MacroFactor["signal"] = val >= 1 ? "bullish" : val <= -1 ? "bearish" : "neutral";
+          const todayStr = val >= 0 ? `+${val.toFixed(1)}B` : `${val.toFixed(1)}B`;
           return {
-            label: "Southbound", value: `${todayStr}亿`,
-            score, signal, detail: `Today ${todayStr}亿 CNY (net buy turnover)`,
+            label: "Southbound", value: todayStr,
+            score, signal, detail: `Today ${todayStr} (aastocks)`,
           };
         }
       }
     }
   } catch { /* fall through */ }
 
-  // ── Source B: EastMoney push2 API (secondary) ──────────────────
-  try {
-    // Use the datacenter-web API which is currently accessible
-    const apiUrl = "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_MUTUAL_DEALAMT&columns=ALL&filter=(TRADE_DATE>='" +
-      new Date(Date.now() - 86400000).toISOString().slice(0, 10) +
-      "')&pageNumber=1&pageSize=5&sortTypes=-1&sortColumns=TRADE_DATE&source=WEB&client=WEB";
-    const res = await fetch(apiUrl, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(5000),
-    });
-    if (res.ok) {
-      const json = await res.json();
-      const data = json?.result?.data;
-      if (data && data.length > 0) {
-        // Try to find southbound fields in the response
-        const latest = data[0];
-        // Look for southbound-specific fields (may vary)
-        const southFields = ["SOUTH_NET_AMT", "SSC_SOUTH_NET", "NX_NET_AMT", "HK_NET_BUY"];
-        for (const field of southFields) {
-          if (latest[field] !== undefined && latest[field] !== null) {
-            const val = parseFloat(String(latest[field])) / 1e8; // Convert to 亿
-            if (!isNaN(val) && val !== 0) {
-              const score  = val >= 50 ? 9 : val >= 20 ? 8 : val >= 5 ? 6 : val >= -5 ? 5 : val >= -20 ? 3 : 2;
-              const signal: MacroFactor["signal"] = val >= 10 ? "bullish" : val <= -10 ? "bearish" : "neutral";
-              const todayStr = val >= 0 ? `+${val.toFixed(1)}` : `${val.toFixed(1)}`;
-              return {
-                label: "Southbound", value: `${todayStr}亿`,
-                score, signal, detail: `Today ${todayStr}亿 CNY (API)`,
-              };
-            }
-          }
-        }
-      }
-    }
-  } catch { /* fall through */ }
-
-  // ── Source C: Yahoo ETF proxy (existing fallback, unchanged) ──
+  // ── Source B: Yahoo ETF proxy (existing fallback, unchanged) ──
   try {
     const [tracker, hstech] = await Promise.all([
       fetchYahooOHLCV("2800.HK", 25),
