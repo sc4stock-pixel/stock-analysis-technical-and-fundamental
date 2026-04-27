@@ -102,9 +102,9 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  // Real-time API for combined Southbound (BK0707)
-  const rtUrl = "https://push2.eastmoney.com/api/qt/stock/get?secid=90.BK0707&fields=f62";
-  // Historical API for the 5-day trend (BK0707)
+  // RT API (f62 is Net Buy, f159 is the secondary Net Buy field)
+  const rtUrl = "https://push2.eastmoney.com/api/qt/stock/get?secid=90.BK0707&fields=f62,f159";
+  // Historical API (Used for the 5-day trend and as a backup for today's value)
   const histUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=6&klt=101&fields2=f51,f56&secid=90.BK0707";
 
   try {
@@ -113,36 +113,43 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
       fetch(histUrl, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" })
     ]);
 
-    if (rtRes.ok && histRes.ok) {
-      const rtJson = await rtRes.json();
-      const histJson = await histRes.json();
+    if (!rtRes.ok || !histRes.ok) throw new Error("API Connection Failed");
 
-      // Today's exact Real-Time value (f62 is in raw Yuan)
-      const todayFlowRaw = rtJson?.data?.f62 ?? 0;
-      const todayFlow = todayFlowRaw / 1e8; // Convert to 亿
+    const rtJson = await rtRes.json();
+    const histJson = await histRes.json();
 
-      // 5-Day Cumulative calculation
-      const klines: string[] = histJson?.data?.klines ?? [];
-      const pastFlows = klines.slice(0, -1).map(k => parseFloat(k.split(",")[1]) / 1e8);
-      const flow5d = pastFlows.reduce((a, b) => a + b, 0) + todayFlow;
-
-      const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
-      const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
-      
-      const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
-      const cumStr = flow5d >= 0 ? `+${flow5d.toFixed(2)}` : `${flow5d.toFixed(2)}`;
-
-      return {
-        label: "Southbound",
-        value: `${todayStr}亿`,
-        score,
-        signal,
-        detail: `Today ${todayStr}亿 · 5d ${cumStr}亿 CNY`,
-      };
+    // 1. Try Real-Time fields first (Mimics the Live UI)
+    let todayFlowRaw = rtJson?.data?.f62 ?? rtJson?.data?.f159 ?? 0;
+    
+    // 2. If RT is 0 (Market closed or lag), use the latest Historical Kline
+    const klines: string[] = histJson?.data?.klines ?? [];
+    if (todayFlowRaw === 0 && klines.length > 0) {
+      const lastKline = klines[klines.length - 1].split(",");
+      todayFlowRaw = parseFloat(lastKline[1]) || 0;
     }
+
+    const todayFlow = todayFlowRaw / 1e8; // Convert to Billion (亿)
+
+    // 3. Calculate 5-Day Cumulative (Past 4 days + today's latest)
+    const pastFlows = klines.slice(0, -1).map(k => parseFloat(k.split(",")[1]) / 1e8);
+    const flow5d = pastFlows.reduce((a, b) => a + b, 0) + todayFlow;
+
+    // 4. Final Scoring Logic
+    const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
+    const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
+    
+    const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
+    const cumStr = flow5d >= 0 ? `+${flow5d.toFixed(2)}` : `${flow5d.toFixed(2)}`;
+
+    return {
+      label: "Southbound",
+      value: `${todayStr}亿`,
+      score,
+      signal,
+      detail: `Today ${todayStr}亿 · 5d ${cumStr}亿 CNY`,
+    };
   } catch (e) {
-    console.error("Southbound RT Error:", e);
-  }
+    console.error("Southbound Logic Error:", e);
 
   // Source B: Yahoo Finance ETF volume proxy (Fallback)
   try {
