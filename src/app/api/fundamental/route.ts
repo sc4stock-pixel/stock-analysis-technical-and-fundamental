@@ -1,6 +1,6 @@
 // src/app/api/fundamental/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { generateFundamentalReport } from '@/lib/fundamental/generateReport';
+import { generateFundamentalPrompts } from '@/lib/fundamental/generateReport';
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,12 +9,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Ticker is required' }, { status: 400 });
     }
 
-    const report = await generateFundamentalReport(ticker.toUpperCase());
-    return NextResponse.json({ report });
+    const prompts = await generateFundamentalPrompts(ticker.toUpperCase());
+    return NextResponse.json({ prompts });
   } catch (e: any) {
-    // Log full error to Vercel logs for debugging
     console.error('Fundamental API error:', e);
-    // Return the actual error message to the client
     return NextResponse.json(
       { error: e?.message ?? String(e) },
       { status: 500 }
