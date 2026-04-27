@@ -110,46 +110,83 @@ async function getVHSI(): Promise<MacroFactor> {
 //   Secondary: Price momentum of 3033.HK vs ^HSI (HSTECH outperforms = risk-on)
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: EastMoney HSGT southbound net flow (primary) ──
-  // Uses the official southbound flow kline endpoint (kamt.kline)
-  const hsgtUrl = "https://push2.eastmoney.com/api/qt/kamt.kline/get?fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&klt=101&lmt=10&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0002";
+  // ── Source A: EastMoney HSGT southbound net flow ──────────────────
+  // Primary: kamt.kline API (exact net turnover as displayed on website)
+  // Fallback: fflow/daykline with corrected column f56
+  const hsgtPrimary = "https://push2his.eastmoney.com/api/qt/kamt.kline/get?fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&klt=101&lmt=10&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0002";
+  
+  const tryParseFlow = (text: string, fromKamt: boolean): number[] => {
+    try {
+      const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
+      const json = JSON.parse(jsonStr || text);
+      const klines: string[] = json?.data?.klines ?? [];
+      if (klines.length < 3) return [];
+      const flows: number[] = [];
+      for (const k of klines.slice(-5)) {
+        const parts = k.split(",");
+        // For kamt.kline: f52 = net buy (万元). For fflow/daykline: f56 = net flow (元).
+        const val = fromKamt ? parseFloat(parts[2] ?? "0") : parseFloat(parts[5] ?? "0");
+        if (isNaN(val)) return [];
+        // Convert: kamt returns 万元 -> 亿; fflow returns 元 -> 亿
+        flows.push(fromKamt ? val / 1e4 : val / 1e8);
+      }
+      return flows;
+    } catch { return []; }
+  };
+
+  // Primary attempt: kamt.kline (HSGT turnover)
   try {
-    const res = await fetch(hsgtUrl, {
+    const res = await fetch(hsgtPrimary, {
       headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
       cache: "no-store",
       signal: AbortSignal.timeout(5000),
     });
     if (res.ok) {
       const text = await res.text();
-      // Remove possible JSONP wrapper
-      const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
-      const json = JSON.parse(jsonStr || text);
-      const klines: string[] = json?.data?.klines ?? [];
-      if (klines.length >= 3) {
-        const recentFlows: number[] = [];
-        for (const k of klines.slice(-5)) {
-          const parts = k.split(",");
-          // f51 = date, f52 = net buy (万元), f53 = total buy, f54 = total sell, …
-          const netWan = parseFloat(parts[1] ?? "0");   // net buy in 万元
-          if (!isNaN(netWan)) recentFlows.push(netWan / 1e4); // convert 万元 → 亿元
-        }
-        if (recentFlows.length >= 3) {
-          const todayFlow = recentFlows[recentFlows.length - 1];
-          const flow5d = recentFlows.reduce((a, b) => a + b, 0);
-          const score  = flow5d >= 50 ? 9 : flow5d >= 20 ? 8 : flow5d >= 5 ? 6 : flow5d >= -5 ? 5 : flow5d >= -20 ? 3 : 2;
-          const signal: MacroFactor["signal"] = flow5d >= 10 ? "bullish" : flow5d <= -10 ? "bearish" : "neutral";
-          const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(1)}` : `${todayFlow.toFixed(1)}`;
-          const cumStr   = flow5d    >= 0 ? `+${flow5d.toFixed(1)}`    : `${flow5d.toFixed(1)}`;
-          return {
-            label: "Southbound", value: `${todayStr}亿`,
-            score, signal, detail: `Today ${todayStr} · 5d ${cumStr}亿 CNY (HSGT)`,
-          };
-        }
+      // Uncomment next line to debug raw response:
+      // console.log("[hk-macro] HSGT raw:", text.slice(0, 200));
+      const flows = tryParseFlow(text, true);
+      if (flows.length >= 3) {
+        const todayFlow = flows[flows.length - 1];
+        const flow5d = flows.reduce((a, b) => a + b, 0);
+        return {
+          label: "Southbound",
+          value: `${todayFlow >= 0 ? "+" : ""}${todayFlow.toFixed(1)}亿`,
+          score: flow5d >= 50 ? 9 : flow5d >= 20 ? 8 : flow5d >= 5 ? 6 : flow5d >= -5 ? 5 : flow5d >= -20 ? 3 : 2,
+          signal: flow5d >= 10 ? "bullish" : flow5d <= -10 ? "bearish" : "neutral",
+          detail: `Today ${todayFlow >= 0 ? "+" : ""}${todayFlow.toFixed(1)} · 5d ${flow5d >= 0 ? "+" : ""}${flow5d.toFixed(1)}亿 CNY`,
+        };
+      }
+    }
+  } catch { /* fall through */ }
+
+  // Secondary: improved fflow/daykline with correct column f56
+  const secondaryUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0002";
+  try {
+    const res = await fetch(secondaryUrl, {
+      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const text = await res.text();
+      // console.log("[hk-macro] fflow raw:", text.slice(0, 200));
+      const flows = tryParseFlow(text, false);
+      if (flows.length >= 3) {
+        const todayFlow = flows[flows.length - 1];
+        const flow5d = flows.reduce((a, b) => a + b, 0);
+        return {
+          label: "Southbound",
+          value: `${todayFlow >= 0 ? "+" : ""}${todayFlow.toFixed(1)}亿`,
+          score: flow5d >= 50 ? 9 : flow5d >= 20 ? 8 : flow5d >= 5 ? 6 : flow5d >= -5 ? 5 : flow5d >= -20 ? 3 : 2,
+          signal: flow5d >= 10 ? "bullish" : flow5d <= -10 ? "bearish" : "neutral",
+          detail: `Today ${todayFlow >= 0 ? "+" : ""}${todayFlow.toFixed(1)} · 5d ${flow5d >= 0 ? "+" : ""}${flow5d.toFixed(1)}亿 CNY`,
+        };
       }
     }
   } catch { /* fall through to ETF proxy */ }
-  
-  // ── Source B: Yahoo Finance ETF volume proxy ──────────────────
+
+  // ── Source B: ETF volume proxy (existing code remains unchanged) ──
   // 2800.HK (Tracker Fund) = best proxy for mainland buying sentiment
   // High volume relative to 20d avg + positive price = southbound inflow
   try {
