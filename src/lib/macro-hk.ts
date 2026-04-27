@@ -102,8 +102,7 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  // Source A: EastMoney southbound net flow (primary)
-  // BK0707 = Combined SH + SZ Southbound Net Buy Turnover
+  // BK0707 = Combined Southbound Net Buy Turnover
   const emUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0707";
 
   try {
@@ -112,18 +111,18 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
       cache: "no-store",
       signal: AbortSignal.timeout(5000),
     });
-    
+
     if (res.ok) {
-      const text = await res.text();
-      const json = JSON.parse(text);
+      const json = await res.json();
       const klines: string[] = json?.data?.klines ?? [];
 
       if (klines.length >= 3) {
         const recentFlows: number[] = [];
         for (const k of klines.slice(-5)) {
           const parts = k.split(",");
-          // parts[1] corresponds to f52 (Net Flow). Units in 万, convert to 亿.
-          const flow = parseFloat(parts[1] ?? "0") / 10000;
+          // fields2 mapping: f51(date), f52, f53, f54, f55, f56(Net)
+          // parts[5] is f56 (Total Net Flow in raw Yuan)
+          const flow = parseFloat(parts[5] ?? "0") / 1e8; // Divide by 100,000,000 to get 亿
           if (!isNaN(flow)) recentFlows.push(flow);
         }
 
@@ -131,6 +130,7 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
           const todayFlow = recentFlows[recentFlows.length - 1];
           const flow5d = recentFlows.reduce((a, b) => a + b, 0);
 
+          // Scoring logic
           const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
           const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
           
