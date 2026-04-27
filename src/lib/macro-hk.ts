@@ -102,41 +102,47 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 // ── 2. Southbound Flow ────────────────────────────────────────
-// Primary:   HKD.com Southbound API (reliable JSON)
-// Fallback:  Yahoo ETF proxy
+// Primary:   EastMoney kamt.rtmin API (correct daily net flow)
+// Secondary: Yahoo ETF proxy (fallback)
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: HKD.com API (original data provider) ───────────
+  // ── Source A: EastMoney real‑time minute K-line (correct data) ──
   try {
-    const url = `https://hqd.appstock.com/v1/fundflow/southbound?t=${Date.now()}`;
+    // secid=90.BK0675 = Southbound combined  (港股通沪深)
+    // fields2:f56 = cumulative net buy in CNY (元)
+    const url = "https://push2.eastmoney.com/api/qt/kamt.rtmin/get" +
+      "?fields1=f1,f2,f3,f4" +
+      "&fields2=f51,f52,f53,f54,f55,f56" +
+      "&ut=b2884a393a59ad64002292a3e90d46a5" +
+      "&secid=90.BK0675";
     const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://hqd.appstock.com/" },
+      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
       cache: "no-store",
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    // Log the raw response for debugging (remove after confirmation)
-    console.log("[Southbound API] response:", JSON.stringify(json).slice(0, 200));
-    const netInflow = json?.data?.netInflow;  // in 万元
-    if (netInflow === undefined || netInflow === null) throw new Error("missing netInflow");
+    const raw = json?.data?.f56;   // net flow in yuan (元)
+    if (raw === undefined || raw === null) throw new Error("missing f56");
+    const netYuan = Number(raw);
+    if (isNaN(netYuan)) throw new Error("invalid number");
 
-    const netYi = Number(netInflow) / 10000;  // 万元 → 亿元
-    if (isNaN(netYi)) throw new Error("invalid number");
-    
+    // Convert yuan → 亿元 (1亿 = 100,000,000元)
+    const netYi = netYuan / 1e8;
+
     const score  = netYi >= 50 ? 9 : netYi >= 20 ? 8 : netYi >= 5 ? 6 : netYi >= -5 ? 5 : netYi >= -20 ? 3 : 2;
     const signal: MacroFactor["signal"] = netYi >= 10 ? "bullish" : netYi <= -10 ? "bearish" : "neutral";
-    const todayStr = netYi >= 0 ? `+${netYi.toFixed(1)}` : `${netYi.toFixed(1)}`;
+    const todayStr = netYi >= 0 ? `+${netYi.toFixed(2)}` : `${netYi.toFixed(2)}`;
 
     return {
       label: "Southbound",
       value: `${todayStr}亿`,
       score,
       signal,
-      detail: `Today ${todayStr}亿 CNY (HKD.com)`,
+      detail: `Today ${todayStr}亿 CNY`,
     };
   } catch (err) {
-    console.error("[Southbound] HKD.com API failed:", err);
+    console.error("[Southbound] EastMoney real‑time API failed:", err);
     // fall through to ETF proxy
   }
 
