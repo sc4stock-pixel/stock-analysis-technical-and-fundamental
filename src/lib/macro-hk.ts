@@ -103,92 +103,79 @@ async function getVHSI(): Promise<MacroFactor> {
 
 // ── 2. Southbound Flow ────────────────────────────────────────
 // Strategy:
-//   Primary A: Yahoo Finance ETF volume proxy
-//     - 2800.HK (Tracker Fund) volume surge vs 20d avg = mainland buying signal
-//     - 3033.HK (HSTECH ETF) relative volume vs 2800.HK momentum
-//   Primary B: EastMoney push2 API (correct secid = 90.BK0002 for southbound)
-//   Secondary: Price momentum of 3033.HK vs ^HSI (HSTECH outperforms = risk-on)
+//   Primary:   Scrape the actual eastmoney hsgt page for net buy turnover
+//   Secondary: EastMoney push2 API (if accessible)
+//   Fallback:  Yahoo ETF volume proxy
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: EastMoney HSGT southbound net flow ──────────────────
-  // Primary: kamt.kline API (exact net turnover as displayed on website)
-  // Fallback: fflow/daykline with corrected column f56
-  const hsgtPrimary = "https://push2his.eastmoney.com/api/qt/kamt.kline/get?fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&klt=101&lmt=10&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0002";
-  
-  const tryParseFlow = (text: string, fromKamt: boolean): number[] => {
-    try {
-      const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
-      const json = JSON.parse(jsonStr || text);
-      const klines: string[] = json?.data?.klines ?? [];
-      if (klines.length < 3) return [];
-      const flows: number[] = [];
-      for (const k of klines.slice(-5)) {
-        const parts = k.split(",");
-        // For kamt.kline: f52 = net buy (万元). For fflow/daykline: f56 = net flow (元).
-        const val = fromKamt ? parseFloat(parts[2] ?? "0") : parseFloat(parts[5] ?? "0");
-        if (isNaN(val)) return [];
-        // Convert: kamt returns 万元 -> 亿; fflow returns 元 -> 亿
-        flows.push(fromKamt ? val / 1e4 : val / 1e8);
-      }
-      return flows;
-    } catch { return []; }
-  };
-
-  // Primary attempt: kamt.kline (HSGT turnover)
+  // ── Source A: Direct page scraping (most reliable) ────────────
   try {
-    const res = await fetch(hsgtPrimary, {
-      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
+    const res = await fetch("https://data.eastmoney.com/hsgt/hsgtV2.html", {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html",
+      },
       cache: "no-store",
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(8000),
     });
     if (res.ok) {
-      const text = await res.text();
-      // Uncomment next line to debug raw response:
-      // console.log("[hk-macro] HSGT raw:", text.slice(0, 200));
-      const flows = tryParseFlow(text, true);
-      if (flows.length >= 3) {
-        const todayFlow = flows[flows.length - 1];
-        const flow5d = flows.reduce((a, b) => a + b, 0);
-        return {
-          label: "Southbound",
-          value: `${todayFlow >= 0 ? "+" : ""}${todayFlow.toFixed(1)}亿`,
-          score: flow5d >= 50 ? 9 : flow5d >= 20 ? 8 : flow5d >= 5 ? 6 : flow5d >= -5 ? 5 : flow5d >= -20 ? 3 : 2,
-          signal: flow5d >= 10 ? "bullish" : flow5d <= -10 ? "bearish" : "neutral",
-          detail: `Today ${todayFlow >= 0 ? "+" : ""}${todayFlow.toFixed(1)} · 5d ${flow5d >= 0 ? "+" : ""}${flow5d.toFixed(1)}亿 CNY`,
-        };
+      const html = await res.text();
+      // The page embeds southbound data directly in the HTML.
+      // Pattern: 南向资金 净买额-40.92亿 or 南向资金 净买额48.82亿
+      const southMatch = html.match(/南向资金[^净]*净买额([+\-]?[0-9]+(?:\.[0-9]+)?)亿/);
+      if (southMatch) {
+        const netFlow = parseFloat(southMatch[1]);
+        if (!isNaN(netFlow)) {
+          const score  = netFlow >= 50 ? 9 : netFlow >= 20 ? 8 : netFlow >= 5 ? 6 : netFlow >= -5 ? 5 : netFlow >= -20 ? 3 : 2;
+          const signal: MacroFactor["signal"] = netFlow >= 10 ? "bullish" : netFlow <= -10 ? "bearish" : "neutral";
+          const todayStr = netFlow >= 0 ? `+${netFlow.toFixed(1)}` : `${netFlow.toFixed(1)}`;
+          return {
+            label: "Southbound", value: `${todayStr}亿`,
+            score, signal, detail: `Today ${todayStr}亿 CNY (net buy turnover)`,
+          };
+        }
       }
     }
   } catch { /* fall through */ }
 
-  // Secondary: improved fflow/daykline with correct column f56
-  const secondaryUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0002";
+  // ── Source B: EastMoney push2 API (secondary) ──────────────────
   try {
-    const res = await fetch(secondaryUrl, {
-      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
+    // Use the datacenter-web API which is currently accessible
+    const apiUrl = "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_MUTUAL_DEALAMT&columns=ALL&filter=(TRADE_DATE>='" +
+      new Date(Date.now() - 86400000).toISOString().slice(0, 10) +
+      "')&pageNumber=1&pageSize=5&sortTypes=-1&sortColumns=TRADE_DATE&source=WEB&client=WEB";
+    const res = await fetch(apiUrl, {
+      headers: { "User-Agent": "Mozilla/5.0" },
       cache: "no-store",
       signal: AbortSignal.timeout(5000),
     });
     if (res.ok) {
-      const text = await res.text();
-      // console.log("[hk-macro] fflow raw:", text.slice(0, 200));
-      const flows = tryParseFlow(text, false);
-      if (flows.length >= 3) {
-        const todayFlow = flows[flows.length - 1];
-        const flow5d = flows.reduce((a, b) => a + b, 0);
-        return {
-          label: "Southbound",
-          value: `${todayFlow >= 0 ? "+" : ""}${todayFlow.toFixed(1)}亿`,
-          score: flow5d >= 50 ? 9 : flow5d >= 20 ? 8 : flow5d >= 5 ? 6 : flow5d >= -5 ? 5 : flow5d >= -20 ? 3 : 2,
-          signal: flow5d >= 10 ? "bullish" : flow5d <= -10 ? "bearish" : "neutral",
-          detail: `Today ${todayFlow >= 0 ? "+" : ""}${todayFlow.toFixed(1)} · 5d ${flow5d >= 0 ? "+" : ""}${flow5d.toFixed(1)}亿 CNY`,
-        };
+      const json = await res.json();
+      const data = json?.result?.data;
+      if (data && data.length > 0) {
+        // Try to find southbound fields in the response
+        const latest = data[0];
+        // Look for southbound-specific fields (may vary)
+        const southFields = ["SOUTH_NET_AMT", "SSC_SOUTH_NET", "NX_NET_AMT", "HK_NET_BUY"];
+        for (const field of southFields) {
+          if (latest[field] !== undefined && latest[field] !== null) {
+            const val = parseFloat(String(latest[field])) / 1e8; // Convert to 亿
+            if (!isNaN(val) && val !== 0) {
+              const score  = val >= 50 ? 9 : val >= 20 ? 8 : val >= 5 ? 6 : val >= -5 ? 5 : val >= -20 ? 3 : 2;
+              const signal: MacroFactor["signal"] = val >= 10 ? "bullish" : val <= -10 ? "bearish" : "neutral";
+              const todayStr = val >= 0 ? `+${val.toFixed(1)}` : `${val.toFixed(1)}`;
+              return {
+                label: "Southbound", value: `${todayStr}亿`,
+                score, signal, detail: `Today ${todayStr}亿 CNY (API)`,
+              };
+            }
+          }
+        }
       }
     }
-  } catch { /* fall through to ETF proxy */ }
+  } catch { /* fall through */ }
 
-  // ── Source B: ETF volume proxy (existing code remains unchanged) ──
-  // 2800.HK (Tracker Fund) = best proxy for mainland buying sentiment
-  // High volume relative to 20d avg + positive price = southbound inflow
+  // ── Source C: Yahoo ETF proxy (existing fallback, unchanged) ──
   try {
     const [tracker, hstech] = await Promise.all([
       fetchYahooOHLCV("2800.HK", 25),
@@ -197,43 +184,33 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
 
     if (tracker.length < 21) throw new Error("insufficient tracker data");
 
-    // Compute 20-day average volume for 2800.HK
     const vols20   = tracker.slice(-21, -1).map(b => b.volume);
     const avgVol20 = vols20.reduce((a, b) => a + b, 0) / vols20.length;
     const todayVol  = tracker[tracker.length - 1].volume;
     const volRatio  = avgVol20 > 0 ? todayVol / avgVol20 : 1;
 
-    // Price momentum: 5d return of 2800.HK vs 10d return
     const close5d  = tracker.length >= 6  ? tracker[tracker.length - 6].close  : tracker[0].close;
-    const close10d = tracker.length >= 11 ? tracker[tracker.length - 11].close : tracker[0].close;
     const ret5d    = close5d  > 0 ? (tracker[tracker.length - 1].close - close5d)  / close5d  * 100 : 0;
-    const ret10d   = close10d > 0 ? (tracker[tracker.length - 1].close - close10d) / close10d * 100 : 0;
 
-    // HSTECH relative strength vs Tracker (HSTECH outperforming = tech risk-on = southbound buying)
     let hstechRelStr = 0;
     if (hstech.length >= 6) {
       const hs5d = hstech[hstech.length - 6].close;
       const hstechRet5 = hs5d > 0 ? (hstech[hstech.length - 1].close - hs5d) / hs5d * 100 : 0;
-      hstechRelStr = hstechRet5 - ret5d; // HSTECH outperformance vs Tracker
+      hstechRelStr = hstechRet5 - ret5d;
     }
 
-    // Composite signal: vol surge + price momentum + tech relative strength
     const bull = [
-      volRatio > 1.3,       // above-average volume
-      ret5d > 0,            // positive 5d return
-      ret10d > 0,           // positive 10d return
-      hstechRelStr > 0,     // HSTECH outperforming
+      volRatio > 1.3, ret5d > 0, ret5d > 0, hstechRelStr > 0,
     ].filter(Boolean).length;
 
     const score  = bull >= 4 ? 9 : bull === 3 ? 7 : bull === 2 ? 5 : bull === 1 ? 3 : 2;
     const signal: MacroFactor["signal"] = bull >= 3 ? "bullish" : bull <= 1 ? "bearish" : "neutral";
-    const volStr = volRatio >= 1 ? `Vol ${volRatio.toFixed(1)}x avg` : `Vol ${volRatio.toFixed(1)}x avg`;
 
     return {
       label: "Southbound",
       value: `${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
       score, signal,
-      detail: `2800.HK ${volStr} · 5d ${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
+      detail: `2800.HK Vol ${volRatio.toFixed(1)}x avg · 5d ${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
     };
   } catch { /* fall through */ }
 
