@@ -103,82 +103,79 @@ async function getVHSI(): Promise<MacroFactor> {
 
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: aastocks with precise label ─────────────────────
-  try {
-    const res = await fetch("https://www.aastocks.com/en/stocks/market/southbound/overview", {
-      headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8000),
-    });
-    if (res.ok) {
-      const html = await res.text();
-      
-      // 1) English label: "Southbound Net Flow" – e.g. <td>Southbound Net Flow</td><td class="cls">-4.092B</td>
-      let match = html.match(/Southbound\s+Net\s+Flow[^<]*<\/[^>]+>\s*<[^>]+>\s*([+\-]?[0-9]+(?:\.[0-9]+)?)\s*B/i);
-      
-      // 2) If not found, try Chinese label: "南向资金净流入" or "南向净流入"
-      if (!match) {
-        match = html.match(/(?:南向资金净流入|南向净流入)[^<]*<\/[^>]+>\s*<[^>]+>\s*([+\-]?[0-9]+(?:\.[0-9]+)?)\s*(?:亿|B)/i);
-      }
+// ── 2. Southbound Flow (via EastMoney HSGT kline API) ────────
+async function getSouthboundFlow(): Promise<MacroFactor> {
 
-      if (match) {
-        const val = parseFloat(match[1]);
-        if (!isNaN(val)) {
-          // Determine if value is in billions (B) or 亿 (100 millions)
-          const isYi = match[0].includes('亿');
-          const magnitude = isYi ? 1 : 1; // both are billions equivalent in this context
-          const displayVal = val;
-          
-          const score  = val >= 5 ? 9 : val >= 2 ? 8 : val >= 0.5 ? 6 : val >= -0.5 ? 5 : val >= -2 ? 3 : 2;
-          const signal: MacroFactor["signal"] = val >= 1 ? "bullish" : val <= -1 ? "bearish" : "neutral";
-          const todayStr = val >= 0 ? `+${val.toFixed(2)}B` : `${val.toFixed(2)}B`;
-          return {
-            label: "Southbound",
-            value: todayStr,
-            score,
-            signal,
-            detail: `Today ${todayStr} (aastocks)`,
-          };
-        }
-      }
+  // ── Source A: EastMoney kamt.kline (official HSGT net flow) ──
+  try {
+    // secid = 90.BK0002  → Southbound (HK Stock Connect)
+    // fields2 = f51,f52,f53,f54,f55,f56:
+    //   f51 = date, f52 = net buy (万元), f53 = buy total (万元),
+    //   f54 = sell total (万元), f55 = net buy (HKD,万元), f56 = net buy (CNY,万元)
+    const url = "https://push2his.eastmoney.com/api/qt/kamt.kline/get?fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&klt=101&lmt=10&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0002";
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error("API failed");
+    const text = await res.text();
+    const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");  // remove JSONP wrapper
+    const json = JSON.parse(jsonStr || text);
+    const klines: string[] = json?.data?.klines ?? [];
+    if (klines.length < 3) throw new Error("no kline data");
+
+    const flows: number[] = [];
+    for (const k of klines.slice(-5)) {
+      const parts = k.split(",");
+      // parts[1] = net buy in 万元 (CNY). Convert to 亿元.
+      const netWan = parseFloat(parts[1] ?? "0");
+      if (!isNaN(netWan)) flows.push(netWan / 10000);
+    }
+
+    if (flows.length >= 3) {
+      const today = flows[flows.length - 1];
+      const sum5 = flows.reduce((a, b) => a + b, 0);
+      const score = sum5 >= 50 ? 9 : sum5 >= 20 ? 8 : sum5 >= 5 ? 6 : sum5 >= -5 ? 5 : sum5 >= -20 ? 3 : 2;
+      const signal: MacroFactor["signal"] = sum5 >= 10 ? "bullish" : sum5 <= -10 ? "bearish" : "neutral";
+      const todayStr = today >= 0 ? `+${today.toFixed(1)}` : `${today.toFixed(1)}`;
+      const sumStr   = sum5   >= 0 ? `+${sum5.toFixed(1)}`    : `${sum5.toFixed(1)}`;
+      return {
+        label: "Southbound", value: `${todayStr}亿`,
+        score, signal, detail: `Today ${todayStr} · 5d ${sumStr}亿 CNY`,
+      };
     }
   } catch { /* fall through */ }
 
-  // ── Source B: Yahoo ETF proxy (existing fallback, unchanged) ──
+  // ── Source B: Yahoo ETF proxy (fallback, unchanged) ─────────
   try {
     const [tracker, hstech] = await Promise.all([
       fetchYahooOHLCV("2800.HK", 25),
       fetchYahooOHLCV("3033.HK", 25),
     ]);
+    if (tracker.length < 21) throw new Error("insufficient data");
 
-    if (tracker.length < 21) throw new Error("insufficient tracker data");
-
-    const vols20   = tracker.slice(-21, -1).map(b => b.volume);
-    const avgVol20 = vols20.reduce((a, b) => a + b, 0) / vols20.length;
-    const todayVol  = tracker[tracker.length - 1].volume;
-    const volRatio  = avgVol20 > 0 ? todayVol / avgVol20 : 1;
-
-    const close5d  = tracker.length >= 6  ? tracker[tracker.length - 6].close  : tracker[0].close;
-    const ret5d    = close5d  > 0 ? (tracker[tracker.length - 1].close - close5d)  / close5d  * 100 : 0;
+    const avgVol = tracker.slice(-21, -1).reduce((s, b) => s + b.volume, 0) / 20;
+    const volRatio = avgVol > 0 ? tracker[tracker.length - 1].volume / avgVol : 1;
+    const close5 = tracker[tracker.length - 6]?.close ?? tracker[0].close;
+    const ret5d = close5 > 0 ? (tracker[tracker.length - 1].close - close5) / close5 * 100 : 0;
 
     let hstechRelStr = 0;
     if (hstech.length >= 6) {
-      const hs5d = hstech[hstech.length - 6].close;
-      const hstechRet5 = hs5d > 0 ? (hstech[hstech.length - 1].close - hs5d) / hs5d * 100 : 0;
-      hstechRelStr = hstechRet5 - ret5d;
+      const hs5 = hstech[hstech.length - 6].close;
+      const hsr5 = hs5 > 0 ? (hstech[hstech.length - 1].close - hs5) / hs5 * 100 : 0;
+      hstechRelStr = hsr5 - ret5d;
     }
 
-    const bull = [
-      volRatio > 1.3, ret5d > 0, ret5d > 0, hstechRelStr > 0,
-    ].filter(Boolean).length;
-
-    const score  = bull >= 4 ? 9 : bull === 3 ? 7 : bull === 2 ? 5 : bull === 1 ? 3 : 2;
-    const signal: MacroFactor["signal"] = bull >= 3 ? "bullish" : bull <= 1 ? "bearish" : "neutral";
+    const bull = [volRatio > 1.3, ret5d > 0, hstechRelStr > 0].filter(Boolean).length;
+    const score = bull === 3 ? 8 : bull === 2 ? 5 : bull === 1 ? 3 : 2;
+    const signal: MacroFactor["signal"] = bull >= 2 ? "bullish" : bull === 0 ? "bearish" : "neutral";
 
     return {
       label: "Southbound",
       value: `${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
-      score, signal,
+      score,
+      signal,
       detail: `2800.HK Vol ${volRatio.toFixed(1)}x avg · 5d ${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
     };
   } catch { /* fall through */ }
