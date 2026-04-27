@@ -103,53 +103,38 @@ async function getVHSI(): Promise<MacroFactor> {
 
 // ── 2. Southbound Flow ────────────────────────────────────────
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  // URLs for consolidated Southbound flow
-  const rtUrl = "https://push2.eastmoney.com/api/qt/stock/get?secid=90.BK0707&fields=f62,f159";
-  const histUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=6&klt=101&fields2=f51,f56&secid=90.BK0707";
+  // Using the consolidated history endpoint as the primary driver for stability
+  const url = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=6&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f56&secid=90.BK0707";
 
-  const fetchOptions = {
-    headers: { 
-      "User-Agent": "Mozilla/5.0", 
-      "Referer": "https://data.eastmoney.com/" 
-    },
-    cache: "no-store" as RequestCache,
-  };
-
-  // --- SOURCE A: EASTMONEY (Primary) ---
   try {
-    const [rtRes, histRes] = await Promise.all([
-      fetch(rtUrl, fetchOptions),
-      fetch(histUrl, fetchOptions)
-    ]);
+    const res = await fetch(url, {
+      headers: {
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://data.eastmoney.com/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      },
+      cache: "no-store"
+    });
 
-    if (rtRes.ok && histRes.ok) {
-      const rtText = await rtRes.text();
-      const histText = await histRes.text();
-
-      // CLEANING LOGIC: Remove potential JSONP padding (e.g. jQuery123(...))
-      const cleanRt = rtText.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
-      const cleanHist = histText.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
-
-      const rtJson = JSON.parse(cleanRt);
-      const histJson = JSON.parse(cleanHist);
-
-      // f62 is Net Buy Turnover. If 0 (after hours), fallback to the last Kline in history.
-      let todayFlowRaw = rtJson?.data?.f62 ?? rtJson?.data?.f159 ?? 0;
-      const klines: string[] = histJson?.data?.klines ?? [];
+    if (res.ok) {
+      const text = await res.text();
+      // Clean potential JSONP padding
+      const jsonStr = text.replace(/^[^{]*/, "").replace(/[^}]*$/, "");
+      const json = JSON.parse(jsonStr);
       
-      if (todayFlowRaw === 0 && klines.length > 0) {
-        const lastParts = klines[klines.length - 1].split(",");
-        todayFlowRaw = parseFloat(lastParts[1]) || 0; 
-      }
+      const klines: string[] = json?.data?.klines ?? [];
 
-      // Convert from raw Yuan to Billion (亿)
-      const todayFlow = todayFlowRaw / 1e8;
-      
-      if (todayFlow !== 0 || klines.length > 0) {
-        // Calculate 5-day trend: Sum previous 4 days + Today's value
-        const pastFlows = klines.slice(0, -1).map(k => (parseFloat(k.split(",")[1]) || 0) / 1e8);
-        const flow5d = pastFlows.reduce((a, b) => a + b, 0) + todayFlow;
+      if (klines.length > 0) {
+        const recentFlows: number[] = klines.map(k => {
+          const parts = k.split(",");
+          return (parseFloat(parts[1]) || 0) / 1e8; // Field f56 is net flow in Yuan
+        });
 
+        const todayFlow = recentFlows[recentFlows.length - 1];
+        const flow5d = recentFlows.reduce((a, b) => a + b, 0);
+
+        // Score: Today's flow conviction
         const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
         const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
         
@@ -166,27 +151,24 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
       }
     }
   } catch (e) {
-    console.warn("Southbound Source A failed:", e);
+    console.error("EastMoney Primary Source Failed:", e);
   }
 
-  // --- SOURCE B: YAHOO FALLBACK (Only runs if Source A crashes) ---
+  // --- SOURCE B: YAHOO FALLBACK (Runs only if Source A fails) ---
   try {
-    const tracker = await fetchYahooOHLCV("2800.HK", 25);
-    if (tracker.length >= 21) {
-      const close5d = tracker[tracker.length - 6]?.close ?? tracker[0].close;
+    const tracker = await fetchYahooOHLCV("2800.HK", 10);
+    if (tracker.length >= 6) {
+      const close5d = tracker[tracker.length - 6].close;
       const ret5d = ((tracker[tracker.length - 1].close - close5d) / close5d) * 100;
-
       return {
         label: "Southbound",
         value: `${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
-        score: ret5d > 0 ? 7 : 3,
+        score: ret5d > 0 ? 6 : 4,
         signal: ret5d > 0 ? "bullish" : "bearish",
         detail: `Fallback: 2800.HK 5d ${ret5d.toFixed(1)}%`,
       };
     }
-  } catch (e) {
-    console.error("Southbound Source B Error:", e);
-  }
+  } catch {}
 
   return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
 }
