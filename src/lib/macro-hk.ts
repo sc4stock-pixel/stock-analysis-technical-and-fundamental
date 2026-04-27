@@ -101,14 +101,10 @@ async function getVHSI(): Promise<MacroFactor> {
   }
 }
 
-// ── 2. Southbound Flow ────────────────────────────────────────
-// Primary:   aastocks.com Hong Kong Stock Connect overview (server-rendered)
-// Secondary: Yahoo ETF volume proxy (fallback)
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: aastocks southbound overview page ───────────────
+  // ── Source A: aastocks with precise label ─────────────────────
   try {
-    // The page shows "Southbound Net Flow" in the HTML (server‑rendered).
     const res = await fetch("https://www.aastocks.com/en/stocks/market/southbound/overview", {
       headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html" },
       cache: "no-store",
@@ -116,36 +112,32 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
     });
     if (res.ok) {
       const html = await res.text();
-      // Typical structure:
-      //   <div class="val">-4.092B</div>   or   <td class="cls">-4.092B</td>
-      // We search for a number followed by "B" near the phrase "Net Flow".
-      // First try a direct pattern for a value like "-4.092B"
-      let match = html.match(/([+\-]?[0-9]+(?:\.[0-9]+)?)\s*B/);
+      
+      // 1) English label: "Southbound Net Flow" – e.g. <td>Southbound Net Flow</td><td class="cls">-4.092B</td>
+      let match = html.match(/Southbound\s+Net\s+Flow[^<]*<\/[^>]+>\s*<[^>]+>\s*([+\-]?[0-9]+(?:\.[0-9]+)?)\s*B/i);
+      
+      // 2) If not found, try Chinese label: "南向资金净流入" or "南向净流入"
       if (!match) {
-        // If no B, look for 亿 (100 million)
-        match = html.match(/([+\-]?[0-9]+(?:\.[0-9]+)?)\s*亿/);
-        if (match) {
-          const val = parseFloat(match[1]);
-          if (!isNaN(val)) {
-            const score  = val >= 50 ? 9 : val >= 20 ? 8 : val >= 5 ? 6 : val >= -5 ? 5 : val >= -20 ? 3 : 2;
-            const signal: MacroFactor["signal"] = val >= 10 ? "bullish" : val <= -10 ? "bearish" : "neutral";
-            const todayStr = val >= 0 ? `+${val.toFixed(1)}` : `${val.toFixed(1)}`;
-            return {
-              label: "Southbound", value: `${todayStr}亿`,
-              score, signal, detail: `Today ${todayStr}亿 CNY (aastocks)`,
-            };
-          }
-        }
-      } else {
-        // B suffix – value is in billions HKD/CNY
+        match = html.match(/(?:南向资金净流入|南向净流入)[^<]*<\/[^>]+>\s*<[^>]+>\s*([+\-]?[0-9]+(?:\.[0-9]+)?)\s*(?:亿|B)/i);
+      }
+
+      if (match) {
         const val = parseFloat(match[1]);
         if (!isNaN(val)) {
+          // Determine if value is in billions (B) or 亿 (100 millions)
+          const isYi = match[0].includes('亿');
+          const magnitude = isYi ? 1 : 1; // both are billions equivalent in this context
+          const displayVal = val;
+          
           const score  = val >= 5 ? 9 : val >= 2 ? 8 : val >= 0.5 ? 6 : val >= -0.5 ? 5 : val >= -2 ? 3 : 2;
           const signal: MacroFactor["signal"] = val >= 1 ? "bullish" : val <= -1 ? "bearish" : "neutral";
-          const todayStr = val >= 0 ? `+${val.toFixed(1)}B` : `${val.toFixed(1)}B`;
+          const todayStr = val >= 0 ? `+${val.toFixed(2)}B` : `${val.toFixed(2)}B`;
           return {
-            label: "Southbound", value: todayStr,
-            score, signal, detail: `Today ${todayStr} (aastocks)`,
+            label: "Southbound",
+            value: todayStr,
+            score,
+            signal,
+            detail: `Today ${todayStr} (aastocks)`,
           };
         }
       }
