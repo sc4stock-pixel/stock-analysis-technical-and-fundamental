@@ -10,7 +10,6 @@ export interface FundamentalPrompts {
 }
 
 export async function generateFundamentalPrompts(ticker: string): Promise<FundamentalPrompts> {
-  // 1. Gather all data
   const [profile, keyStats, financials, peers, insiders, marginData, concentration] =
     await Promise.all([
       fetchers.getCompanyProfile(ticker),
@@ -26,7 +25,6 @@ export async function generateFundamentalPrompts(ticker: string): Promise<Fundam
   const sector = profile?.sector ?? 'Unknown';
   const industry = profile?.industry ?? 'Unknown';
 
-  // 2. Peer data (top 2)
   const peerSymbols = peers.slice(0, 2);
   const peerFinancials: any[] = [];
   for (const p of peerSymbols) {
@@ -45,25 +43,30 @@ export async function generateFundamentalPrompts(ticker: string): Promise<Fundam
     });
   }
 
-  // 3. Build Deep Dive prompt
-  const deepDivePrompt = `You are a fundamental analyst. Using the data below, write a comprehensive Deep Dive report on ${ticker} covering:
+  // ── Abbreviated Deep Dive prompt ──────────────────────────
+  const deepDivePrompt = `You are a fundamental analyst. Give an **abbreviated** Deep Dive on ${ticker}.
+Use **bullet points** only — no paragraphs. Keep each bullet to one line.
 
-1. **Business Model**: How does ${ticker} make money? Explain its core product in plain English.
-2. **Moat**: Top 3 competitors. Does ${ticker} have a durable edge (patent, switching cost, network effect, or cost structure) that rivals can't copy?
-3. **Catalysts**: Upcoming launches, earnings, regulatory events, or partnerships in the next 12 months.
-4. **Asymmetry**: Low valuation floor vs high growth ceiling? Why or why not?
+1. **Business Model** (2-3 bullets):
+   - Core product & how ${ticker} makes money.
+2. **Moat** (3 bullets max):
+   - Top 3 competitors, and whether ${ticker} has a durable edge (patent, switching cost, network effect, cost structure).
+3. **Catalysts** (3 bullets max):
+   - Upcoming launches, earnings, regulatory events, partnerships (next 12 months).
+4. **Asymmetry** (2 bullets):
+   - Valuation floor vs growth ceiling.
 
-**Data:**
-- Company description: ${description}
+Use data below:
+- Description: ${description}
 - Sector: ${sector}, Industry: ${industry}
-- Peers recommended: ${peers.join(', ')}
-- Key statistics: P/S TTM: ${keyStats?.psTrailing12Months?.raw ?? 'N/A'}, P/FCF: ${keyStats?.priceToFreeCashFlows?.raw ?? 'N/A'}, EV/EBITDA: ${keyStats?.enterpriseToEbitda?.raw ?? 'N/A'}, Gross margin: ${financials?.grossMargins?.raw ? (financials.grossMargins.raw * 100).toFixed(1) + '%' : 'N/A'}, Revenue growth: ${financials?.revenueGrowth?.raw ? (financials.revenueGrowth.raw * 100).toFixed(1) + '%' : 'N/A'}
-- Recent insider trades (last 12 months): ${JSON.stringify(insiders.slice(0, 5), null, 2)}
-- Customer concentration check: ${concentration}
+- Peers: ${peers.join(', ')}
+- P/S TTM: ${keyStats?.psTrailing12Months?.raw ?? 'N/A'}, P/FCF: ${keyStats?.priceToFreeCashFlows?.raw ?? 'N/A'}, EV/EBITDA: ${keyStats?.enterpriseToEbitda?.raw ?? 'N/A'}, GM: ${financials?.grossMargins?.raw ? (financials.grossMargins.raw * 100).toFixed(1) + '%' : 'N/A'}, RevGr: ${financials?.revenueGrowth?.raw ? (financials.revenueGrowth.raw * 100).toFixed(1) + '%' : 'N/A'}
+- Insider trades (5 most recent): ${JSON.stringify(insiders.slice(0, 5))}
+- Customer concentration: ${concentration}
 
-Format your answer in markdown with clear headings.`;
+Format: bullet points, **no more than 10 bullets total**.`;
 
-  // 4. Build Peer Comparison prompt
+  // ── Abbreviated Peer Comparison prompt ────────────────────
   const peerTable = `| Metric | ${ticker} | ${peerSymbols[0] ?? 'N/A'} | ${peerSymbols[1] ?? 'N/A'} |
 |--------|----------|-----------------|-----------------|
 | P/S TTM | ${keyStats?.psTrailing12Months?.raw?.toFixed(2) ?? 'N/A'} | ${peerFinancials[0]?.psTTM ?? 'N/A'} | ${peerFinancials[1]?.psTTM ?? 'N/A'} |
@@ -73,24 +76,24 @@ Format your answer in markdown with clear headings.`;
 | Gross Margin | ${financials?.grossMargins?.raw ? (financials.grossMargins.raw * 100).toFixed(1) + '%' : 'N/A'} | ${peerFinancials[0]?.grossMargin ?? 'N/A'}% | ${peerFinancials[1]?.grossMargin ?? 'N/A'}% |
 | YoY Rev Growth | ${financials?.revenueGrowth?.raw ? (financials.revenueGrowth.raw * 100).toFixed(1) + '%' : 'N/A'} | ${peerFinancials[0]?.revenueGrowth ?? 'N/A'}% | ${peerFinancials[1]?.revenueGrowth ?? 'N/A'}% |`;
 
-  const peerComparisonPrompt = `Given the following valuation table for ${ticker} vs its peers, build a relative valuation analysis and calculate a **Value/Growth Score** = P/S TTM + revenue growth %. Lowest score = most growth per dollar of valuation.
+  const peerComparisonPrompt = `Analyse the valuation of ${ticker} vs peers. **Be concise**.
+- Show the **Value/Growth Score** = P/S TTM + revenue growth % (lowest = best).
+- State if the valuation makes sense relative to growth.
+- **Max 5 bullet points** and the table from the data.
 
-${peerTable}
+${peerTable}`;
 
-Interpret the table and conclude whether ${ticker}'s valuation makes sense relative to growth. Format in markdown.`;
+  // ── Abbreviated Bear Case prompt ─────────────────────────
+  const bearCasePrompt = `Act as a skeptical short-seller. List the **3 most serious red flags** for ${ticker}, ranked by severity.
+**Bullet points only, one per flag**, with a one‑sentence source citation from the data below.
+If you can't find 3, keep researching but still produce the top 3 you find.
 
-  // 5. Build Bear Case prompt
-  const bearCasePrompt = `Act as a **skeptical short-seller** researching ${ticker}. Using the provided data, give the **3 most serious red flags**, ranked by severity. Check for:
-
-- **Customer concentration**: Any single customer over 25% of revenue — latest 10-K finding: ${concentration}
-- **Margin compression**: Last 4 quarters:
-${JSON.stringify(marginData?.margins, null, 2)}
-- **Unscheduled insider selling** (not pre-planned 10b5-1) — last 12 months:
-${JSON.stringify(insiders.slice(0, 10), null, 2)}
-- **Widening GAAP vs non-GAAP gap** (if available from earnings)
-- **Guidance cuts** in the last 12 months
-
-Cite sources for each red flag. **If you can't find 3 real reasons to be bearish, you haven't done the research.** Format in markdown.`;
+Data:
+- Customer concentration: ${concentration}
+- Margin trend (last 4Q): ${JSON.stringify(marginData?.margins)}
+- Insider sells (last 12m): ${JSON.stringify(insiders.slice(0, 10))}
+- Revenue growth YoY: ${financials?.revenueGrowth?.raw ? (financials.revenueGrowth.raw * 100).toFixed(1) + '%' : 'N/A'}
+- Gross margin: ${financials?.grossMargins?.raw ? (financials.grossMargins.raw * 100).toFixed(1) + '%' : 'N/A'}`;
 
   return {
     ticker,
