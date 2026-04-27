@@ -103,77 +103,70 @@ async function getVHSI(): Promise<MacroFactor> {
 
 // ── 2. Southbound Flow ────────────────────────────────────────
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  // BK0707 = Southbound Aggregate. f62 = Net Buy Turnover (The target -40.9B value)
-  const rtUrl = "https://push2.eastmoney.com/api/qt/stock/get?secid=90.BK0707&fields=f62,f159";
-  const histUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=6&klt=101&fields2=f51,f56&secid=90.BK0707";
-
-  const headers = { 
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://data.eastmoney.com/"
-  };
+  // Use the specific Real-time API for Net Buy Turnover (BK0707)
+  // f62 is the specific field for the -40.9B number you see on the dashboard
+  const url = "https://push2.eastmoney.com/api/qt/stock/get?secid=90.BK0707&fields=f62,f159,f160";
 
   try {
-    const [rtRes, histRes] = await Promise.all([
-      fetch(rtUrl, { headers, cache: "no-store" }),
-      fetch(histUrl, { headers, cache: "no-store" })
-    ]);
+    const res = await fetch(url, {
+      headers: { 
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Referer": "https://data.eastmoney.com/",
+        "Accept": "application/json, text/javascript, */*; q=0.01"
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000)
+    });
 
-    // 1. ROBUST PARSING: Extract JSON from potentially padded text
-    const rtText = await rtRes.text();
-    const histText = await histRes.text();
-    
-    const rtJson = JSON.parse(rtText.match(/\{.*\}/)?.[0] || "{}");
-    const histJson = JSON.parse(histText.match(/\{.*\}/)?.[0] || "{}");
+    if (res.ok) {
+      const text = await res.text();
+      // Aggressive JSON cleaning: find the first '{' and the last '}'
+      const start = text.indexOf('{');
+      const end = text.lastIndexOf('}');
+      if (start !== -1 && end !== -1) {
+        const json = JSON.parse(text.substring(start, end + 1));
+        
+        // Priority: f62 (Net Buy Turnover). If 0, try f159 (Backup).
+        const rawValue = json?.data?.f62 ?? json?.data?.f159 ?? 0;
+        
+        if (rawValue !== 0) {
+          const todayFlow = rawValue / 1e8; // Convert Yuan to Billion (亿)
+          const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
+          
+          // Technical Analysis Logic
+          const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
+          const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
 
-    // 2. TARGET FIELD f62: This is the exact "Net Buy Turnover" displayed on web
-    let todayFlowRaw = rtJson?.data?.f62 ?? rtJson?.data?.f159 ?? 0;
-    const klines: string[] = histJson?.data?.klines ?? [];
-    
-    // Fallback to history if RT is 0 (Market closed/Lagging)
-    if (todayFlowRaw === 0 && klines.length > 0) {
-      todayFlowRaw = parseFloat(klines[klines.length - 1].split(",")[1]) || 0;
-    }
-
-    if (todayFlowRaw !== 0 || klines.length > 0) {
-      const todayFlow = todayFlowRaw / 1e8; // Convert raw Yuan to 亿 (Billion)
-      
-      // Calculate 5-Day Trend
-      const pastFlows = klines.slice(0, -1).map(k => (parseFloat(k.split(",")[1]) || 0) / 1e8);
-      const flow5d = pastFlows.reduce((a, b) => a + b, 0) + todayFlow;
-
-      // Scoring logic (Sentiment based on conviction)
-      const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
-      const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
-      
-      const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
-      const cumStr = flow5d >= 0 ? `+${flow5d.toFixed(2)}` : `${flow5d.toFixed(2)}`;
-
-      return {
-        label: "Southbound",
-        value: `${todayStr}亿`,
-        score,
-        signal,
-        detail: `Today ${todayStr}亿 · 5d ${cumStr}亿 CNY`,
-      };
+          return {
+            label: "Southbound",
+            value: `${todayStr}亿`,
+            score,
+            signal,
+            detail: `Today ${todayStr}亿 CNY (EastMoney Live)`,
+          };
+        }
+      }
     }
   } catch (e) {
-    console.error("EastMoney Logic Failure:", e);
+    console.error("Southbound Primary Source Error:", e);
   }
 
-  // --- SOURCE B: YAHOO FALLBACK (Only if Source A is completely blocked) ---
+  // --- FALLBACK (Yahoo Finance ETF Volume Proxy) ---
   try {
     const tracker = await fetchYahooOHLCV("2800.HK", 10);
-    const close5d = tracker[tracker.length - 6]?.close ?? tracker[0].close;
-    const ret5d = ((tracker[tracker.length - 1].close - close5d) / close5d) * 100;
+    const last = tracker[tracker.length - 1];
+    const prev = tracker[tracker.length - 6];
+    const ret5d = ((last.close - prev.close) / prev.close) * 100;
+
     return {
       label: "Southbound",
       value: `${ret5d >= 0 ? "+" : ""}${ret5d.toFixed(1)}%`,
-      score: ret5d > 0 ? 7 : 3,
+      score: ret5d > 0 ? 6 : 4,
       signal: ret5d > 0 ? "bullish" : "bearish",
-      detail: `Fallback: 2800.HK 5d ${ret5d.toFixed(1)}%`,
+      detail: `2800.HK Proxy: 5d ${ret5d.toFixed(1)}% (EM Unreachable)`,
     };
   } catch {
-    return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "Data unavailable" };
+    return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "Data offline" };
   }
 }
 
