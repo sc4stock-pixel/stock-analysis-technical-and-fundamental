@@ -102,54 +102,50 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  // BK0707 = Combined Southbound Net Buy Turnover
-  const emUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=10&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56&ut=b2884a393a59ad64002292a3e90d46a5&secid=90.BK0707";
+  // Real-time API for combined Southbound (BK0707)
+  const rtUrl = "https://push2.eastmoney.com/api/qt/stock/get?secid=90.BK0707&fields=f62";
+  // Historical API for the 5-day trend (BK0707)
+  const histUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=6&klt=101&fields2=f51,f56&secid=90.BK0707";
 
   try {
-    const res = await fetch(emUrl, {
-      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(5000),
-    });
+    const [rtRes, histRes] = await Promise.all([
+      fetch(rtUrl, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" }),
+      fetch(histUrl, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" })
+    ]);
 
-    if (res.ok) {
-      const json = await res.json();
-      const klines: string[] = json?.data?.klines ?? [];
+    if (rtRes.ok && histRes.ok) {
+      const rtJson = await rtRes.json();
+      const histJson = await histRes.json();
 
-      if (klines.length >= 3) {
-        const recentFlows: number[] = [];
-        for (const k of klines.slice(-5)) {
-          const parts = k.split(",");
-          // fields2 mapping: f51(date), f52, f53, f54, f55, f56(Net)
-          // parts[5] is f56 (Total Net Flow in raw Yuan)
-          const flow = parseFloat(parts[5] ?? "0") / 1e8; // Divide by 100,000,000 to get 亿
-          if (!isNaN(flow)) recentFlows.push(flow);
-        }
+      // Today's exact Real-Time value (f62 is in raw Yuan)
+      const todayFlowRaw = rtJson?.data?.f62 ?? 0;
+      const todayFlow = todayFlowRaw / 1e8; // Convert to 亿
 
-        if (recentFlows.length > 0) {
-          const todayFlow = recentFlows[recentFlows.length - 1];
-          const flow5d = recentFlows.reduce((a, b) => a + b, 0);
+      // 5-Day Cumulative calculation
+      const klines: string[] = histJson?.data?.klines ?? [];
+      const pastFlows = klines.slice(0, -1).map(k => parseFloat(k.split(",")[1]) / 1e8);
+      const flow5d = pastFlows.reduce((a, b) => a + b, 0) + todayFlow;
 
-          // Scoring logic
-          const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
-          const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
-          
-          const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
-          const cumStr = flow5d >= 0 ? `+${flow5d.toFixed(2)}` : `${flow5d.toFixed(2)}`;
+      const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
+      const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
+      
+      const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
+      const cumStr = flow5d >= 0 ? `+${flow5d.toFixed(2)}` : `${flow5d.toFixed(2)}`;
 
-          return {
-            label: "Southbound",
-            value: `${todayStr}亿`,
-            score,
-            signal,
-            detail: `Today ${todayStr}亿 · 5d ${cumStr}亿 CNY`,
-          };
-        }
-      }
+      return {
+        label: "Southbound",
+        value: `${todayStr}亿`,
+        score,
+        signal,
+        detail: `Today ${todayStr}亿 · 5d ${cumStr}亿 CNY`,
+      };
     }
   } catch (e) {
-    console.error("Southbound EastMoney Error:", e);
+    console.error("Southbound RT Error:", e);
   }
+
+  return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "Data unavailable" };
+}
 
   // Source B: Yahoo Finance ETF volume proxy (Fallback)
   try {
