@@ -102,39 +102,43 @@ async function getVHSI(): Promise<MacroFactor> {
 }
 
 // ── 2. Southbound Flow ────────────────────────────────────────
-// Primary:   Scrape data.eastmoney.com/hsgt/index.html (server-rendered)
-// Secondary: Yahoo ETF proxy (fallback)
+// Primary:   HKD.com Southbound API (reliable JSON)
+// Fallback:  Yahoo ETF proxy
 async function getSouthboundFlow(): Promise<MacroFactor> {
 
-  // ── Source A: EastMoney server-rendered HSGT page ────────────
+  // ── Source A: HKD.com API (original data provider) ───────────
   try {
-    const res = await fetch("https://data.eastmoney.com/hsgt/index.html", {
-      headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/html" },
+    const url = `https://hqd.appstock.com/v1/fundflow/southbound?t=${Date.now()}`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://hqd.appstock.com/" },
       cache: "no-store",
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) throw new Error("fetch failed");
-    const html = await res.text();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    // Log the raw response for debugging (remove after confirmation)
+    console.log("[Southbound API] response:", JSON.stringify(json).slice(0, 200));
+    const netInflow = json?.data?.netInflow;  // in 万元
+    if (netInflow === undefined || netInflow === null) throw new Error("missing netInflow");
 
-    // The page embeds southbound net flow in its server HTML:
-    //   ... 南向资金 净买额-40.92亿买入额510.94亿卖出额551.86亿 ...
-    const match = html.match(/南向资金\s+净买额([+\-]?[0-9]+(?:\.[0-9]+)?)亿/);
-    if (match) {
-      const netYi = parseFloat(match[1]);   // value in 亿元
-      if (!isNaN(netYi)) {
-        const score  = netYi >= 50 ? 9 : netYi >= 20 ? 8 : netYi >= 5 ? 6 : netYi >= -5 ? 5 : netYi >= -20 ? 3 : 2;
-        const signal: MacroFactor["signal"] = netYi >= 10 ? "bullish" : netYi <= -10 ? "bearish" : "neutral";
-        const todayStr = netYi >= 0 ? `+${netYi.toFixed(1)}` : `${netYi.toFixed(1)}`;
-        return {
-          label: "Southbound",
-          value: `${todayStr}亿`,
-          score,
-          signal,
-          detail: `Today ${todayStr}亿 CNY (官方)`,
-        };
-      }
-    }
-  } catch { /* fall through to ETF proxy */ }
+    const netYi = Number(netInflow) / 10000;  // 万元 → 亿元
+    if (isNaN(netYi)) throw new Error("invalid number");
+    
+    const score  = netYi >= 50 ? 9 : netYi >= 20 ? 8 : netYi >= 5 ? 6 : netYi >= -5 ? 5 : netYi >= -20 ? 3 : 2;
+    const signal: MacroFactor["signal"] = netYi >= 10 ? "bullish" : netYi <= -10 ? "bearish" : "neutral";
+    const todayStr = netYi >= 0 ? `+${netYi.toFixed(1)}` : `${netYi.toFixed(1)}`;
+
+    return {
+      label: "Southbound",
+      value: `${todayStr}亿`,
+      score,
+      signal,
+      detail: `Today ${todayStr}亿 CNY (HKD.com)`,
+    };
+  } catch (err) {
+    console.error("[Southbound] HKD.com API failed:", err);
+    // fall through to ETF proxy
+  }
 
   // ── Source B: Yahoo ETF proxy (unchanged) ────────────────────
   try {
