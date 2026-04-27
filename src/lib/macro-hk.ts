@@ -103,45 +103,64 @@ async function getVHSI(): Promise<MacroFactor> {
 
 // ── 2. Southbound Flow ────────────────────────────────────────
 async function getSouthboundFlow(): Promise<MacroFactor> {
-  // Use the specific Real-Time endpoint for the Southbound Aggregate (BK0707)
-  // f62 = Today's Net Buy Turnover in raw Yuan
-  const url = "https://push2.eastmoney.com/api/qt/stock/get?secid=90.BK0707&fields=f62";
+  // BK0707 = Southbound Aggregate. f62 = Net Buy Turnover (The target -40.9B value)
+  const rtUrl = "https://push2.eastmoney.com/api/qt/stock/get?secid=90.BK0707&fields=f62,f159";
+  const histUrl = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?lmt=6&klt=101&fields2=f51,f56&secid=90.BK0707";
+
+  const headers = { 
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://data.eastmoney.com/"
+  };
 
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/" },
-      cache: "no-store",
-    });
+    const [rtRes, histRes] = await Promise.all([
+      fetch(rtUrl, { headers, cache: "no-store" }),
+      fetch(histUrl, { headers, cache: "no-store" })
+    ]);
 
-    if (res.ok) {
-      const json = await res.json();
-      const rawValue = json?.data?.f62 ?? 0;
+    // 1. ROBUST PARSING: Extract JSON from potentially padded text
+    const rtText = await rtRes.text();
+    const histText = await histRes.text();
+    
+    const rtJson = JSON.parse(rtText.match(/\{.*\}/)?.[0] || "{}");
+    const histJson = JSON.parse(histText.match(/\{.*\}/)?.[0] || "{}");
 
-      // Logic: rawValue is in Yuan. 
-      // 4,090,000,000 Yuan / 100,000,000 = 40.9亿
-      const todayFlow = rawValue / 1e8; 
+    // 2. TARGET FIELD f62: This is the exact "Net Buy Turnover" displayed on web
+    let todayFlowRaw = rtJson?.data?.f62 ?? rtJson?.data?.f159 ?? 0;
+    const klines: string[] = histJson?.data?.klines ?? [];
+    
+    // Fallback to history if RT is 0 (Market closed/Lagging)
+    if (todayFlowRaw === 0 && klines.length > 0) {
+      todayFlowRaw = parseFloat(klines[klines.length - 1].split(",")[1]) || 0;
+    }
 
-      if (todayFlow !== 0) {
-        const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
-        
-        // Signal logic based on conviction
-        const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
-        const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
+    if (todayFlowRaw !== 0 || klines.length > 0) {
+      const todayFlow = todayFlowRaw / 1e8; // Convert raw Yuan to 亿 (Billion)
+      
+      // Calculate 5-Day Trend
+      const pastFlows = klines.slice(0, -1).map(k => (parseFloat(k.split(",")[1]) || 0) / 1e8);
+      const flow5d = pastFlows.reduce((a, b) => a + b, 0) + todayFlow;
 
-        return {
-          label: "Southbound",
-          value: `${todayStr}亿`,
-          score,
-          signal,
-          detail: `Today ${todayStr}亿 CNY (Live)`,
-        };
-      }
+      // Scoring logic (Sentiment based on conviction)
+      const score = todayFlow >= 20 ? 9 : todayFlow >= 5 ? 7 : todayFlow >= -5 ? 5 : todayFlow >= -20 ? 3 : 2;
+      const signal: MacroFactor["signal"] = todayFlow >= 10 ? "bullish" : todayFlow <= -10 ? "bearish" : "neutral";
+      
+      const todayStr = todayFlow >= 0 ? `+${todayFlow.toFixed(2)}` : `${todayFlow.toFixed(2)}`;
+      const cumStr = flow5d >= 0 ? `+${flow5d.toFixed(2)}` : `${flow5d.toFixed(2)}`;
+
+      return {
+        label: "Southbound",
+        value: `${todayStr}亿`,
+        score,
+        signal,
+        detail: `Today ${todayStr}亿 · 5d ${cumStr}亿 CNY`,
+      };
     }
   } catch (e) {
-    console.error("Southbound EM Error:", e);
+    console.error("EastMoney Logic Failure:", e);
   }
 
-  // Fallback to your existing Yahoo calculation if the above fails or is 0 (off-hours)
+  // --- SOURCE B: YAHOO FALLBACK (Only if Source A is completely blocked) ---
   try {
     const tracker = await fetchYahooOHLCV("2800.HK", 10);
     const close5d = tracker[tracker.length - 6]?.close ?? tracker[0].close;
@@ -154,7 +173,7 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
       detail: `Fallback: 2800.HK 5d ${ret5d.toFixed(1)}%`,
     };
   } catch {
-    return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
+    return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "Data unavailable" };
   }
 }
 
