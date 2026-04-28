@@ -341,6 +341,13 @@ async function getHIBOR(): Promise<MacroFactor> {
   return { label: "HIBOR 1M", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
 }
 
+function scoreHIBOR(rate: number, source: string): MacroFactor {
+  const score  = rate < 1.0 ? 8 : rate < 2.5 ? 7 : rate < 4.0 ? 5 : rate < 6.0 ? 3 : 2;
+  const signal: MacroFactor["signal"] = rate < 2.0 ? "bullish" : rate > 4.5 ? "bearish" : "neutral";
+  const label  = rate < 1.0 ? "Very Low" : rate < 2.5 ? "Low" : rate < 4.0 ? "Moderate" : rate < 6.0 ? "High" : "Very High";
+  return { label: "HIBOR 1M", value: `${rate.toFixed(2)}%`, score, signal, detail: `${label} (${source})` };
+}
+
 // ── Main export ───────────────────────────────────────────────
 export async function fetchHKMacroData(): Promise<HKMacroData> {
   try {
