@@ -59,7 +59,7 @@ function RadarChart({ factors }: { factors: MacroData["factors"] }) {
     factors.newsSentiment.score,
     factors.breadth.score,
   ];
-  const labels = ["F&G", "VIX", "Idx", "A/D", "News", "Breadth"];
+  const labels = ["F&G", "VIX", "Idx", "10Y‑2Y", "News", "Breadth"];
   const n = vals.length;
   const cx = 80, cy = 80, r = 58;
 
