@@ -12,10 +12,10 @@ export type { MacroData, MacroFactor, MacroHeadline };
 
 const W = {
   fearGreed:     0.20,
-  vixStructure:  0.20,
+  vixStructure:  0.15,
   indexTrends:   0.25,
-  adRatio:       0.15,
-  newsSentiment: 0.10,
+  yieldSpread:   0.15,    // new
+  newsSentiment: 0.15,
   breadth:       0.10,
 };
 
@@ -147,7 +147,35 @@ async function getVixStructure(): Promise<MacroFactor> {
   }
 }
 
-// ── 3. Index Trends — US (SPX + IXIC, 3 momentum periods each) ─
+// ── 3. Yield Spread (10Y ‑ 2Y) ─────────────────────────────────
+async function getYieldSpread(): Promise<MacroFactor> {
+  try {
+    const [tnx, us2y] = await Promise.all([
+      fetchYahooClose("^TNX"),
+      fetchYahooClose("US2Y=X"),
+    ]);
+    if (tnx === null || us2y === null) throw new Error("missing data");
+    const spread = tnx - us2y;
+    let score: number;
+    let signal: MacroFactor["signal"];
+    let detail: string;
+    if (spread > 0.20)          { score = 9; signal = "bullish"; detail = "Normal (Expansion)"; }
+    else if (spread >= 0.00)    { score = 6; signal = "neutral"; detail = "Flattening"; }
+    else if (spread >= -0.20)   { score = 3; signal = "bearish"; detail = "Inverted (Caution)"; }
+    else                        { score = 1; signal = "bearish"; detail = "Deeply Inverted"; }
+    return {
+      label: "10Y-2Y Spread",
+      value: `${spread.toFixed(2)}%`,
+      score,
+      signal,
+      detail,
+    };
+  } catch {
+    return { label: "10Y-2Y Spread", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
+  }
+}
+
+// ── 4. Index Trends — US (SPX + IXIC, 3 momentum periods each) ─
 async function getIndexTrends(): Promise<MacroFactor> {
   try {
     // We need 50 bars + offset; fetch 60 days to be safe
@@ -185,7 +213,7 @@ async function getIndexTrends(): Promise<MacroFactor> {
   }
 }
 
-// ── 4. Advance/Decline Ratio — multiple sources ───────────────
+// ── 5. Advance/Decline Ratio — multiple sources ───────────────
 async function getADRatio(): Promise<MacroFactor> {
   // Source A: Yahoo ^ADD (NYSE A-D daily line change)
   try {
@@ -256,7 +284,7 @@ async function getADRatio(): Promise<MacroFactor> {
   return { label: "A/D Ratio", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
 }
 
-// ── 5. News Sentiment ─────────────────────────────────────────
+// ── 6. News Sentiment ─────────────────────────────────────────
 const BULL_KW = ["beat","beats","surge","rally","record","recovery","upgrade","outperform","buy","bullish","gain","jump","soar","strong","growth","breakout","positive","rebound","higher","optimism"];
 const BEAR_KW = ["miss","misses","crash","plunge","recession","downgrade","sell","bearish","loss","drop","fall","weak","fear","tariff","inflation","concern","warning","risk","decline","default"];
 
@@ -316,22 +344,22 @@ async function getNewsSentiment(): Promise<{ factor: MacroFactor; headlines: Mac
   };
 }
 
-// ── 6. Market Breadth — multi-ETF proxy ──────────────────────
+// ── 7. Market Breadth — multi-ETF proxy ──────────────────────
 // Uses % of major sector ETFs above their own 20-day SMA.
 // More accurate than SPY-series-only proxy; matches investing.com method.
 async function getMarketBreadth(): Promise<MacroFactor> {
   try {
     // Core ETFs: broad market + sectors
     const etfs = ["SPY", "QQQ", "IWM", "XLK", "XLF", "XLE", "XLV", "XLI", "XLU", "XLP", "XLY", "XLB", "XLRE", "GLD", "TLT"];
-    const seriesArr = await Promise.all(etfs.map(e => fetchYahooSeries(e, 25)));
+    const seriesArr = await Promise.all(etfs.map(e => fetchYahooSeries(e, 55)));   // was 25
 
     let aboveCount = 0, totalCount = 0;
     seriesArr.forEach(series => {
-      if (series.length < 21) return;
-      const sma20 = series.slice(-20).reduce((a, b) => a + b, 0) / 20;
+      if (series.length < 51) return;                           // need 50 days + current
+      const sma50 = series.slice(-50).reduce((a, b) => a + b, 0) / 50;
       const cur   = series[series.length - 1];
       totalCount++;
-      if (cur > sma20) aboveCount++;
+      if (cur > sma50) aboveCount++;
     });
 
     if (totalCount < 5) throw new Error("insufficient ETF data");
@@ -348,7 +376,7 @@ async function getMarketBreadth(): Promise<MacroFactor> {
     const signal: MacroFactor["signal"] = pct >= 0.60 ? "bullish" : pct <= 0.40 ? "bearish" : "neutral";
     return {
       label: "Market Breadth",
-      value: `${(pct * 100).toFixed(0)}% >SMA20`,
+      value: `${(pct * 100).toFixed(0)}% >SMA50`,
       score, signal,
       detail: `${aboveCount}/${totalCount} ETFs · SPY 5d ${ret5 >= 0 ? "+" : ""}${ret5.toFixed(1)}%`,
     };
@@ -360,22 +388,26 @@ async function getMarketBreadth(): Promise<MacroFactor> {
 // ── Main export ───────────────────────────────────────────────
 export async function fetchMacroData(): Promise<MacroData> {
   try {
-    const [fearGreed, vixStructure, indexTrends, adRatio, newsResult, breadth] = await Promise.all([
-      getFearGreed(), getVixStructure(), getIndexTrends(),
-      getADRatio(), getNewsSentiment(), getMarketBreadth(),
+        const [fearGreed, vixStructure, indexTrends, yieldSpread, newsResult, breadth] = await Promise.all([
+      getFearGreed(),
+      getVixStructure(),
+      getIndexTrends(),
+      getYieldSpread(),
+      getNewsSentiment(),
+      getMarketBreadth(),
     ]);
     const { factor: newsSentiment, headlines } = newsResult;
     const mbs =
       fearGreed.score     * W.fearGreed     +
       vixStructure.score  * W.vixStructure  +
       indexTrends.score   * W.indexTrends   +
-      adRatio.score       * W.adRatio       +
+      yieldSpread.score   * W.yieldSpread   +
       newsSentiment.score * W.newsSentiment +
       breadth.score       * W.breadth;
     return {
       mbs: Math.round(mbs * 10) / 10,
       mbsLabel: mbsLabel(mbs),
-      factors: { fearGreed, vixStructure, indexTrends, adRatio, newsSentiment, breadth },
+      factors: { fearGreed, vixStructure, indexTrends, yieldSpread, newsSentiment, breadth },
       headlines,
       fetchedAt: new Date().toISOString(),
     };
