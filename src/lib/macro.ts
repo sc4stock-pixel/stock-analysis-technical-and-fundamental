@@ -181,7 +181,7 @@ async function getIndexTrends(): Promise<MacroFactor> {
       detail,
     };
   } catch {
-    return { label: "Index Trends", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
+    return { label: "Index Trends 10d/20d/50d%", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
   }
 }
 
