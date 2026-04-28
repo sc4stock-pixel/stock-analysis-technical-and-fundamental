@@ -417,7 +417,7 @@ export async function fetchMacroData(): Promise<MacroData> {
       mbs: 5.0, mbsLabel: "NEUTRAL",
       factors: {
         fearGreed: empty("Fear & Greed"), vixStructure: empty("VIX Structure"),
-        indexTrends: empty("Index Trends"), adRatio: empty("A/D Ratio"),
+        indexTrends: empty("Index Trends"), yieldSpread: empty("10Y-2Y Spread"),,
         newsSentiment: empty("News Sentiment"), breadth: empty("Market Breadth"),
       },
       headlines: [],
