@@ -205,7 +205,7 @@ async function getHSITrends(): Promise<MacroFactor> {
       detail,
     };
   } catch {
-    return { label: "HSI/HSTECH", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
+    return { label: "HSI/HSTECH 10d/20d/50d%", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
   }
 }
 
