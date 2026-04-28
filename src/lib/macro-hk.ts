@@ -265,19 +265,12 @@ async function getHKBreadth(): Promise<MacroFactor> {
 }
 
 // ── 6. HIBOR 1M ───────────────────────────────────────────────
-// Strategy:
-//   Primary A: HKMA public API (correct field: hibor_1m)
-//   Primary B: HKAB scrape (regex on rate table)
-//   Fallback:  Yahoo Finance ^IRX (US 13-week T-bill) as proxy
-//              HK HIBOR tracks Fed Funds closely due to peg
+// Sources: HKMA public API → HKAB website scrape → unavailable
 async function getHIBOR(): Promise<MacroFactor> {
 
-  // ── Source A: HKMA daily interbank liquidity API ──────────────
-  // Correct endpoint with actual field names
+  // ── Source A: HKMA daily/monthly interbank liquidity API ────
   const hkmaEndpoints = [
-    // Daily monetary stats — has overnight, 1w, 1m HIBOR
     "https://api.hkma.gov.hk/public/market-data-and-statistics/daily-monetary-statistics/daily-figures-interbank-liquidity?pagesize=5&sortby=end_of_date&sortorder=desc",
-    // Monthly statistical bulletin — has hibor series
     "https://api.hkma.gov.hk/public/market-data-and-statistics/monthly-statistical-bulletin/money/interest-rates-in-hong-kong?pagesize=3&sortby=end_of_date&sortorder=desc",
   ];
 
@@ -293,7 +286,6 @@ async function getHIBOR(): Promise<MacroFactor> {
       const records: Array<Record<string, unknown>> = json?.result?.records ?? [];
       if (!records.length) continue;
       const rec = records[0];
-      // Try all known field name variants for 1M HIBOR
       const fieldNames = [
         "hibor_1m", "hibor_1m_fixing", "one_month", "1m",
         "hibor_1month", "interbank_1m", "rate_1m",
@@ -303,7 +295,6 @@ async function getHIBOR(): Promise<MacroFactor> {
         const val = parseFloat(String(rec[field] ?? ""));
         if (!isNaN(val) && val > 0 && val < 30) { rate = val; break; }
       }
-      // Also check all numeric fields if named ones failed
       if (rate === null) {
         for (const [key, val] of Object.entries(rec)) {
           if (key.toLowerCase().includes("1m") || key.toLowerCase().includes("month")) {
@@ -313,10 +304,10 @@ async function getHIBOR(): Promise<MacroFactor> {
         }
       }
       if (rate !== null) return scoreHIBOR(rate, "HKMA");
-    } catch { /* try next */ }
+    } catch { /* try next endpoint */ }
   }
 
-  // ── Source B: HKAB website scrape ────────────────────────────
+  // ── Source B: HKAB website scrape ───────────────────────────
   const hkabUrls = [
     "https://www.hkab.org.hk/hibor/listHibor.do",
     "https://www.hkab.org.hk/en/market-information/hong-kong-interbank-offered-rate",
@@ -330,7 +321,6 @@ async function getHIBOR(): Promise<MacroFactor> {
       });
       if (!res.ok) continue;
       const html = await res.text();
-      // Multiple regex patterns to handle different HTML structures
       const patterns = [
         /1\s*[Mm]onth[^<]*<\/td>\s*<td[^>]*>\s*(\d+\.\d+)/,
         /1M[^<]*<\/td>\s*<td[^>]*>\s*(\d+\.\d+)/,
@@ -345,41 +335,10 @@ async function getHIBOR(): Promise<MacroFactor> {
           if (!isNaN(rate) && rate > 0 && rate < 30) return scoreHIBOR(rate, "HKAB");
         }
       }
-    } catch { /* try next */ }
+    } catch { /* try next URL */ }
   }
 
-  // ── Fallback: Yahoo ^IRX (13-week US T-bill) as HIBOR proxy ──
-  // HK HIBOR tracks US rates tightly due to peg; IRX ≈ HIBOR O/N
-  // 1M HIBOR ≈ IRX * 1.05 (slight premium due to HK credit)
-  try {
-    const irx = await fetchYahooClose("^IRX");
-    if (irx && irx > 0) {
-      const hiborProxy = irx * 1.05; // approximate 1M HIBOR from US T-bill
-      return scoreHIBOR(hiborProxy, "^IRX proxy");
-    }
-  } catch { /* ignore */ }
-
-  // ── Last resort: Fed Funds + spread proxy ─────────────────────
-  try {
-    // Use EFFR proxy from Yahoo (^TNX = 10yr, not ideal, but better than nothing)
-    // Actually derive from USDHKD positioning: tight peg + high USDHKD = higher HIBOR
-    const usdHkd = await fetchYahooClose("USDHKD=X");
-    if (usdHkd) {
-      // Historically: USDHKD closer to 7.85 = tighter liquidity = higher HIBOR
-      const pegStress = (usdHkd - 7.75) / (7.85 - 7.75); // 0=strong side, 1=weak side
-      const impliedHibor = 2.0 + pegStress * 4.0; // rough: 2% at strong side, 6% at weak
-      return scoreHIBOR(impliedHibor, "Peg proxy");
-    }
-  } catch { /* ignore */ }
-
   return { label: "HIBOR 1M", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
-}
-
-function scoreHIBOR(rate: number, source: string): MacroFactor {
-  const score  = rate < 1.0 ? 8 : rate < 2.5 ? 7 : rate < 4.0 ? 5 : rate < 6.0 ? 3 : 2;
-  const signal: MacroFactor["signal"] = rate < 2.0 ? "bullish" : rate > 4.5 ? "bearish" : "neutral";
-  const label  = rate < 1.0 ? "Very Low" : rate < 2.5 ? "Low" : rate < 4.0 ? "Moderate" : rate < 6.0 ? "High" : "Very High";
-  return { label: "HIBOR 1M", value: `${rate.toFixed(2)}%`, score, signal, detail: `${label} (${source})` };
 }
 
 // ── Main export ───────────────────────────────────────────────
