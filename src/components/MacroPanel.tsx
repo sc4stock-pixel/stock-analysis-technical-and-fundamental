@@ -55,7 +55,7 @@ function RadarChart({ factors }: { factors: MacroData["factors"] }) {
     factors.fearGreed.score,
     factors.vixStructure.score,
     factors.indexTrends.score,
-    factors.adRatio.score,
+    factors.yieldSpread.score,
     factors.newsSentiment.score,
     factors.breadth.score,
   ];
