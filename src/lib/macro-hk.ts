@@ -173,66 +173,39 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
   return { label: "Southbound", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
 }
 
-// ── 3. HSI & HSTECH Trends ────────────────────────────────────
+// ── 3. HSI & HSTECH Trends (10d/20d/50d momentum, score 0‑10) ─
 async function getHSITrends(): Promise<MacroFactor> {
   try {
-    // Fetch HSI and HSTECH index; if HSTECH fails, fallback to the ETF
+    // Fetch HSI and HSTECH index; if ^HSTECH fails, fallback to 3033.HK ETF
     const [hsiSeries, hstechIndex] = await Promise.all([
-      fetchYahooSeries("^HSI", 22),
-      fetchYahooSeries("^HSTECH", 22).catch(() => []),
+      fetchYahooSeries("^HSI", 60),
+      fetchYahooSeries("^HSTECH", 60).catch(() => []),
     ]);
+    const hstechSeries = hstechIndex.length >= 50 ? hstechIndex : await fetchYahooSeries("3033.HK", 60);
 
-    // Fallback to 3033.HK if the index didn't return enough data
-    const hstechSeries = hstechIndex.length >= 5
-      ? hstechIndex
-      : await fetchYahooSeries("3033.HK", 22);
+    const mom = (series: number[], days: number) =>
+      series.length > days ? (series[series.length - 1] / series[series.length - 1 - days] - 1) * 100 : 0;
 
-    const trend20 = (s: number[]) =>
-      s.length < 5 ? 0 : ((s[s.length - 1] - s[0]) / s[0]) * 100;
-    const ema10 = (s: number[]) => {
-      if (!s.length) return 0;
-      const a = 2 / 11;
-      let e = s[0];
-      for (let i = 1; i < s.length; i++) e = a * s[i] + (1 - a) * e;
-      return e;
-    };
+    const hsi10 = mom(hsiSeries, 10), hsi20 = mom(hsiSeries, 20), hsi50 = mom(hsiSeries, 50);
+    const hstech10 = mom(hstechSeries, 10), hstech20 = mom(hstechSeries, 20), hstech50 = mom(hstechSeries, 50);
 
-    const hsiT = trend20(hsiSeries);
-    const hstechT = trend20(hstechSeries);
-    const hsiAbove =
-      hsiSeries.length > 0 && hsiSeries[hsiSeries.length - 1] > ema10(hsiSeries);
-    const hstechAbove =
-      hstechSeries.length > 0 && hstechSeries[hstechSeries.length - 1] > ema10(hstechSeries);
+    const conditions = [hsi10 > 0, hsi20 > 0, hsi50 > 0, hstech10 > 0, hstech20 > 0, hstech50 > 0];
+    const bullCount = conditions.filter(Boolean).length;
 
-    const bull = [hsiT > 0, hstechT > 0, hsiAbove, hstechAbove].filter(Boolean).length;
-    const score = bull === 4 ? 9 : bull === 3 ? 7 : bull === 2 ? 5 : bull === 1 ? 3 : 2;
-    const signal: MacroFactor["signal"] =
-      bull >= 3 ? "bullish" : bull <= 1 ? "bearish" : "neutral";
+    const score = Math.round((bullCount / 6) * 10);
+    const signal: MacroFactor["signal"] = score >= 7 ? "bullish" : score <= 3 ? "bearish" : "neutral";
 
-    const hsiStr =
-      hsiSeries.length > 0
-        ? `HSI${hsiT >= 0 ? "+" : ""}${hsiT.toFixed(1)}%`
-        : "HSI—";
-    const hstechStr =
-      hstechSeries.length > 0
-        ? `Tech${hstechT >= 0 ? "+" : ""}${hstechT.toFixed(1)}%`
-        : "Tech—";
+    const detail = `HSI ${hsi10>=0?'+':''}${hsi10.toFixed(1)}% ${hsi20>=0?'+':''}${hsi20.toFixed(1)}% ${hsi50>=0?'+':''}${hsi50.toFixed(1)}% | Tech ${hstech10>=0?'+':''}${hstech10.toFixed(1)}% ${hstech20>=0?'+':''}${hstech20.toFixed(1)}% ${hstech50>=0?'+':''}${hstech50.toFixed(1)}%`;
 
     return {
       label: "HSI/HSTECH",
-      value: `${bull}/4 bull`,
+      value: `${score}/10`,
       score,
       signal,
-      detail: `${hsiStr} ${hstechStr}`,
+      detail,
     };
   } catch {
-    return {
-      label: "HSI/HSTECH",
-      value: "—",
-      score: 5,
-      signal: "neutral",
-      detail: "unavailable",
-    };
+    return { label: "HSI/HSTECH", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
   }
 }
 
