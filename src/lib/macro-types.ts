@@ -23,12 +23,12 @@ export interface MacroData {
   mbs: number;
   mbsLabel: string;
   factors: {
-    fearGreed:     MacroFactor;
-    vixStructure:  MacroFactor;
-    indexTrends:   MacroFactor;
-    adRatio:       MacroFactor;
+    fearGreed: MacroFactor;
+    vixStructure: MacroFactor;
+    indexTrends: MacroFactor;
+    yieldSpread: MacroFactor;
     newsSentiment: MacroFactor;
-    breadth:       MacroFactor;
+    breadth: MacroFactor;
   };
   headlines: MacroHeadline[];
   fetchedAt: string;
