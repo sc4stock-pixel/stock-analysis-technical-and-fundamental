@@ -176,29 +176,63 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
 // ── 3. HSI & HSTECH Trends ────────────────────────────────────
 async function getHSITrends(): Promise<MacroFactor> {
   try {
-    const [hsiSeries, hstechSeries] = await Promise.all([
+    // Fetch HSI and HSTECH index; if HSTECH fails, fallback to the ETF
+    const [hsiSeries, hstechIndex] = await Promise.all([
       fetchYahooSeries("^HSI", 22),
-      fetchYahooSeries("^HSTECH", 22),
+      fetchYahooSeries("^HSTECH", 22).catch(() => []),
     ]);
-    const trend20 = (s: number[]) => s.length < 5 ? 0 : (s[s.length - 1] - s[0]) / s[0] * 100;
-    const ema10   = (s: number[]) => {
+
+    // Fallback to 3033.HK if the index didn't return enough data
+    const hstechSeries = hstechIndex.length >= 5
+      ? hstechIndex
+      : await fetchYahooSeries("3033.HK", 22);
+
+    const trend20 = (s: number[]) =>
+      s.length < 5 ? 0 : ((s[s.length - 1] - s[0]) / s[0]) * 100;
+    const ema10 = (s: number[]) => {
       if (!s.length) return 0;
-      const a = 2 / 11; let e = s[0];
+      const a = 2 / 11;
+      let e = s[0];
       for (let i = 1; i < s.length; i++) e = a * s[i] + (1 - a) * e;
       return e;
     };
-    const hsiT        = trend20(hsiSeries);
-    const hstechT     = trend20(hstechSeries);
-    const hsiAbove    = hsiSeries.length    > 0 && hsiSeries[hsiSeries.length - 1]       > ema10(hsiSeries);
-    const hstechAbove = hstechSeries.length > 0 && hstechSeries[hstechSeries.length - 1] > ema10(hstechSeries);
-    const bull        = [hsiT > 0, hstechT > 0, hsiAbove, hstechAbove].filter(Boolean).length;
-    const score       = bull === 4 ? 9 : bull === 3 ? 7 : bull === 2 ? 5 : bull === 1 ? 3 : 2;
-    const signal: MacroFactor["signal"] = bull >= 3 ? "bullish" : bull <= 1 ? "bearish" : "neutral";
-    const hsiStr    = hsiSeries.length    > 0 ? `HSI${hsiT >= 0 ? "+" : ""}${hsiT.toFixed(1)}%`       : "HSI—";
-    const hstechStr = hstechSeries.length > 0 ? `Tech${hstechT >= 0 ? "+" : ""}${hstechT.toFixed(1)}%` : "Tech—";
-    return { label: "HSI/HSTECH", value: `${bull}/4 bull`, score, signal, detail: `${hsiStr} ${hstechStr}` };
+
+    const hsiT = trend20(hsiSeries);
+    const hstechT = trend20(hstechSeries);
+    const hsiAbove =
+      hsiSeries.length > 0 && hsiSeries[hsiSeries.length - 1] > ema10(hsiSeries);
+    const hstechAbove =
+      hstechSeries.length > 0 && hstechSeries[hstechSeries.length - 1] > ema10(hstechSeries);
+
+    const bull = [hsiT > 0, hstechT > 0, hsiAbove, hstechAbove].filter(Boolean).length;
+    const score = bull === 4 ? 9 : bull === 3 ? 7 : bull === 2 ? 5 : bull === 1 ? 3 : 2;
+    const signal: MacroFactor["signal"] =
+      bull >= 3 ? "bullish" : bull <= 1 ? "bearish" : "neutral";
+
+    const hsiStr =
+      hsiSeries.length > 0
+        ? `HSI${hsiT >= 0 ? "+" : ""}${hsiT.toFixed(1)}%`
+        : "HSI—";
+    const hstechStr =
+      hstechSeries.length > 0
+        ? `Tech${hstechT >= 0 ? "+" : ""}${hstechT.toFixed(1)}%`
+        : "Tech—";
+
+    return {
+      label: "HSI/HSTECH",
+      value: `${bull}/4 bull`,
+      score,
+      signal,
+      detail: `${hsiStr} ${hstechStr}`,
+    };
   } catch {
-    return { label: "HSI/HSTECH", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
+    return {
+      label: "HSI/HSTECH",
+      value: "—",
+      score: 5,
+      signal: "neutral",
+      detail: "unavailable",
+    };
   }
 }
 
@@ -233,15 +267,11 @@ async function getUSDHKD(): Promise<MacroFactor> {
 async function getHKBreadth(): Promise<MacroFactor> {
   try {
     const symbols = [
-      "^HSI", "^HSTECH",
-      "2800.HK",  // Tracker Fund
+      "2800.HK",  // Tracker Fund (HSI)
       "3033.HK",  // CSOP HSTECH ETF
-      "9988.HK",  // Alibaba
-      "0700.HK",  // Tencent
-      "1211.HK",  // BYD
-      "1810.HK",  // Xiaomi
-      "0005.HK",  // HSBC
-      "0941.HK",  // China Mobile
+      "2828.HK",  // HSCEI ETF (H-shares)
+      "2823.HK",  // iShares FTSE A50 China (A-share proxy)
+      "3188.HK",  // CAM CSI300 ETF
     ];
     const seriesArr = await Promise.all(symbols.map(s => fetchYahooSeries(s, 25)));
     let above = 0, total = 0;
