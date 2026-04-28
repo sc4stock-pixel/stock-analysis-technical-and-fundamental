@@ -198,7 +198,7 @@ async function getHSITrends(): Promise<MacroFactor> {
     const detail = `HSI ${hsi10>=0?'+':''}${hsi10.toFixed(1)}% ${hsi20>=0?'+':''}${hsi20.toFixed(1)}% ${hsi50>=0?'+':''}${hsi50.toFixed(1)}% | Tech ${hstech10>=0?'+':''}${hstech10.toFixed(1)}% ${hstech20>=0?'+':''}${hstech20.toFixed(1)}% ${hstech50>=0?'+':''}${hstech50.toFixed(1)}%`;
 
     return {
-      label: "HSI/HSTECH 10d/20d/50d%",
+      label: "Index Trends 10d/20d/50d%",
       value: `${score}/10`,
       score,
       signal,
