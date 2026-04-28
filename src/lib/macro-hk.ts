@@ -112,7 +112,7 @@ async function getSouthboundFlow(): Promise<MacroFactor> {
     const jsonUrl = "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/southbound_data.json";
     const res = await fetch(jsonUrl, {
       headers: { "User-Agent": "Mozilla/5.0" },
-      next: { revalidate: 3600 },   // re‑fetch at most every hour
+      next: { revalidate: 1800 },   // re‑fetch at most 30min
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
