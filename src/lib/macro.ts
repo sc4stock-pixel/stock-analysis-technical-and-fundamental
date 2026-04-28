@@ -174,7 +174,7 @@ async function getIndexTrends(): Promise<MacroFactor> {
     const detail = `SPX ${spx10>=0?'+':''}${spx10.toFixed(1)}% ${spx20>=0?'+':''}${spx20.toFixed(1)}% ${spx50>=0?'+':''}${spx50.toFixed(1)}% | IXIC ${ixic10>=0?'+':''}${ixic10.toFixed(1)}% ${ixic20>=0?'+':''}${ixic20.toFixed(1)}% ${ixic50>=0?'+':''}${ixic50.toFixed(1)}%`;
 
     return {
-      label: "Index Trends",
+      label: "Index Trends 10d/20d/50d%",
       value: `${score}/10`,
       score,
       signal,
