@@ -147,32 +147,39 @@ async function getVixStructure(): Promise<MacroFactor> {
   }
 }
 
-// ── 3. Index Trends — US only (no HSI) ───────────────────────
+// ── 3. Index Trends — US (SPX + IXIC, 3 momentum periods each) ─
 async function getIndexTrends(): Promise<MacroFactor> {
   try {
-    const [spySeries, qqSeries, diaSeries] = await Promise.all([
-      fetchYahooSeries("^GSPC", 22),
-      fetchYahooSeries("^IXIC", 22),
-      fetchYahooSeries("^DJI", 22),
+    // We need 50 bars + offset; fetch 60 days to be safe
+    const [spxSeries, ixicSeries] = await Promise.all([
+      fetchYahooSeries("^GSPC", 60),
+      fetchYahooSeries("^IXIC", 60),
     ]);
-    const trend20 = (s: number[]) => s.length < 5 ? 0 : (s[s.length - 1] - s[0]) / s[0] * 100;
-    const ema10   = (s: number[]) => {
-      if (!s.length) return 0;
-      const a = 2 / 11; let e = s[0];
-      for (let i = 1; i < s.length; i++) e = a * s[i] + (1 - a) * e;
-      return e;
+
+    const mom = (series: number[], days: number) =>
+      series.length > days ? (series[series.length - 1] / series[series.length - 1 - days] - 1) * 100 : 0;
+
+    // 10‑day, 20‑day, 50‑day momentum for each index
+    const spx10 = mom(spxSeries, 10), spx20 = mom(spxSeries, 20), spx50 = mom(spxSeries, 50);
+    const ixic10 = mom(ixicSeries, 10), ixic20 = mom(ixicSeries, 20), ixic50 = mom(ixicSeries, 50);
+
+    // Conditions: momentum > 0
+    const conditions = [spx10 > 0, spx20 > 0, spx50 > 0, ixic10 > 0, ixic20 > 0, ixic50 > 0];
+    const bullCount = conditions.filter(Boolean).length;
+
+    // Map count (0‑6) to a 0‑10 score (linear)
+    const score = Math.round((bullCount / 6) * 10);
+    const signal: MacroFactor["signal"] = score >= 7 ? "bullish" : score <= 3 ? "bearish" : "neutral";
+
+    const detail = `SPX ${spx10>=0?'+':''}${spx10.toFixed(1)}% ${spx20>=0?'+':''}${spx20.toFixed(1)}% ${spx50>=0?'+':''}${spx50.toFixed(1)}% | IXIC ${ixic10>=0?'+':''}${ixic10.toFixed(1)}% ${ixic20>=0?'+':''}${ixic20.toFixed(1)}% ${ixic50>=0?'+':''}${ixic50.toFixed(1)}%`;
+
+    return {
+      label: "Index Trends",
+      value: `${score}/10`,
+      score,
+      signal,
+      detail,
     };
-    const spyAbove = spySeries.length > 0 && spySeries[spySeries.length - 1] > ema10(spySeries);
-    const qqAbove  = qqSeries.length  > 0 && qqSeries[qqSeries.length - 1]   > ema10(qqSeries);
-    const diaAbove = diaSeries.length > 0 && diaSeries[diaSeries.length - 1] > ema10(diaSeries);
-    const spyT = trend20(spySeries), qqT = trend20(qqSeries), diaT = trend20(diaSeries);
-    const bull = [spyT > 0, qqT > 0, diaT > 0, spyAbove, qqAbove, diaAbove].filter(Boolean).length;
-    const score = bull >= 6 ? 9 : bull >= 5 ? 8 : bull >= 4 ? 7 : bull >= 3 ? 5 : bull >= 2 ? 4 : 2;
-    const signal: MacroFactor["signal"] = bull >= 4 ? "bullish" : bull <= 2 ? "bearish" : "neutral";
-    const spyStr = spySeries.length > 0 ? `SPY${spyT >= 0 ? "+" : ""}${spyT.toFixed(1)}%` : "SPY—";
-    const qqStr  = qqSeries.length  > 0 ? `QQQ${qqT  >= 0 ? "+" : ""}${qqT.toFixed(1)}%`  : "QQQ—";
-    const diaStr = diaSeries.length > 0 ? `DJI${diaT >= 0 ? "+" : ""}${diaT.toFixed(1)}%` : "DJI—";
-    return { label: "Index Trends", value: `${bull}/6 bull`, score, signal, detail: `${spyStr} ${qqStr} ${diaStr}` };
   } catch {
     return { label: "Index Trends", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
   }
