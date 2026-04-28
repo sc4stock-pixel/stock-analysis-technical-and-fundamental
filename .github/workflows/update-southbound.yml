@@ -1,25 +1,45 @@
 name: Update Southbound JSON
+
 on:
   schedule:
-    - cron: '20 10 * * *'   # runs daily at 23:00 UTC (market close) mm hh dom mm dow
-  workflow_dispatch:        # allows manual trigger
+    - cron: '30 10 * * *'      # runs daily at 23:00 UTC (market close)
+  workflow_dispatch:           # allows manual trigger from Actions tab
+
 jobs:
   update:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: pip install akshare
-      - run: python -c "
-        import json, akshare as ak;
-        df = ak.stock_hsgt_fund_flow_summary_em();
-        south = df[df['资金方向'] == '南向'];
-        total = sum(float(row.get('成交净买额',0)) for _,row in south.iterrows() if isinstance(row.get('成交净买额'),(int,float)));
-        with open('southbound_data.json','w') as f: json.dump({'todayYi':round(total,2)},f)
-        "
-      - uses: stefanzweifel/git-auto-commit-action@v5
+
+      - name: Install dependencies
+        run: pip install akshare
+
+      - name: Generate southbound data
+        run: |
+          cat << 'EOF' > /tmp/southbound.py
+          import json, akshare as ak
+          df = ak.stock_hsgt_fund_flow_summary_em()
+          south = df[df['资金方向'] == '南向']
+          total = 0.0
+          for _, row in south.iterrows():
+              val = row.get('成交净买额', 0)
+              if isinstance(val, (int, float)):
+                  total += val
+          with open('southbound_data.json', 'w', encoding='utf-8') as f:
+              json.dump({'todayYi': round(total, 2)}, f, ensure_ascii=False)
+          print(f"Exported: totalYi = {round(total, 2)}")
+          EOF
+          python /tmp/southbound.py
+
+      - name: Commit updated JSON
+        uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Update southbound data"
           file_pattern: 'southbound_data.json'
