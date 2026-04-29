@@ -71,8 +71,8 @@ const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: 
 export default function ChartTab({ result }: Props) {
   const [range, setRange]           = useState<Range>("1Y");
   const [showSMA, setShowSMA]       = useState(true);
-  const [showEMA20, setShowEMA20]   = useState(true);
-  const [showEMA50, setShowEMA50]   = useState(true);
+  const [showEMA20, setShowEMA20]   = useState(false);
+  const [showEMA50, setShowEMA50]   = useState(false);
   const [showBB, setShowBB]         = useState(true);
   const [showST, setShowST]         = useState(true);
   const [showVol, setShowVol]       = useState(true);
