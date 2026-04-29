@@ -53,10 +53,10 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
       });
     }
 
-    // 3. SuperTrend flip alerts (detect from chart_bars if not provided)
-    let flipType = r.st_flip_type ?? undefined;
-    let barsSince = r.st_bars_since_flip ?? undefined;
-    if ((!flipType || !barsSince) && r.chart_bars && r.chart_bars.length >= 2) {
+    // 3. SuperTrend flip alerts (compute from chart_bars)
+    let flipType: "BULLISH" | "BEARISH" | undefined = undefined;
+    let barsSince: number | undefined = undefined;
+    if (r.chart_bars && r.chart_bars.length >= 2) {
       const f = computeFlip(r.chart_bars);
       flipType = f.flipType ?? undefined;
       barsSince = f.barsSince;
