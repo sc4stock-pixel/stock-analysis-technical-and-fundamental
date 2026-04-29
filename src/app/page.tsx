@@ -7,6 +7,7 @@ import ConfigPanel from "@/components/ConfigPanel";
 import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
 import StockCard from "@/components/StockCard";
 import dynamic from "next/dynamic";
+import AlertsPanel from "@/components/AlertsPanel";
 
 const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
 const MacroPanelHK = dynamic(() => import("@/components/MacroPanelHK"), { ssr: false });
@@ -269,6 +270,9 @@ export default function Dashboard() {
           <PortfolioSummaryBar results={results} onRowClick={scrollToCard} />
         </div>
       )}
+
+      {/* ── ALERTS PANEL (NEW) ── */}
+      {results.length > 0 && <AlertsPanel results={results} />}
 
       {/* ── STOCK CARDS ── */}
       <main className="p-4">
