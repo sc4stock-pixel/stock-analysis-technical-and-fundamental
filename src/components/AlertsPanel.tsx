@@ -35,7 +35,7 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
 
   for (const r of results) {
     const bt = r.backtest;
-    const comparison = bt?.comparison;
+    const comparison = r.comparison;   // <-- now correctly on the stock result
 
     // 1. RSI divergence
     if (bt?.rsi_divergence_type && bt.rsi_divergence_type !== "None") {
@@ -124,7 +124,7 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
       }
     }
 
-    // 5. Candlestick pattern alerts (only recent 3 bars)
+    // 5. Candlestick pattern alerts (unchanged)
     const patterns = bt?.candlestick_patterns || [];
     const signal = r.signal;
     const recentPatterns = patterns.filter(p => {
