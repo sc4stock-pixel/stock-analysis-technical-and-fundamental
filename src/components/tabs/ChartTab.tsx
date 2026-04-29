@@ -267,10 +267,13 @@ export default function ChartTab({ result }: Props) {
 
       {/* ── ST Status strip with optimized params ── */}
       {(() => {
-        const dir     = result.st_direction ?? -1;
-        const dist    = result.st_stop_distance_pct ?? 0;
-        const openRet = result.st_open_return_pct;
-        const stVal   = result.st_value;
+        // Derive current ST state from the last chart bar (always consistent with the chart)
+        const lastBar = result.chart_bars?.length ? result.chart_bars[result.chart_bars.length - 1] : null;
+        const dir     = lastBar?.supertrendDir ?? -1;
+        const stVal   = lastBar?.supertrend ?? result.st_value;          // fallback to old value if chart empty
+        const close   = lastBar?.close ?? result.current_price;
+        const dist    = stVal > 0 && close > 0 ? ((close - stVal) / close) * 100 : 0;
+        const openRet = result.st_open_return_pct;                       // this still needs the pre‑computed value
         return (
           <div className={`flex items-center gap-3 px-2 py-1 rounded border text-xs font-mono ${dir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
             <span className={dir === 1 ? "text-[#00ff88] font-bold" : "text-[#ff4757] font-bold"}>
@@ -282,7 +285,7 @@ export default function ChartTab({ result }: Props) {
               <span className="text-[#4a6080]">open: <span className={openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span></span>
             )}
             {dir === -1 && <span className="text-[#4a6080]">wait for flip to bullish before entry</span>}
-            {/* Optimized params badge */}
+            {/* Optimized params badge (unchanged) */}
             {optLabel && (
               <span className="ml-auto text-[#ffa502] border border-[#ffa502]/40 rounded px-1.5 py-0.5 text-[0.6rem] font-mono">
                 {optLabel}
