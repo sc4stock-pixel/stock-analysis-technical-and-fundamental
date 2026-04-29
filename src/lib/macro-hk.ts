@@ -243,9 +243,7 @@ async function getHKBreadth(): Promise<MacroFactor> {
     const symbols = [
       "2800.HK",  // Tracker Fund (HSI)
       "3033.HK",  // CSOP HSTECH ETF
-      "2828.HK",  // HSCEI ETF (H-shares)
-      "2823.HK",  // iShares FTSE A50 China
-      "3188.HK",  // CAM CSI300 ETF
+      "2828.HK",  // HSCEI ETF (H‑shares)
     ];
     const seriesArr = await Promise.all(symbols.map(s => fetchYahooSeries(s, 55)));
     let above = 0, total = 0;
@@ -255,9 +253,9 @@ async function getHKBreadth(): Promise<MacroFactor> {
       total++;
       if (series[series.length - 1] > sma50) above++;
     });
-    if (total < 3) throw new Error("insufficient");
+    if (total < 2) throw new Error("insufficient");   // require at least 2 ETFs with data
     const pct = above / total;
-    // Score alignment
+    // Score alignment (same as before, works with 3‑ETF breadth)
     const score  = pct >= 0.80 ? 9 : pct >= 0.75 ? 7 : pct >= 0.60 ? 7 : pct >= 0.45 ? 5 : pct >= 0.30 ? 3 : pct >= 0.20 ? 3 : 1;
     const signal: MacroFactor["signal"] = pct >= 0.60 ? "bullish" : pct <= 0.30 ? "bearish" : "neutral";
     return {
