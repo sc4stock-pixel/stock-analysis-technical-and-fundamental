@@ -201,17 +201,20 @@ export function runPipeline(
   const lastBar = bars[bars.length - 1];
   const signal  = lastBar.signalConfirmed ?? "HOLD";
 
-  // chart_bars uses DEFAULT ST params for visual consistency with UI overlays
-  // The optimized params are used only for backtest trades
-  const chartBars: ChartBar[] = bars.slice(-500).map(b => ({
+const chartBars: ChartBar[] = bars.slice(-500).map((b, i) => {
+  const offset = bars.length - Math.min(500, bars.length);
+  const absIdx = offset + i;
+  return {
     date: b.date, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
     sma20: b.sma20, sma50: b.sma50, ema20: b.ema20, ema50: b.ema50,
     bbUpper: b.bbUpper, bbLower: b.bbLower, signal: b.signalConfirmed, score: b.score,
     rsi: b.rsi, macd: b.macd, macdSig: b.macdSignal, macdHist: b.macdHist,
     adx: b.adx, pdi: b.plusDI, mdi: b.minusDI,
-    // Chart shows DEFAULT ST line; backtest used optimal params
-    supertrend: b.supertrend, supertrendDir: b.supertrendDir,
-  }));
+    // Use OPTIMIZED ST params for chart overlay — matches st_direction/st_value
+    supertrend: optStArr[absIdx] ?? NaN,
+    supertrendDir: optStDirArr[absIdx] ?? -1,
+  };
+});
 
   // ── ST status (uses optimal params for current direction/value) ─
   const lastOptDir = optStDirArr[optStDirArr.length - 1] ?? -1;
