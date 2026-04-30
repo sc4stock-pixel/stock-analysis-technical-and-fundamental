@@ -1,4 +1,6 @@
 "use client";
+import { SuperTrendOptimizer } from "@/lib/supertrend_optimizer";
+import type { Bar } from "@/lib/supertrend_optimizer";
 import { StockAnalysisResult, ChartBar } from "@/types";
 import { useState } from "react";
 import {
@@ -100,21 +102,41 @@ export default function ChartTab({ result }: Props) {
     if (t.exit_date)  { exitMap[t.exit_date] = t.exit_price; exitReturnMap[t.exit_date] = t.return; }
   }
 
-  const chartData = sliced.map(b => {
-    const stVal = (!b.supertrend || isNaN(b.supertrend)) ? null : b.supertrend;
-    return {
-      date: b.date, dateShort: b.date.slice(5),
-      Close: b.close,
-      SMA20: isNaN(b.sma20) ? null : b.sma20, SMA50: isNaN(b.sma50) ? null : b.sma50,
-      EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
-      EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
-      BBU: isNaN(b.bbUpper) ? null : b.bbUpper, BBL: isNaN(b.bbLower) ? null : b.bbLower,
-      ST_Bull: stVal !== null && b.supertrendDir === 1  ? stVal : null,
-      ST_Bear: stVal !== null && b.supertrendDir === -1 ? stVal : null,
-      Volume: b.volume, RSI: b.rsi, "MACD H": b.macdHist,
-      Entry: entryMap[b.date] ?? null, Exit: exitMap[b.date] ?? null,
-    };
-  });
+// Optimized ST parameters (fallback to defaults if not available)
+const optParams = result.st_opt_params || { atrPeriod: 10, multiplier: 3.0 };
+
+// Prepare bars for the optimizer (need high/low/close)
+const chartBars: Bar[] = sliced.map(b => ({
+  high: b.high,
+  low: b.low,
+  close: b.close,
+  // other fields are not strictly needed for SuperTrend calculation
+} as Bar));
+
+const optimizer = new SuperTrendOptimizer();
+const optST = optimizer.calculate(chartBars, optParams.atrPeriod, optParams.multiplier);
+
+const chartData = sliced.map((b, i) => {
+  const st = optST[i];
+  return {
+    date: b.date,
+    dateShort: b.date.slice(5),
+    Close: b.close,
+    SMA20: isNaN(b.sma20) ? null : b.sma20,
+    SMA50: isNaN(b.sma50) ? null : b.sma50,
+    EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
+    EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
+    BBU: isNaN(b.bbUpper) ? null : b.bbUpper,
+    BBL: isNaN(b.bbLower) ? null : b.bbLower,
+    ST_Bull: st && st.direction === 1 ? st.line : null,
+    ST_Bear: st && st.direction === -1 ? st.line : null,
+    Volume: b.volume,
+    RSI: b.rsi,
+    "MACD H": b.macdHist,
+    Entry: entryMap[b.date] ?? null,
+    Exit: exitMap[b.date] ?? null,
+  };
+});
 
   const prices = chartData.map(d => d.Close).filter(Boolean) as number[];
   const extras = [
@@ -269,7 +291,7 @@ export default function ChartTab({ result }: Props) {
       {(() => {
         // Derive current ST state from the last chart bar (always consistent with the chart)
         const lastBar = result.chart_bars?.length ? result.chart_bars[result.chart_bars.length - 1] : null;
-        const dir     = lastBar?.supertrendDir ?? -1;
+        const dir = optST.length ? optST[optST.length - 1].direction : -1;
         const stVal   = lastBar?.supertrend ?? result.st_value;          // fallback to old value if chart empty
         const close   = lastBar?.close ?? result.current_price;
         const dist    = stVal > 0 && close > 0 ? ((close - stVal) / close) * 100 : 0;
