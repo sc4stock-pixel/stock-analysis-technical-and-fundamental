@@ -1,6 +1,7 @@
 "use client";
 import { useState, useMemo } from "react";
-import { StockAnalysisResult, ChartBar } from "@/types";
+import { StockAnalysisResult } from "@/types";
+import { supertrend } from "@/lib/indicators";
 
 interface Props {
   results: StockAnalysisResult[];
@@ -13,18 +14,28 @@ interface Alert {
 
 const FLIP_ALERT_DAYS = 3;
 
-function computeFlip(
-  chartBars: ChartBar[]
+function computeOptimizedFlip(
+  result: StockAnalysisResult
 ): { flipType: "BULLISH" | "BEARISH" | null; barsSince: number } {
-  if (!chartBars || chartBars.length < 2) return { flipType: null, barsSince: 999 };
-  // find the most recent direction change
-  for (let i = chartBars.length - 1; i >= 1; i--) {
-    const prev = chartBars[i - 1].supertrendDir;
-    const curr = chartBars[i].supertrendDir;
-    if (prev !== curr) {
-      const barsSince = chartBars.length - 1 - i;
-      if (curr === 1) return { flipType: "BULLISH", barsSince };
-      if (curr === -1) return { flipType: "BEARISH", barsSince };
+  const bars = result.chart_bars;
+  if (!bars || bars.length < 2) return { flipType: null, barsSince: 999 };
+
+  const optAtr = result.st_opt_params?.atrPeriod ?? 10;
+  const optMul = result.st_opt_params?.multiplier ?? 3.0;
+
+  const highs  = bars.map(b => b.high);
+  const lows   = bars.map(b => b.low);
+  const closes = bars.map(b => b.close);
+
+  const [, dir] = supertrend(highs, lows, closes, optAtr, optMul);
+  if (dir.length < 2) return { flipType: null, barsSince: 999 };
+
+  // find most recent direction change
+  for (let i = dir.length - 1; i >= 1; i--) {
+    if (dir[i] !== dir[i - 1]) {
+      const barsSince = dir.length - 1 - i;
+      if (dir[i] === 1) return { flipType: "BULLISH", barsSince };
+      if (dir[i] === -1) return { flipType: "BEARISH", barsSince };
     }
   }
   return { flipType: null, barsSince: 999 };
@@ -35,7 +46,7 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
 
   for (const r of results) {
     const bt = r.backtest;
-    const comparison = r.comparison;   // <-- now correctly on the stock result
+    const comparison = r.comparison;
 
     // 1. RSI divergence
     if (bt?.rsi_divergence_type && bt.rsi_divergence_type !== "None") {
@@ -53,14 +64,8 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
       });
     }
 
-    // 3. SuperTrend flip alerts (compute from chart_bars)
-    let flipType: "BULLISH" | "BEARISH" | undefined = undefined;
-    let barsSince: number | undefined = undefined;
-    if (r.chart_bars && r.chart_bars.length >= 2) {
-      const f = computeFlip(r.chart_bars);
-      flipType = f.flipType ?? undefined;
-      barsSince = f.barsSince;
-    }
+    // 3. SuperTrend flip alerts (optimized)
+    const { flipType, barsSince } = computeOptimizedFlip(r);
 
     const stReturn500 = comparison?.supertrend?.total_return ?? 0;
     const stReturn250 = comparison?.supertrend?.total_return_250d ?? 0;
@@ -68,7 +73,7 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
     const scoreReturn250 = comparison?.score?.total_return_250d ?? 0;
     const scoreSignal = r.signal;
 
-    if (flipType === "BULLISH" && barsSince !== undefined && barsSince <= FLIP_ALERT_DAYS) {
+    if (flipType === "BULLISH" && barsSince <= FLIP_ALERT_DAYS) {
       const daysText = barsSince === 0 ? "TODAY" : `${barsSince}d ago`;
       const stOut500 = stReturn500 > scoreReturn500;
       const stOut250 = stReturn250 > scoreReturn250;
@@ -87,7 +92,7 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
           text: `<strong>${r.symbol}</strong>: SuperTrend FLIPPED BULLISH 📈 (${daysText})`,
         });
       }
-    } else if (flipType === "BEARISH" && barsSince !== undefined && barsSince <= FLIP_ALERT_DAYS) {
+    } else if (flipType === "BEARISH" && barsSince <= FLIP_ALERT_DAYS) {
       const daysText = barsSince === 0 ? "TODAY" : `${barsSince}d ago`;
       const stOut500 = stReturn500 > scoreReturn500;
       const stOut250 = stReturn250 > scoreReturn250;
@@ -108,7 +113,7 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
     }
 
     // 4. Score BUY signal (avoid duplicate if recent bullish flip)
-    const recentBullishFlip = flipType === "BULLISH" && barsSince !== undefined && barsSince <= FLIP_ALERT_DAYS;
+    const recentBullishFlip = flipType === "BULLISH" && barsSince <= FLIP_ALERT_DAYS;
     if (scoreSignal === "BUY" && !recentBullishFlip) {
       const scOut500 = scoreReturn500 > stReturn500;
       const scOut250 = scoreReturn250 > stReturn250;
@@ -184,7 +189,6 @@ export default function AlertsPanel({ results }: Props) {
       {!collapsed && (
         <div className="mt-2 space-y-1.5">
           {alerts.map((alert, idx) => {
-            // split by <strong> tags to allow bold styling
             const parts = alert.text.split(/(<strong>.*?<\/strong>)/g);
             return (
               <div
