@@ -105,11 +105,14 @@ export default function ChartTab({ result }: Props) {
   const optAtr = result.st_opt_params?.atrPeriod ?? 10;
   const optMul = result.st_opt_params?.multiplier ?? 3.0;
 
-  const highs  = sliced.map(b => b.high);
-  const lows   = sliced.map(b => b.low);
-  const closes = sliced.map(b => b.close);
-
-  const [optStLine, optStDir] = supertrend(highs, lows, closes, optAtr, optMul);
+  // Compute ST on full chart history, then slice to view window
+  const allHighs  = chartBars.map(b => b.high);
+  const allLows   = chartBars.map(b => b.low);
+  const allCloses = chartBars.map(b => b.close);
+  const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
+  const offset = chartBars.length - barsToShow;
+  const optStLine = fullStLine.slice(offset);
+  const optStDir  = fullStDir.slice(offset);
 
   const chartData = sliced.map((b, i) => {
     return {
