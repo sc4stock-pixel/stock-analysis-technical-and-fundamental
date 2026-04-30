@@ -1,12 +1,11 @@
 "use client";
-import { SuperTrendOptimizer } from "@/lib/supertrend_optimizer";
-import type { Bar } from "@/lib/supertrend_optimizer";
 import { StockAnalysisResult, ChartBar } from "@/types";
 import { useState } from "react";
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
+import { supertrend } from "@/lib/indicators";
 
 interface Props { result: StockAnalysisResult; }
 
@@ -102,44 +101,30 @@ export default function ChartTab({ result }: Props) {
     if (t.exit_date)  { exitMap[t.exit_date] = t.exit_price; exitReturnMap[t.exit_date] = t.return; }
   }
 
-// Optimized ST parameters (fallback to defaults if not available)
+  // Optimized SuperTrend parameters (same as stock card badge)
+  const optAtr = result.st_opt_params?.atrPeriod ?? 10;
+  const optMul = result.st_opt_params?.multiplier ?? 3.0;
 
+  const highs  = sliced.map(b => b.high);
+  const lows   = sliced.map(b => b.low);
+  const closes = sliced.map(b => b.close);
 
-// Prepare bars for the optimizer (need high/low/close)
-const optInputBars: Bar[] = sliced.map(b => ({
-  high: b.high,
-  low: b.low,
-  close: b.close,
-} as Bar));
+  const [optStLine, optStDir] = supertrend(highs, lows, closes, optAtr, optMul);
 
-const optimizer = new SuperTrendOptimizer();
-const optST = optimizer.calculate(
-  optInputBars,
-  optParams?.atrPeriod ?? 10,
-  optParams?.multiplier ?? 3.0
-);
-
-const chartData = sliced.map((b, i) => {
-  const st = optST[i];
-  return {
-    date: b.date,
-    dateShort: b.date.slice(5),
-    Close: b.close,
-    SMA20: isNaN(b.sma20) ? null : b.sma20,
-    SMA50: isNaN(b.sma50) ? null : b.sma50,
-    EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
-    EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
-    BBU: isNaN(b.bbUpper) ? null : b.bbUpper,
-    BBL: isNaN(b.bbLower) ? null : b.bbLower,
-    ST_Bull: st && st.direction === 1 ? st.line : null,
-    ST_Bear: st && st.direction === -1 ? st.line : null,
-    Volume: b.volume,
-    RSI: b.rsi,
-    "MACD H": b.macdHist,
-    Entry: entryMap[b.date] ?? null,
-    Exit: exitMap[b.date] ?? null,
-  };
-});
+  const chartData = sliced.map((b, i) => {
+    return {
+      date: b.date, dateShort: b.date.slice(5),
+      Close: b.close,
+      SMA20: isNaN(b.sma20) ? null : b.sma20, SMA50: isNaN(b.sma50) ? null : b.sma50,
+      EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
+      EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
+      BBU: isNaN(b.bbUpper) ? null : b.bbUpper, BBL: isNaN(b.bbLower) ? null : b.bbLower,
+      ST_Bull: optStDir[i] === 1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
+      ST_Bear: optStDir[i] === -1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
+      Volume: b.volume, RSI: b.rsi, "MACD H": b.macdHist,
+      Entry: entryMap[b.date] ?? null, Exit: exitMap[b.date] ?? null,
+    };
+  });
 
   const prices = chartData.map(d => d.Close).filter(Boolean) as number[];
   const extras = [
@@ -292,13 +277,11 @@ const chartData = sliced.map((b, i) => {
 
       {/* ── ST Status strip with optimized params ── */}
       {(() => {
-        // Derive current ST state from the last chart bar (always consistent with the chart)
-        const lastBar = result.chart_bars?.length ? result.chart_bars[result.chart_bars.length - 1] : null;
-        const dir = optST.length ? optST[optST.length - 1].direction : -1;
-        const stVal   = lastBar?.supertrend ?? result.st_value;          // fallback to old value if chart empty
-        const close   = lastBar?.close ?? result.current_price;
+        const dir     = optStDir.length ? optStDir[optStDir.length - 1] : -1;
+        const stVal   = optStLine.length ? optStLine[optStLine.length - 1] : 0;
+        const close   = sliced.length ? sliced[sliced.length - 1].close : result.current_price;
         const dist    = stVal > 0 && close > 0 ? ((close - stVal) / close) * 100 : 0;
-        const openRet = result.st_open_return_pct;                       // this still needs the pre‑computed value
+        const openRet = result.st_open_return_pct;   // pre‑computed
         return (
           <div className={`flex items-center gap-3 px-2 py-1 rounded border text-xs font-mono ${dir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
             <span className={dir === 1 ? "text-[#00ff88] font-bold" : "text-[#ff4757] font-bold"}>
@@ -310,7 +293,7 @@ const chartData = sliced.map((b, i) => {
               <span className="text-[#4a6080]">open: <span className={openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span></span>
             )}
             {dir === -1 && <span className="text-[#4a6080]">wait for flip to bullish before entry</span>}
-            {/* Optimized params badge (unchanged) */}
+            {/* Optimized params badge */}
             {optLabel && (
               <span className="ml-auto text-[#ffa502] border border-[#ffa502]/40 rounded px-1.5 py-0.5 text-[0.6rem] font-mono">
                 {optLabel}
