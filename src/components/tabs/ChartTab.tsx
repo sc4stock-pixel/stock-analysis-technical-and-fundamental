@@ -103,7 +103,7 @@ export default function ChartTab({ result }: Props) {
   }
 
 // Optimized ST parameters (fallback to defaults if not available)
-const optParams = result.st_opt_params || { atrPeriod: 10, multiplier: 3.0 };
+
 
 // Prepare bars for the optimizer (need high/low/close)
 const optInputBars: Bar[] = sliced.map(b => ({
@@ -113,7 +113,11 @@ const optInputBars: Bar[] = sliced.map(b => ({
 } as Bar));
 
 const optimizer = new SuperTrendOptimizer();
-const optST = optimizer.calculate(optInputBars, optParams.atrPeriod, optParams.multiplier);
+const optST = optimizer.calculate(
+  optInputBars,
+  optParams?.atrPeriod ?? 10,
+  optParams?.multiplier ?? 3.0
+);
 
 const chartData = sliced.map((b, i) => {
   const st = optST[i];
