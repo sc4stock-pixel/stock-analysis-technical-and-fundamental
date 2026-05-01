@@ -45,6 +45,29 @@ const ExitMarker = (props: { cx?: number; cy?: number; value?: number }) => {
   );
 };
 
+// Single unified interface for all chart data points (actual + forecast)
+interface ChartDataPoint {
+  date: string;
+  dateShort: string;
+  Close: number | null;
+  SMA20: number | null;
+  SMA50: number | null;
+  EMA20: number | null;
+  EMA50: number | null;
+  BBU: number | null;
+  BBL: number | null;
+  ST_Bull: number | null;
+  ST_Bear: number | null;
+  Volume: number | null;
+  RSI: number | null;
+  "MACD H": number | null;
+  Entry: number | null;
+  Exit: number | null;
+  P50?: number;
+  P10?: number;
+  P90?: number;
+}
+
 interface TTP { name: string; value: number; color: string; }
 const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: TTP[]; label?: string }) => {
   if (!active || !payload?.length) return null;
@@ -101,11 +124,11 @@ export default function ChartTab({ result, config, timesfm }: Props) {
   const barsToShow = Math.min(RANGE_BARS[range], chartBars.length);
   const sliced: ChartBar[] = chartBars.slice(-barsToShow);
 
-  // Optimized SuperTrend parameters (same as stock card badge)
+  // Optimized SuperTrend parameters
   const optAtr = result.st_opt_params?.atrPeriod ?? 10;
   const optMul = result.st_opt_params?.multiplier ?? 3.0;
 
-  // Compute ST on full chart history (needed for correct band seeding)
+  // Compute ST on full chart history
   const allHighs  = chartBars.map(b => b.high);
   const allLows   = chartBars.map(b => b.low);
   const allCloses = chartBars.map(b => b.close);
@@ -123,29 +146,38 @@ export default function ChartTab({ result, config, timesfm }: Props) {
     if (t.exit_date)  exitMap[t.exit_date] = t.exit_price;
   }
 
-  let chartData = sliced.map((b, i) => ({
+  // Build initial chart data from actual bars
+  let chartData: ChartDataPoint[] = sliced.map((b, i) => ({
     date: b.date, dateShort: b.date.slice(5),
     Close: b.close,
-    SMA20: isNaN(b.sma20) ? null : b.sma20, SMA50: isNaN(b.sma50) ? null : b.sma50,
+    SMA20: isNaN(b.sma20) ? null : b.sma20,
+    SMA50: isNaN(b.sma50) ? null : b.sma50,
     EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
     EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
-    BBU: isNaN(b.bbUpper) ? null : b.bbUpper, BBL: isNaN(b.bbLower) ? null : b.bbLower,
+    BBU: isNaN(b.bbUpper) ? null : b.bbUpper,
+    BBL: isNaN(b.bbLower) ? null : b.bbLower,
     ST_Bull: optStDir[i] === 1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
     ST_Bear: optStDir[i] === -1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
-    Volume: b.volume, RSI: b.rsi, "MACD H": b.macdHist,
-    Entry: entryMap[b.date] ?? null, Exit: exitMap[b.date] ?? null,
+    Volume: b.volume,
+    RSI: b.rsi,
+    "MACD H": b.macdHist,
+    Entry: entryMap[b.date] ?? null,
+    Exit: exitMap[b.date] ?? null,
   }));
 
-  // ─── TIMESFM FORECAST OVERLAY ──────────────────────────────────
+  // ── TIMESFM FORECAST OVERLAY ──────────────────────────────
   if (timesfm) {
     const p10 = timesfm.p10, p50 = timesfm.p50, p90 = timesfm.p90;
-    const forecastBars = p50.map((v, i) => ({
+    const forecastBars: ChartDataPoint[] = p50.map((v, i) => ({
       date: `F+${i + 1}`,
       dateShort: `+${i + 1}`,
-      Close: null as number | null,
-      P50: v,
-      P10: p10[i],
-      P90: p90[i],
+      Close: null,
+      SMA20: null, SMA50: null, EMA20: null, EMA50: null,
+      BBU: null, BBL: null,
+      ST_Bull: null, ST_Bear: null,
+      Volume: null, RSI: null, "MACD H": null,
+      Entry: null, Exit: null,
+      P50: v, P10: p10[i], P90: p90[i],
     }));
     chartData = [...chartData, ...forecastBars];
   }
@@ -239,7 +271,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
             <ReferenceLine y={result.current_price} stroke="#c8d8f0" strokeDasharray="4 2" strokeOpacity={0.3}
               label={{ value: result.current_price.toFixed(2), position: "right", fontSize: 9, fill: "#6b85a0" }} />
 
-            {/* TimesFM overlay */}
+            {/* TimesFM forecast overlay */}
             {timesfm && (
               <>
                 <Line dataKey="P50" stroke="#a78bfa" strokeWidth={2} dot={false} strokeDasharray="5 5" name="P50 Forecast" connectNulls={false} />
@@ -251,7 +283,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
         </ResponsiveContainer>
       </div>
 
-      {/* Sub-charts (same as before) */}
+      {/* Sub-charts */}
       {showVol && (
         <div style={{ height: subH }}>
           <ResponsiveContainer width="100%" height="100%">
@@ -314,7 +346,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
         </>}
       </div>
 
-      {/* ST Status strip (unchanged) */}
+      {/* ST Status strip */}
       {(() => {
         const dir     = optStDir.length ? optStDir[optStDir.length - 1] : -1;
         const stVal   = optStLine.length ? optStLine[optStLine.length - 1] : 0;
@@ -341,7 +373,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
         );
       })()}
 
-      {/* Score Trades (unchanged) */}
+      {/* Score Trades */}
       {showTrades && allScoreTrades.length > 0 && (
         <div className="mt-1">
           <div className="text-[#00d4ff] text-xs mb-1 font-bold">
@@ -385,7 +417,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
         </div>
       )}
 
-      {/* ST Trades (unchanged) */}
+      {/* ST Trades */}
       {allStTrades.length > 0 && showTrades && (
         <div className="mt-2">
           <div className="text-[#ffa502] text-xs mb-1 font-bold">
