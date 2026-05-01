@@ -1,5 +1,7 @@
 "use client";
+import { useState } from "react";
 import { StockAnalysisResult, ChartBar, TimesfmPriceTargets, AppConfig } from "@/types";
+import { supertrend } from "@/lib/indicators";
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, Area,
