@@ -8,6 +8,7 @@ import MonteCarloTab from "./tabs/MonteCarloTab";
 import TradingPlanTab from "./tabs/TradingPlanTab";
 import ChartTab      from "./tabs/ChartTab";
 import FundamentalReport from "@/components/FundamentalReport"; // <-- added
+import { TimesfmPriceTargets } from "@/types";
 
 interface Props {
   result: StockAnalysisResult;
@@ -297,4 +298,34 @@ export default function StockCard({ result, config }: Props) {
       </div>
     </div>
   );
+
+  {timesfm && (
+  <div className="mt-3 border border-[#a78bfa]/40 rounded p-3 text-xs">
+    <div className="text-[#a78bfa] font-bold mb-2">🔮 TIMESFM PREDICTIONS</div>
+    <div className="grid grid-cols-3 gap-2">
+      <div className="text-center bg-[#0f1629] rounded p-2">
+        <div className="text-[#4a6080]">T1 (5d)</div>
+        <div className="text-white font-bold">{timesfm.t1.toFixed(2)}</div>
+        <div className={timesfm.t1 >= result.current_price ? "text-green-400" : "text-red-400"}>
+          {((timesfm.t1 / result.current_price - 1) * 100).toFixed(1)}%
+        </div>
+      </div>
+      <div className="text-center bg-[#0f1629] rounded p-2">
+        <div className="text-[#4a6080]">T2 (10d)</div>
+        <div className="text-white font-bold">{timesfm.t2.toFixed(2)}</div>
+        <div className={timesfm.t2 >= result.current_price ? "text-green-400" : "text-red-400"}>
+          {((timesfm.t2 / result.current_price - 1) * 100).toFixed(1)}%
+        </div>
+      </div>
+      <div className="text-center bg-[#0f1629] rounded p-2">
+        <div className="text-[#4a6080]">T3 (20d)</div>
+        <div className="text-white font-bold">{timesfm.t3.toFixed(2)}</div>
+        <div className={timesfm.t3 >= result.current_price ? "text-green-400" : "text-red-400"}>
+          {((timesfm.t3 / result.current_price - 1) * 100).toFixed(1)}%
+        </div>
+      </div>
+    </div>
+    {/* optional mini chart of the forecast bands could go here */}
+  </div>
+)}
 }
