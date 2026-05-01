@@ -1,13 +1,17 @@
 "use client";
-import { StockAnalysisResult, ChartBar } from "@/types";
+import { StockAnalysisResult, ChartBar, TimesfmPriceTargets } from "@/types";
 import { useState } from "react";
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, ReferenceLine,
+  Tooltip, ResponsiveContainer, ReferenceLine, Area,
 } from "recharts";
 import { supertrend } from "@/lib/indicators";
 
-interface Props { result: StockAnalysisResult; }
+interface Props {
+  result: StockAnalysisResult;
+  config: AppConfig;
+  timesfm?: TimesfmPriceTargets;
+}
 
 type Range = "1M" | "3M" | "6M" | "1Y" | "2Y";
 const RANGE_BARS: Record<Range, number> = { "1M": 21, "3M": 63, "6M": 126, "1Y": 252, "2Y": 500 };
@@ -50,26 +54,30 @@ const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: 
   const stBull = p("ST_Bull"); const stBear = p("ST_Bear");
   const vol = p("Volume"); const rsi = p("RSI"); const macdH = p("MACD H");
   const entry = p("Entry"); const exit = p("Exit");
+  const p50 = p("P50"); const p10 = p("P10"); const p90 = p("P90");
   return (
-    <div className="bg-[#0f1629] border border-[#1e2d4a] rounded px-2.5 py-2 text-xs font-mono shadow-xl">
+    <div className="bg-[#0f1629] border border-[#1e2d4a] rounded px-2.5 py-2 text-xs font-mono shadow-xl max-w-[250px]">
       <div className="text-[#6b85a0] mb-1.5 border-b border-[#1e2d4a] pb-1">{label}</div>
       {close  != null && <div className="text-[#c8d8f0]">Close: <span className="text-[#00d4ff] font-bold">{close.toFixed(2)}</span></div>}
       {sma20  != null && <div className="text-[#00ff88]">SMA20: {sma20.toFixed(2)}</div>}
       {sma50  != null && <div className="text-[#ff7f50]">SMA50: {sma50.toFixed(2)}</div>}
       {ema20  != null && <div className="text-[#a78bfa]">EMA20: {ema20.toFixed(2)}</div>}
-      {ema50  != null && <div className="text-[#f59e0b]">EMA50: {ema50.toFixed(2)} <span className="text-[#4a6080]">(display)</span></div>}
+      {ema50  != null && <div className="text-[#f59e0b]">EMA50: {ema50.toFixed(2)}</div>}
       {stBull != null && <div className="text-[#00ff88]">ST 🟢: {stBull.toFixed(2)}</div>}
       {stBear != null && <div className="text-[#ff4757]">ST 🔴: {stBear.toFixed(2)}</div>}
       {rsi    != null && <div className="text-[#a78bfa]">RSI: {rsi.toFixed(1)}</div>}
       {macdH  != null && <div className={macdH >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>MACD H: {macdH.toFixed(3)}</div>}
       {vol    != null && <div className="text-[#4a6080]">Vol: {(vol / 1_000_000).toFixed(1)}M</div>}
+      {p50    != null && <div className="text-[#a78bfa]">P50 Fcst: {p50.toFixed(2)}</div>}
+      {p10    != null && <div className="text-[#4a6080]">P10 band: {p10.toFixed(2)}</div>}
+      {p90    != null && <div className="text-[#4a6080]">P90 band: {p90.toFixed(2)}</div>}
       {entry  != null && <div className="text-[#00ff88] font-bold mt-1">▲ ENTRY @ {entry.toFixed(2)}</div>}
       {exit   != null && <div className="text-[#ff4757] font-bold mt-1">▼ EXIT @ {exit.toFixed(2)}</div>}
     </div>
   );
 };
 
-export default function ChartTab({ result }: Props) {
+export default function ChartTab({ result, config, timesfm }: Props) {
   const [range, setRange]           = useState<Range>("1Y");
   const [showSMA, setShowSMA]       = useState(true);
   const [showEMA20, setShowEMA20]   = useState(false);
@@ -93,48 +101,59 @@ export default function ChartTab({ result }: Props) {
   const barsToShow = Math.min(RANGE_BARS[range], chartBars.length);
   const sliced: ChartBar[] = chartBars.slice(-barsToShow);
 
-  // ── BUG FIX: Compute ST on FULL chart history, then slice to view window ──
-  // Previously computed on `sliced` only — caused wrong ST values for short
-  // ranges (1M/3M) because ATR warmup needs full bar history to seed correctly.
+  // Optimized SuperTrend parameters (same as stock card badge)
   const optAtr = result.st_opt_params?.atrPeriod ?? 10;
   const optMul = result.st_opt_params?.multiplier ?? 3.0;
 
+  // Compute ST on full chart history (needed for correct band seeding)
   const allHighs  = chartBars.map(b => b.high);
   const allLows   = chartBars.map(b => b.low);
   const allCloses = chartBars.map(b => b.close);
   const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
 
-  // Slice to the visible window
-  const viewOffset = chartBars.length - barsToShow;
-  const optStLine = fullStLine.slice(viewOffset);
-  const optStDir  = fullStDir.slice(viewOffset);
+  // Slice to current view window
+  const offset = chartBars.length - barsToShow;
+  const optStLine = fullStLine.slice(offset);
+  const optStDir  = fullStDir.slice(offset);
 
   const entryMap: Record<string, number> = {};
   const exitMap:  Record<string, number> = {};
-  const exitReturnMap: Record<string, number> = {};
   for (const t of bt?.trades ?? []) {
     if (t.entry_date) entryMap[t.entry_date] = t.entry_price;
-    if (t.exit_date)  { exitMap[t.exit_date] = t.exit_price; exitReturnMap[t.exit_date] = t.return; }
+    if (t.exit_date)  exitMap[t.exit_date] = t.exit_price;
   }
 
-  const chartData = sliced.map((b, i) => {
-    const stVal = optStLine[i];
-    const stDir = optStDir[i];
-    return {
-      date: b.date, dateShort: b.date.slice(5),
-      Close: b.close,
-      SMA20: isNaN(b.sma20) ? null : b.sma20, SMA50: isNaN(b.sma50) ? null : b.sma50,
-      EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
-      EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
-      BBU: isNaN(b.bbUpper) ? null : b.bbUpper, BBL: isNaN(b.bbLower) ? null : b.bbLower,
-      ST_Bull: stDir === 1 && !isNaN(stVal) ? stVal : null,
-      ST_Bear: stDir === -1 && !isNaN(stVal) ? stVal : null,
-      Volume: b.volume, RSI: b.rsi, "MACD H": b.macdHist,
-      Entry: entryMap[b.date] ?? null, Exit: exitMap[b.date] ?? null,
-    };
-  });
+  let chartData = sliced.map((b, i) => ({
+    date: b.date, dateShort: b.date.slice(5),
+    Close: b.close,
+    SMA20: isNaN(b.sma20) ? null : b.sma20, SMA50: isNaN(b.sma50) ? null : b.sma50,
+    EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
+    EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
+    BBU: isNaN(b.bbUpper) ? null : b.bbUpper, BBL: isNaN(b.bbLower) ? null : b.bbLower,
+    ST_Bull: optStDir[i] === 1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
+    ST_Bear: optStDir[i] === -1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
+    Volume: b.volume, RSI: b.rsi, "MACD H": b.macdHist,
+    Entry: entryMap[b.date] ?? null, Exit: exitMap[b.date] ?? null,
+  }));
 
-  const prices = chartData.map(d => d.Close).filter(Boolean) as number[];
+  // ─── TIMESFM FORECAST OVERLAY ──────────────────────────────────
+  if (timesfm) {
+    const p10 = timesfm.p10, p50 = timesfm.p50, p90 = timesfm.p90;
+    const forecastBars = p50.map((v, i) => ({
+      date: `F+${i + 1}`,
+      dateShort: `+${i + 1}`,
+      Close: null as number | null,
+      P50: v,
+      P10: p10[i],
+      P90: p90[i],
+    }));
+    chartData = [...chartData, ...forecastBars];
+  }
+
+  const prices = chartData
+    .filter(d => d.Close != null)
+    .map(d => d.Close as number);
+
   const extras = [
     ...(showBB    ? chartData.flatMap(d => [d.BBU, d.BBL]).filter(Boolean) as number[] : []),
     ...(showST    ? chartData.map(d => d.ST_Bull ?? d.ST_Bear).filter(Boolean) as number[] : []),
@@ -142,13 +161,15 @@ export default function ChartTab({ result }: Props) {
     ...(showEMA50 ? chartData.map(d => d.EMA50).filter(Boolean) as number[] : []),
   ];
   const allY = [...prices, ...extras];
-  const yPad = (Math.max(...allY) - Math.min(...allY)) * 0.05;
+  const yPad = (Math.max(...allY) - Math.min(...allY)) * 0.05 || 1;
   const yMin = Math.min(...allY) - yPad;
   const yMax = Math.max(...allY) + yPad;
 
   const tickCount  = Math.min(8, chartData.length);
   const tickStep   = Math.max(1, Math.floor(chartData.length / tickCount));
-  const sparseTicks = chartData.filter((_, i) => i === 0 || i === chartData.length - 1 || i % tickStep === 0).map(d => d.dateShort);
+  const sparseTicks = chartData
+    .filter((_, i) => i === 0 || i === chartData.length - 1 || i % tickStep === 0)
+    .map(d => d.dateShort);
 
   const datesInView    = new Set(sliced.map(b => b.date));
   const allScoreTrades = bt?.trades ?? [];
@@ -217,11 +238,20 @@ export default function ChartTab({ result }: Props) {
             </>}
             <ReferenceLine y={result.current_price} stroke="#c8d8f0" strokeDasharray="4 2" strokeOpacity={0.3}
               label={{ value: result.current_price.toFixed(2), position: "right", fontSize: 9, fill: "#6b85a0" }} />
+
+            {/* TimesFM overlay */}
+            {timesfm && (
+              <>
+                <Line dataKey="P50" stroke="#a78bfa" strokeWidth={2} dot={false} strokeDasharray="5 5" name="P50 Forecast" connectNulls={false} />
+                <Area dataKey="P90" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P90 band" />
+                <Area dataKey="P10" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P10 band" />
+              </>
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
 
-      {/* Sub-charts */}
+      {/* Sub-charts (same as before) */}
       {showVol && (
         <div style={{ height: subH }}>
           <ResponsiveContainer width="100%" height="100%">
@@ -277,19 +307,19 @@ export default function ChartTab({ result }: Props) {
           <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #00ff88" }} /> ST Bull</span>
           <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #ff4757" }} /> ST Bear</span>
         </>}
+        {timesfm && <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #a78bfa" }} /> P50 Forecast</span>}
         {showTrades && <>
           <span className="flex items-center gap-1.5"><span className="text-[#00ff88] text-sm leading-none">▲</span> Entry</span>
           <span className="flex items-center gap-1.5"><span className="text-[#ff4757] text-sm leading-none">▼</span> Exit</span>
         </>}
       </div>
 
-      {/* ── ST Status strip — driven by FULL-history optimized params ── */}
+      {/* ST Status strip (unchanged) */}
       {(() => {
-        // Use last bar of full ST computation (most accurate, unaffected by view range)
-        const dir   = fullStDir.length ? fullStDir[fullStDir.length - 1] : -1;
-        const stVal = fullStLine.length ? fullStLine[fullStLine.length - 1] : 0;
-        const close = chartBars.length ? chartBars[chartBars.length - 1].close : result.current_price;
-        const dist  = stVal > 0 && close > 0 && dir === 1 ? ((close - stVal) / close) * 100 : 0;
+        const dir     = optStDir.length ? optStDir[optStDir.length - 1] : -1;
+        const stVal   = optStLine.length ? optStLine[optStLine.length - 1] : 0;
+        const close   = sliced.length ? sliced[sliced.length - 1].close : result.current_price;
+        const dist    = stVal > 0 && close > 0 ? ((close - stVal) / close) * 100 : 0;
         const openRet = result.st_open_return_pct;
         return (
           <div className={`flex items-center gap-3 px-2 py-1 rounded border text-xs font-mono ${dir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
@@ -311,7 +341,7 @@ export default function ChartTab({ result }: Props) {
         );
       })()}
 
-      {/* Score Trades */}
+      {/* Score Trades (unchanged) */}
       {showTrades && allScoreTrades.length > 0 && (
         <div className="mt-1">
           <div className="text-[#00d4ff] text-xs mb-1 font-bold">
@@ -355,7 +385,7 @@ export default function ChartTab({ result }: Props) {
         </div>
       )}
 
-      {/* ST Trades */}
+      {/* ST Trades (unchanged) */}
       {allStTrades.length > 0 && showTrades && (
         <div className="mt-2">
           <div className="text-[#ffa502] text-xs mb-1 font-bold">
