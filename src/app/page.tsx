@@ -66,13 +66,6 @@ export default function Dashboard() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
   
-  // ── Fetch TimesFM forecasts on mount if results exist ──────
-  useEffect(() => {
-    if (results.length > 0 && !timesfmData) {
-      fetchTimesfm();
-    }
-  }, [results, timesfmData, fetchTimesfm]);
-  
   const scrollToTop = useCallback(() => window.scrollTo({ top: 0, behavior: "smooth" }), []);
 
   // ── Fetch US macro ────────────────────────────────────────
