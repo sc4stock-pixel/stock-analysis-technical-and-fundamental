@@ -397,3 +397,18 @@ export interface RegimeBadge {
   label: string;
   dir: string;
 }
+
+export interface TimesfmPriceTargets {
+  t1: number;
+  t2: number;
+  t3: number;
+  p10: number[];
+  p50: number[];
+  p90: number[];
+}
+
+export interface TimesfmForecasts {
+  [symbol: string]: {
+    price_targets?: TimesfmPriceTargets;
+  };
+}
