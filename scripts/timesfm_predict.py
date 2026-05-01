@@ -8,16 +8,16 @@ import yfinance as yf
 
 # ── Load model ──────────────────────────────────────────────────
 try:
-    import timesfm
+    from timesfm import TimesFM, ForecastConfig
 except ImportError:
     print(json.dumps({"error": "timesfm not installed"}))
     sys.exit(1)
 
 print("Loading TimesFM model (financial fine‑tune)…", flush=True)
-model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(
+model = TimesFM.from_pretrained(
     "pfnet/timesfm-1.0-200m-fin"
 )
-model.compile(timesfm.ForecastConfig(
+model.compile(ForecastConfig(
     max_context=1024,
     max_horizon=256,
     normalize_inputs=True,
