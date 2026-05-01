@@ -1,6 +1,5 @@
 "use client";
-import { StockAnalysisResult, ChartBar, TimesfmPriceTargets } from "@/types";
-import { useState } from "react";
+import { StockAnalysisResult, ChartBar, TimesfmPriceTargets, AppConfig } from "@/types";
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, Area,
