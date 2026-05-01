@@ -93,6 +93,22 @@ export default function ChartTab({ result }: Props) {
   const barsToShow = Math.min(RANGE_BARS[range], chartBars.length);
   const sliced: ChartBar[] = chartBars.slice(-barsToShow);
 
+  // ── BUG FIX: Compute ST on FULL chart history, then slice to view window ──
+  // Previously computed on `sliced` only — caused wrong ST values for short
+  // ranges (1M/3M) because ATR warmup needs full bar history to seed correctly.
+  const optAtr = result.st_opt_params?.atrPeriod ?? 10;
+  const optMul = result.st_opt_params?.multiplier ?? 3.0;
+
+  const allHighs  = chartBars.map(b => b.high);
+  const allLows   = chartBars.map(b => b.low);
+  const allCloses = chartBars.map(b => b.close);
+  const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
+
+  // Slice to the visible window
+  const viewOffset = chartBars.length - barsToShow;
+  const optStLine = fullStLine.slice(viewOffset);
+  const optStDir  = fullStDir.slice(viewOffset);
+
   const entryMap: Record<string, number> = {};
   const exitMap:  Record<string, number> = {};
   const exitReturnMap: Record<string, number> = {};
@@ -101,20 +117,9 @@ export default function ChartTab({ result }: Props) {
     if (t.exit_date)  { exitMap[t.exit_date] = t.exit_price; exitReturnMap[t.exit_date] = t.return; }
   }
 
-  // Optimized SuperTrend parameters (same as stock card badge)
-  const optAtr = result.st_opt_params?.atrPeriod ?? 10;
-  const optMul = result.st_opt_params?.multiplier ?? 3.0;
-
-  // Compute ST on full chart history, then slice to view window
-  const allHighs  = chartBars.map(b => b.high);
-  const allLows   = chartBars.map(b => b.low);
-  const allCloses = chartBars.map(b => b.close);
-  const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
-  const offset = chartBars.length - barsToShow;
-  const optStLine = fullStLine.slice(offset);
-  const optStDir  = fullStDir.slice(offset);
-
   const chartData = sliced.map((b, i) => {
+    const stVal = optStLine[i];
+    const stDir = optStDir[i];
     return {
       date: b.date, dateShort: b.date.slice(5),
       Close: b.close,
@@ -122,8 +127,8 @@ export default function ChartTab({ result }: Props) {
       EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
       EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
       BBU: isNaN(b.bbUpper) ? null : b.bbUpper, BBL: isNaN(b.bbLower) ? null : b.bbLower,
-      ST_Bull: optStDir[i] === 1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
-      ST_Bear: optStDir[i] === -1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
+      ST_Bull: stDir === 1 && !isNaN(stVal) ? stVal : null,
+      ST_Bear: stDir === -1 && !isNaN(stVal) ? stVal : null,
       Volume: b.volume, RSI: b.rsi, "MACD H": b.macdHist,
       Entry: entryMap[b.date] ?? null, Exit: exitMap[b.date] ?? null,
     };
@@ -278,13 +283,14 @@ export default function ChartTab({ result }: Props) {
         </>}
       </div>
 
-      {/* ── ST Status strip with optimized params ── */}
+      {/* ── ST Status strip — driven by FULL-history optimized params ── */}
       {(() => {
-        const dir     = optStDir.length ? optStDir[optStDir.length - 1] : -1;
-        const stVal   = optStLine.length ? optStLine[optStLine.length - 1] : 0;
-        const close   = sliced.length ? sliced[sliced.length - 1].close : result.current_price;
-        const dist    = stVal > 0 && close > 0 ? ((close - stVal) / close) * 100 : 0;
-        const openRet = result.st_open_return_pct;   // pre‑computed
+        // Use last bar of full ST computation (most accurate, unaffected by view range)
+        const dir   = fullStDir.length ? fullStDir[fullStDir.length - 1] : -1;
+        const stVal = fullStLine.length ? fullStLine[fullStLine.length - 1] : 0;
+        const close = chartBars.length ? chartBars[chartBars.length - 1].close : result.current_price;
+        const dist  = stVal > 0 && close > 0 && dir === 1 ? ((close - stVal) / close) * 100 : 0;
+        const openRet = result.st_open_return_pct;
         return (
           <div className={`flex items-center gap-3 px-2 py-1 rounded border text-xs font-mono ${dir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
             <span className={dir === 1 ? "text-[#00ff88] font-bold" : "text-[#ff4757] font-bold"}>
@@ -296,7 +302,6 @@ export default function ChartTab({ result }: Props) {
               <span className="text-[#4a6080]">open: <span className={openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span></span>
             )}
             {dir === -1 && <span className="text-[#4a6080]">wait for flip to bullish before entry</span>}
-            {/* Optimized params badge */}
             {optLabel && (
               <span className="ml-auto text-[#ffa502] border border-[#ffa502]/40 rounded px-1.5 py-0.5 text-[0.6rem] font-mono">
                 {optLabel}
