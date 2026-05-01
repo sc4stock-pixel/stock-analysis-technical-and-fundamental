@@ -1,15 +1,14 @@
 // ============================================================
 // ANALYSIS PIPELINE — V14 + SuperTrend Parameter Optimization
 //
-// Key changes:
-//   1. optimizeSupertrend() runs a 25-combo grid search (ATR 10-14, mult 2.5-3.5)
-//      BEFORE the ST backtest. Optimal params are used for:
-//        - stEntrySignal loop (signal generation)
-//        - runSupertrendBacktest() (the actual backtest)
-//      Chart overlay (chart_bars) keeps default params for visual consistency.
-//   2. ST entry: SMA50 crossover signal catches "already bullish + SMA confirmed" entries
-//   3. signals.ts velocity filter is applied to rawSignal BEFORE confirm bars
-//   4. chart_bars = 500 for 2Y toggle
+// Debug logging enabled — matches Python script output format:
+//   🔍 Optimizing SuperTrend for {symbol}...
+//   ✅ Best: ATR={n}, Mult={m} => Return={r}%, Sharpe={s}, Trades={t}
+//   [DEBUG] Last bar ({date}): ST={v}, Close={c}, Direction={d}, Trend={trend}
+//   [DEBUG] Backtest has_open_position: {bool}
+//   [DEBUG] ST Flip to BULLISH: {date} ({n} bars ago)
+//   [DEBUG] At flip: Close={c}, SMA_50={s}, Close>SMA_50={bool}
+//   [DEBUG] Last ST trade: entry={e}, exit={x}, reason={r}
 // ============================================================
 import { AppConfig, StockAnalysisResult, KellyResult, WalkForwardResult, OHLCVBar, ChartBar } from "@/types";
 import { rsi, macd, adx, atr, bollingerBands, sma, ema, volumeRatio, supertrend } from "./indicators";
@@ -24,6 +23,14 @@ export interface RawOHLCV {
   date: string; open: number; high: number; low: number; close: number; volume: number;
 }
 
+// ── Debug logger — prefix matches Python output ───────────────
+function dbg(symbol: string, msg: string) {
+  console.log(`  [DEBUG][${symbol}] ${msg}`);
+}
+function info(symbol: string, msg: string) {
+  console.log(`  📊 [${symbol}] ${msg}`);
+}
+
 export function runPipeline(
   rawBars: RawOHLCV[],
   stockConfig: { symbol: string; name: string; exchange: string },
@@ -31,10 +38,15 @@ export function runPipeline(
   currentPrice: number,
   changePct: number
 ): StockAnalysisResult {
+  const sym = stockConfig.symbol;
+  console.log(`\nAnalyzing ${sym} (${stockConfig.name})...`);
+
   const closes  = rawBars.map(b => b.close);
   const highs   = rawBars.map(b => b.high);
   const lows    = rawBars.map(b => b.low);
   const volumes = rawBars.map(b => b.volume);
+
+  info(sym, `Fetched ${rawBars.length} bars. Date range: ${rawBars[0]?.date} → ${rawBars[rawBars.length - 1]?.date}`);
 
   // ── Indicators ────────────────────────────────────────────────
   const rsiArr   = rsi(closes, config.analysis.rsiPeriod);
@@ -44,7 +56,7 @@ export function runPipeline(
   const sma20Arr = sma(closes, config.analysis.smaShort);
   const sma50Arr = sma(closes, config.analysis.smaLong);
   const ema20Arr = ema(closes, 20);
-  const ema50Arr = ema(closes, 50);                        // chart display only
+  const ema50Arr = ema(closes, 50);
 
   const ema20SlopeArr = ema20Arr.map((v, i) =>
     (i < 3 || isNaN(v) || isNaN(ema20Arr[i - 3])) ? 0 : v - ema20Arr[i - 3]
@@ -93,6 +105,15 @@ export function runPipeline(
     trendGateArr: trendGate, rsiDivergenceArr: rsiDivArr, regimeArr,
   });
 
+  // ── Last bar indicators ───────────────────────────────────────
+  const lastIdx = rawBars.length - 1;
+  const lastBar0 = rawBars[lastIdx];
+  const lastRSI  = rsiArr[lastIdx];
+  const lastADX  = adxArr[lastIdx];
+  const lastMACD = macdHist[lastIdx];
+  const lastRegime = regimeArr[lastIdx];
+  info(sym, `Last bar (${lastBar0.date}): Close=${lastBar0.close.toFixed(2)}, RSI=${lastRSI?.toFixed(1)}, ADX=${lastADX?.toFixed(1)}, MACD_H=${lastMACD?.toFixed(4)}, Regime=${lastRegime}`);
+
   // ── Assemble OHLCVBar array ───────────────────────────────────
   const bars: OHLCVBar[] = rawBars.map((raw, i) => ({
     date: raw.date, open: raw.open, high: raw.high, low: raw.low, close: raw.close, volume: raw.volume,
@@ -109,34 +130,59 @@ export function runPipeline(
     score: barScores[i]?.Score ?? 5, scoreAdjusted: barScores[i]?.Score ?? 5,
     volumeSurge: 0, confidence: barScores[i]?.Confidence ?? 70,
     rawSignal: "HOLD", signalConfirmed: "HOLD", entrySignal: "HOLD", forceEntry: 0,
-    // Default ST values (used for chart overlay)
     supertrend: stArr[i] ?? NaN, supertrendDir: stDirArr[i] ?? 1,
     supertrendSignal: stSigArr[i] ?? "HOLD", stEntrySignal: "HOLD",
     ema50: ema50Arr[i] ?? 0,
   }));
 
   // ── SuperTrend Parameter Optimization ────────────────────────
-  // Grid search: ATR [10-14] × Multiplier [2.5-3.5] = 25 combos
-  // Selects the combo with the highest Sharpe (min 2 trades).
-  // Optimal params are used for signal generation AND the ST backtest.
-  // Chart overlay keeps default params (stArr/stDirArr above) for consistency.
+  console.log(`  🔍 Optimizing SuperTrend for ${sym}...`);
   const optResult = optimizeSupertrend(
     bars,
     config.backtest.initialCapital,
     config.backtest.commissionRate,
     config.backtest.slippageRate
   );
+  console.log(`    ✅ Best: ATR=${optResult.atrPeriod}, Mult=${optResult.multiplier} => Return=${optResult.totalReturn.toFixed(1)}%, Sharpe=${optResult.sharpe.toFixed(2)}, Trades=${optResult.numTrades}`);
 
-  // Recompute ST with optimal params for backtest + signal generation
+  // Recompute ST with optimal params
   const [optStArr, optStDirArr, optStSigArr] = supertrend(
     highs, lows, closes, optResult.atrPeriod, optResult.multiplier
   );
 
+  // ── Last bar ST debug ─────────────────────────────────────────
+  const lastOptST  = optStArr[lastIdx] ?? NaN;
+  const lastOptDir = optStDirArr[lastIdx] ?? -1;
+  const lastClose  = closes[lastIdx];
+  const lastSMA50  = sma50Arr[lastIdx];
+  const trendStr   = lastOptDir === 1 ? "BULLISH" : "BEARISH";
+  dbg(sym, `Last bar (${lastBar0.date}): ST=${isNaN(lastOptST) ? "NaN" : lastOptST.toFixed(4)}, Close=${lastClose.toFixed(2)}, Direction=${lastOptDir}.0, Trend=${trendStr}`);
+  dbg(sym, `Current: Close=${lastClose.toFixed(2)}, SMA_50=${lastSMA50.toFixed(2)}, Close>SMA_50=${lastClose > lastSMA50}`);
+
+  // ── Detect most recent ST flip ────────────────────────────────
+  let lastFlipIdx: number | null = null;
+  let lastFlipDir: number | null = null;
+  for (let i = optStDirArr.length - 1; i >= 1; i--) {
+    if (optStDirArr[i] !== optStDirArr[i - 1]) {
+      lastFlipIdx = i;
+      lastFlipDir = optStDirArr[i];
+      break;
+    }
+  }
+  if (lastFlipIdx !== null && lastFlipDir !== null) {
+    const barsSinceFlip = lastIdx - lastFlipIdx;
+    const flipLabel     = lastFlipDir === 1 ? "BULLISH" : "BEARISH";
+    const flipBar       = rawBars[lastFlipIdx];
+    const flipSig       = optStSigArr[lastFlipIdx];
+    const flipSMA50     = sma50Arr[lastFlipIdx] ?? 0;
+    dbg(sym, `ST Flip to ${flipLabel}: ${flipBar.date} (${barsSinceFlip} bars ago)`);
+    dbg(sym, `At flip: Close=${flipBar.close.toFixed(2)}, SMA_50=${flipSMA50.toFixed(2)}, Close>SMA_50=${flipBar.close > flipSMA50}`);
+    dbg(sym, `At flip: ST_Signal=${flipSig}, ST_Signal_EMA_Only=${flipBar.close > flipSMA50 ? flipSig : "HOLD (SMA50 filter blocked)"}`);
+  } else {
+    dbg(sym, `No ST flip detected in lookback window`);
+  }
+
   // ── SuperTrend entry signals using OPTIMAL params ─────────────
-  // Two conditions:
-  // A) Bullish flip (optStSig='BUY') AND close > SMA50
-  // B) Already bullish (no flip) AND price just crossed above SMA50
-  //    (catches the "wick stopped out, trend resumed" case like GOOGL 06/23)
   for (let i = 1; i < bars.length; i++) {
     if (i + 1 >= bars.length) continue;
     const cur  = bars[i];
@@ -147,14 +193,12 @@ export function runPipeline(
       continue;
     }
     if (optStSigArr[i] === "BUY") {
-      // Condition A: bullish flip with SMA50 filter
       const smaFilter = stConfig.filter_mode === "ema_only"
         ? cur.close > cur.sma50
         : cur.close > cur.sma50 && cur.adx > 20;
       if (smaFilter) bars[i + 1].stEntrySignal = "BUY";
       continue;
     }
-    // Condition B: already bullish, SMA50 upward crossover
     if (optStDirArr[i] === 1) {
       const smaUpCross = cur.close > cur.sma50 && prev.close <= prev.sma50;
       if (smaUpCross) bars[i + 1].stEntrySignal = "BUY";
@@ -164,20 +208,92 @@ export function runPipeline(
   // ── Score signals ─────────────────────────────────────────────
   generateSignals(bars, config, stockConfig.exchange);
 
-  // ── Dual Backtest ─────────────────────────────────────────────
-  const backtestResult = runBacktest(bars, stockConfig.symbol, config, stockConfig.exchange);
+  // Log current signal state
+  const lastBar = bars[bars.length - 1];
+  dbg(sym, `Signals: Raw=${lastBar.rawSignal}, Confirmed=${lastBar.signalConfirmed}, Entry=${lastBar.entrySignal}, ST_Entry=${lastBar.stEntrySignal}`);
+  dbg(sym, `Score: ${lastBar.score.toFixed(1)}, Confidence: ${lastBar.confidence}%, EMA20Slope: ${lastBar.ema20Slope.toFixed(6)}`);
 
-  // ST backtest: inject optimal params into bars temporarily
-  // We need bars with optimal ST values for the backtest loop.
-  // Create a patched copy with optimal supertrend/dir/signal values.
+  // ── Dual Backtest ─────────────────────────────────────────────
+  const backtestResult = runBacktest(bars, sym, config, stockConfig.exchange);
+  info(sym, `Score backtest: ${backtestResult.num_trades} trades, Return=${backtestResult.total_return.toFixed(1)}%, Sharpe=${backtestResult.sharpe.toFixed(2)}, Alpha=${backtestResult.alpha.toFixed(1)}%`);
+
   const barsForST: OHLCVBar[] = bars.map((b, i) => ({
     ...b,
     supertrend:       optStArr[i]    ?? NaN,
     supertrendDir:    optStDirArr[i] ?? 1,
     supertrendSignal: optStSigArr[i] ?? "HOLD",
-    // stEntrySignal already set on bars[] above (same loop, uses optStDirArr)
   }));
-  const stBacktestResult = runSupertrendBacktest(barsForST, stockConfig.symbol, config);
+  const stBacktestResult = runSupertrendBacktest(barsForST, sym, config);
+
+  const stTradesCount = stBacktestResult.trades.length;
+  console.log(`  SuperTrend trades count: ${stTradesCount}`);
+  if (stTradesCount > 0) {
+    const first = stBacktestResult.trades[0];
+    const last  = stBacktestResult.trades[stTradesCount - 1];
+    console.log(`  First ST trade: ${first.entry_date} -> ${first.exit_date}`);
+    console.log(`  Last ST trade:  ${last.entry_date} -> ${last.exit_date}`);
+    dbg(sym, `Last ST trade: entry=${last.entry_price.toFixed(2)}, exit=${last.exit_price.toFixed(2)}, reason=${last.exit_reason}, ret=${(last.return * 100).toFixed(1)}%`);
+
+    // Log ST value at exit date
+    const exitIdx = last.exit_idx;
+    if (exitIdx >= 0 && exitIdx < optStArr.length) {
+      const stAtExit  = optStArr[exitIdx];
+      const dirAtExit = optStDirArr[exitIdx];
+      dbg(sym, `At exit date (${last.exit_date}): ST=${isNaN(stAtExit) ? "NaN" : stAtExit.toFixed(2)}, Close=${rawBars[exitIdx]?.close.toFixed(2)}, Direction=${dirAtExit}.0`);
+    }
+  }
+  info(sym, `ST backtest: ${stTradesCount} trades, Return=${stBacktestResult.total_return.toFixed(1)}%, Sharpe=${stBacktestResult.sharpe.toFixed(2)}, Alpha=${stBacktestResult.alpha.toFixed(1)}%`);
+
+  // ── Open position detection ───────────────────────────────────
+  let stOpenReturnPct: number | null = null;
+  let hasOpenPosition = false;
+
+  // Determine ST current direction/value using OPTIMAL params
+  const lastOptDir2 = optStDirArr[optStDirArr.length - 1] ?? -1;
+  const lastOptST2  = optStArr[optStArr.length - 1] ?? 0;
+  const stDirection   = lastOptDir2;
+  const stValue       = !isNaN(lastOptST2) ? lastOptST2 : 0;
+  const stStopDistPct = stValue > 0 && currentPrice > 0
+    ? ((currentPrice - stValue) / currentPrice) * 100 : 0;
+
+  if (stDirection === 1) {
+    let openEntryPrice: number | null = null;
+    let trailingStop:   number | null = null;
+
+    for (let i = 1; i < bars.length; i++) {
+      const cur  = bars[i];
+
+      if (openEntryPrice === null) {
+        if (cur.stEntrySignal === "BUY") {
+          openEntryPrice = cur.open * (1 + config.backtest.slippageRate);
+          const prevOptST = optStArr[i - 1];
+          trailingStop = (!isNaN(prevOptST) && prevOptST > 0) ? prevOptST : null;
+        }
+      } else {
+        // Update trailing stop as ST line rises
+        const curOptST = optStArr[i];
+        if (!isNaN(curOptST) && (trailingStop === null || curOptST > trailingStop)) {
+          trailingStop = curOptST;
+        }
+        const stopHit    = trailingStop !== null && cur.low <= trailingStop;
+        const sellSignal = optStSigArr[i - 1] === "SELL";
+        if (stopHit || sellSignal) {
+          openEntryPrice = null;
+          trailingStop   = null;
+        }
+      }
+    }
+
+    hasOpenPosition = openEntryPrice !== null;
+    dbg(sym, `Backtest has_open_position: ${hasOpenPosition}`);
+
+    if (openEntryPrice !== null && openEntryPrice > 0) {
+      stOpenReturnPct = ((currentPrice - openEntryPrice) / openEntryPrice) * 100;
+      dbg(sym, `Open position: entry=${openEntryPrice.toFixed(2)}, current=${currentPrice.toFixed(2)}, P&L=${stOpenReturnPct.toFixed(2)}%, trailing_stop=${trailingStop?.toFixed(2) ?? "none"}`);
+    }
+  } else {
+    dbg(sym, `Backtest has_open_position: false (ST is BEARISH)`);
+  }
 
   // ── Monte Carlo ───────────────────────────────────────────────
   const mcResult   = config.monteCarlo.enabled && backtestResult.equity_curve.length   >= 30 ? runMonteCarlo(backtestResult.equity_curve,   config) : null;
@@ -186,7 +302,10 @@ export function runPipeline(
   // ── Walk-Forward + Kelly ──────────────────────────────────────
   let walkForward: WalkForwardResult | null = null;
   if (config.walkForward.enabled && bars.length >= 100) {
-    walkForward = runWalkForward(bars, stockConfig.symbol, config, stockConfig.exchange);
+    walkForward = runWalkForward(bars, sym, config, stockConfig.exchange);
+    if (walkForward) {
+      dbg(sym, `Walk-forward: train_sharpe=${walkForward.train_sharpe}, test_sharpe=${walkForward.test_sharpe}, quality=${walkForward.efficiency_quality}`);
+    }
   }
   let kelly: KellyResult | null = null;
   if (backtestResult.trades.length >= 5) kelly = calcKelly(backtestResult, config);
@@ -198,61 +317,24 @@ export function runPipeline(
     closeArr: closes, sma20Arr, sma50Arr, rsiArr,
   });
 
-  const lastBar = bars[bars.length - 1];
   const signal  = lastBar.signalConfirmed ?? "HOLD";
+  info(sym, `Final: Signal=${signal}, Score=${lastBar.score.toFixed(1)}, Regime=${regimeInfo.regime}, ST=${trendStr}, StopDist=${stStopDistPct.toFixed(1)}%`);
 
-const chartBars: ChartBar[] = bars.slice(-500).map((b, i) => {
-  const offset = bars.length - Math.min(500, bars.length);
-  const absIdx = offset + i;
-  return {
-    date: b.date, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
-    sma20: b.sma20, sma50: b.sma50, ema20: b.ema20, ema50: b.ema50,
-    bbUpper: b.bbUpper, bbLower: b.bbLower, signal: b.signalConfirmed, score: b.score,
-    rsi: b.rsi, macd: b.macd, macdSig: b.macdSignal, macdHist: b.macdHist,
-    adx: b.adx, pdi: b.plusDI, mdi: b.minusDI,
-    // Use OPTIMIZED ST params for chart overlay — matches st_direction/st_value
-    supertrend: optStArr[absIdx] ?? NaN,
-    supertrendDir: optStDirArr[absIdx] ?? -1,
-  };
-});
-
-  // ── ST status (uses optimal params for current direction/value) ─
-  const lastOptDir = optStDirArr[optStDirArr.length - 1] ?? -1;
-  const lastOptST  = optStArr[optStArr.length - 1] ?? 0;
-  const stDirection   = lastOptDir;
-  const stValue       = !isNaN(lastOptST) ? lastOptST : 0;
-  const stStopDistPct = stValue > 0 && currentPrice > 0 ? ((currentPrice - stValue) / currentPrice) * 100 : 0;
-
-  // ── ST open position detection (uses optimal params) ──────────
-  let stOpenReturnPct: number | null = null;
-  if (stDirection === 1) {
-    let openEntryPrice: number | null = null;
-    let trailingStop:   number | null = null;
-
-    for (let i = 1; i < bars.length; i++) {
-      const cur  = bars[i];
-      const prev = bars[i - 1];
-
-      if (openEntryPrice === null) {
-        if (cur.stEntrySignal === "BUY") {
-          openEntryPrice = cur.open * (1 + config.backtest.slippageRate);
-          const prevOptST = optStArr[i - 1];
-          trailingStop = (!isNaN(prevOptST) && prevOptST > 0) ? prevOptST : null;
-        }
-      } else {
-        const curOptST = optStArr[i];
-        if (!isNaN(curOptST) && (trailingStop === null || curOptST > trailingStop)) {
-          trailingStop = curOptST;
-        }
-        const stopHit    = trailingStop !== null && cur.low <= trailingStop;
-        const sellSignal = optStSigArr[i - 1] === "SELL";
-        if (stopHit || sellSignal) { openEntryPrice = null; trailingStop = null; }
-      }
-    }
-    if (openEntryPrice !== null && openEntryPrice > 0) {
-      stOpenReturnPct = ((currentPrice - openEntryPrice) / openEntryPrice) * 100;
-    }
-  }
+  // ── chartBars: use OPTIMIZED ST params ─────────────────────────
+  const chartBars: ChartBar[] = bars.slice(-500).map((b, i) => {
+    const offset = bars.length - Math.min(500, bars.length);
+    const absIdx = offset + i;
+    return {
+      date: b.date, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
+      sma20: b.sma20, sma50: b.sma50, ema20: b.ema20, ema50: b.ema50,
+      bbUpper: b.bbUpper, bbLower: b.bbLower, signal: b.signalConfirmed, score: b.score,
+      rsi: b.rsi, macd: b.macd, macdSig: b.macdSignal, macdHist: b.macdHist,
+      adx: b.adx, pdi: b.plusDI, mdi: b.minusDI,
+      // Optimized ST params — consistent with st_direction/st_value badges
+      supertrend: optStArr[absIdx] ?? NaN,
+      supertrendDir: optStDirArr[absIdx] ?? -1,
+    };
+  });
 
   // ── Strategy comparison ───────────────────────────────────────
   function toMetrics(bt: typeof backtestResult) {
@@ -270,8 +352,11 @@ const chartBars: ChartBar[] = bars.slice(-500).map((b, i) => {
   const winner: "score" | "supertrend" | "tie" =
     Math.abs(scoreAlpha - stAlpha) < 0.5 ? "tie" : scoreAlpha > stAlpha ? "score" : "supertrend";
 
+  dbg(sym, `Winner: ${winner} (Score α=${scoreAlpha.toFixed(1)}% vs ST α=${stAlpha.toFixed(1)}%)`);
+  console.log(`  ✓ Done: ${sym}\n`);
+
   return {
-    symbol: stockConfig.symbol, name: stockConfig.name, exchange: stockConfig.exchange,
+    symbol: sym, name: stockConfig.name, exchange: stockConfig.exchange,
     signal, score: lastBar.score, confidence: lastBar.confidence,
     regime: regimeInfo.regime, regime_info: regimeInfo,
     current_price: currentPrice, change_pct: changePct,
@@ -279,7 +364,6 @@ const chartBars: ChartBar[] = bars.slice(-500).map((b, i) => {
     walk_forward: walkForward, kelly, chart_bars: chartBars,
     st_direction: stDirection, st_value: stValue,
     st_stop_distance_pct: stStopDistPct, st_open_return_pct: stOpenReturnPct,
-    // Expose optimal params so UI can display them
     st_opt_params: { atrPeriod: optResult.atrPeriod, multiplier: optResult.multiplier, sharpe: optResult.sharpe, numTrades: optResult.numTrades },
     comparison: {
       score: toMetrics(backtestResult), supertrend: toMetrics(stBacktestResult),
