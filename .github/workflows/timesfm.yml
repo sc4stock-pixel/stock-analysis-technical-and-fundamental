@@ -23,7 +23,8 @@ jobs:
       - name: Install dependencies
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install timesfm yfinance
+          pip install git+https://github.com/google-research/timesfm.git
+          pip install yfinance
 
       - name: Run predictor
         run: python scripts/timesfm_predict.py
