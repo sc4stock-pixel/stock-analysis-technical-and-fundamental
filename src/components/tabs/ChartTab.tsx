@@ -6,7 +6,6 @@ import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, Area,
 } from "recharts";
-import { supertrend } from "@/lib/indicators";
 
 interface Props {
   result: StockAnalysisResult;
