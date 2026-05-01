@@ -8,6 +8,8 @@ import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
 import StockCard from "@/components/StockCard";
 import dynamic from "next/dynamic";
 import AlertsPanel from "@/components/AlertsPanel";
+import { fetchTimesfmForecasts } from "@/lib/timesfm";
+import type { TimesfmForecasts } from "@/types";
 
 const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
 const MacroPanelHK = dynamic(() => import("@/components/MacroPanelHK"), { ssr: false });
@@ -51,6 +53,9 @@ export default function Dashboard() {
   // HK macro state
   const [hkMacroData, setHKMacroData]       = useState<HKMacroData | null>(null);
   const [hkMacroLoading, setHKMacroLoading] = useState(false);
+  // TimesFM
+  const [timesfmData, setTimesfmData] = useState<TimesfmForecasts | null>(null);
+  const [timesfmLoading, setTimesfmLoading] = useState(false);
 
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -84,7 +89,6 @@ export default function Dashboard() {
   // ── Fetch HK macro ────────────────────────────────────────
   const fetchHKMacro = useCallback(async (): Promise<HKMacroData | null> => {
     if (!config.macro?.enabled) return null;
-    // Only fetch HK macro if portfolio has HK stocks
     const hasHK = config.stocks.PORTFOLIO.some(s => s.exchange === "HK");
     if (!hasHK) return null;
     setHKMacroLoading(true);
@@ -126,6 +130,19 @@ export default function Dashboard() {
       ));
     }
   }, [fetchHKMacro, results.length, config.macro, macroData]);
+
+  // ── Fetch TimesFM forecasts ──────────────────────────────
+  const fetchTimesfm = useCallback(async () => {
+    setTimesfmLoading(true);
+    try {
+      const data = await fetchTimesfmForecasts();
+      setTimesfmData(data);
+    } catch {
+      setTimesfmData(null);
+    } finally {
+      setTimesfmLoading(false);
+    }
+  }, []);
 
   // ── Main analysis run ─────────────────────────────────────
   const runAnalysis = useCallback(async () => {
@@ -173,10 +190,13 @@ export default function Dashboard() {
       setResults(adjusted);
     }
 
+    // Fetch TimesFM after analysis, independent of macro state
+    fetchTimesfm();
+
     setLastUpdated(new Date().toLocaleTimeString());
     setProgressSymbol("");
     setLoading(false);
-  }, [config, fetchUSMacro, fetchHKMacro]);
+  }, [config, fetchUSMacro, fetchHKMacro, fetchTimesfm]);
 
   // ── Scroll to card ────────────────────────────────────────
   const scrollToCard = useCallback((symbol: string) => {
@@ -271,7 +291,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── ALERTS PANEL (NEW) ── */}
+      {/* ── ALERTS PANEL ── */}
       {results.length > 0 && <AlertsPanel results={results} />}
 
       {/* ── STOCK CARDS ── */}
@@ -306,7 +326,11 @@ export default function Dashboard() {
                       ? "ring-2 ring-[#00d4ff] ring-offset-2 ring-offset-[#0a0e1a] shadow-[0_0_20px_rgba(0,212,255,0.25)]"
                       : ""
                   }`}>
-                  <StockCard result={result} config={config} />
+                 <StockCard
+                    result={result}
+                    config={config}
+                    timesfm={timesfmData?.[result.symbol]?.price_targets}
+                  />
                 </div>
               );
             })}
