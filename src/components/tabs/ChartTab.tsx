@@ -45,7 +45,7 @@ const ExitMarker = (props: { cx?: number; cy?: number; value?: number }) => {
   );
 };
 
-// Single unified interface for all chart data points (actual + forecast)
+// Unified data point for actual bars and forecast bars
 interface ChartDataPoint {
   date: string;
   dateShort: string;
@@ -124,17 +124,14 @@ export default function ChartTab({ result, config, timesfm }: Props) {
   const barsToShow = Math.min(RANGE_BARS[range], chartBars.length);
   const sliced: ChartBar[] = chartBars.slice(-barsToShow);
 
-  // Optimized SuperTrend parameters
   const optAtr = result.st_opt_params?.atrPeriod ?? 10;
   const optMul = result.st_opt_params?.multiplier ?? 3.0;
 
-  // Compute ST on full chart history
   const allHighs  = chartBars.map(b => b.high);
   const allLows   = chartBars.map(b => b.low);
   const allCloses = chartBars.map(b => b.close);
   const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
 
-  // Slice to current view window
   const offset = chartBars.length - barsToShow;
   const optStLine = fullStLine.slice(offset);
   const optStDir  = fullStDir.slice(offset);
@@ -146,7 +143,6 @@ export default function ChartTab({ result, config, timesfm }: Props) {
     if (t.exit_date)  exitMap[t.exit_date] = t.exit_price;
   }
 
-  // Build initial chart data from actual bars
   let chartData: ChartDataPoint[] = sliced.map((b, i) => ({
     date: b.date, dateShort: b.date.slice(5),
     Close: b.close,
