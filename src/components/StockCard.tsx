@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult } from "@/types";
+import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, TimesfmPriceTargets } from "@/types";
 import { regimeColor } from "@/lib/regime";
 import OverviewTab    from "./tabs/OverviewTab";
 import BacktestTab   from "./tabs/BacktestTab";
@@ -11,6 +11,7 @@ import ChartTab      from "./tabs/ChartTab";
 interface Props {
   result: StockAnalysisResult;
   config: AppConfig;
+  timesfm?: TimesfmPriceTargets;
 }
 
 type Strategy = "score" | "supertrend";
@@ -36,12 +37,8 @@ function patternBadge(p: CandlestickPattern) {
   );
 }
 
-/**
- * Build a "SuperTrend view" of the result by splicing the ST backtest metrics
- * into the result object so all existing tabs render ST data transparently.
- * Only backtest metrics change — price, regime, chart_bars, etc. stay the same.
- */
 function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
+  // ... (unchanged – same as original)
   const cmp = result.comparison;
   if (!cmp) return result;
 
@@ -49,19 +46,14 @@ function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
   const scoreBt = result.backtest;
   if (!scoreBt) return result;
 
-  // Reconstruct a simplified ST equity curve from trade PnLs
-  // Start at same initialCapital, step through trades in order
   const initialCapital = scoreBt.equity_curve[0] ?? 10000;
   const stEquityCurve: number[] = [initialCapital];
   const stEquityDates: string[] = [scoreBt.equity_dates[0] ?? ""];
   let runningEq = initialCapital;
-  // Sort trades by entry index
   const sortedTrades = [...stMetrics.trades].sort((a, b) => a.entry_idx - b.entry_idx);
   for (const t of sortedTrades) {
-    // Flat equity during pre-entry period
     const barsBefore = Math.max(0, t.entry_idx - stEquityCurve.length + 1);
     for (let b = 0; b < barsBefore; b++) stEquityCurve.push(runningEq);
-    // Approximate linear equity during trade
     const pnl = t.pnl;
     const barsHeld = Math.max(1, t.bars_held);
     for (let b = 0; b < barsHeld; b++) {
@@ -69,7 +61,6 @@ function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
     }
     runningEq += pnl;
   }
-  // Pad to match score equity length with final equity
   while (stEquityCurve.length < scoreBt.equity_curve.length) {
     stEquityCurve.push(runningEq);
   }
@@ -126,7 +117,7 @@ function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
   return { ...result, backtest: stBt };
 }
 
-export default function StockCard({ result, config }: Props) {
+export default function StockCard({ result, config, timesfm }: Props) {
   const [tab, setTab] = useState<Tab>("OVERVIEW");
   const [strategy, setStrategy] = useState<Strategy>("score");
 
@@ -134,7 +125,6 @@ export default function StockCard({ result, config }: Props) {
   const isError = result.signal === "ERROR";
   const hasST = !!result.comparison;
 
-  // Build the result view for the active strategy
   const activeResult = strategy === "supertrend" && hasST
     ? buildSTView(result)
     : result;
@@ -152,14 +142,12 @@ export default function StockCard({ result, config }: Props) {
       {/* ── CARD HEADER ── */}
       <div className="p-3 border-b border-[#1e2d4a] flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          {/* Symbol row */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[#00d4ff] font-bold text-sm">{result.symbol}</span>
             <span className="text-[#4a6080] text-xs">{result.name}</span>
             <span className={`text-xs px-1.5 py-0.5 rounded border ${signalBadge(result.signal)}`}>
               {result.signal}
             </span>
-            {/* ST direction badge inline */}
             <span className={`text-xs px-1 py-0.5 rounded border font-mono ${
               stDir === 1
                 ? "border-[#00ff88]/30 text-[#00ff88] bg-[#00ff88]/5"
@@ -168,7 +156,6 @@ export default function StockCard({ result, config }: Props) {
               {stDir === 1 ? "🟢 ST" : "🔴 ST"}
             </span>
           </div>
-          {/* Price row */}
           <div className="flex items-center gap-3 mt-1 flex-wrap">
             <span className="text-[#c8d8f0] text-sm font-bold">{priceFmt(result.current_price)}</span>
             <span className={`text-xs font-mono ${chg >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
@@ -182,7 +169,6 @@ export default function StockCard({ result, config }: Props) {
             </span>
             <span className="text-[#4a6080] text-xs">{result.confidence?.toFixed(0)}% conf</span>
           </div>
-          {/* Regime + patterns */}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <span className={`text-xs px-1.5 py-0.5 rounded border ${regimeColor(result.regime ?? "")}`}>
               {(result.regime ?? "UNKNOWN").replace(/_/g, " ")}
@@ -191,7 +177,6 @@ export default function StockCard({ result, config }: Props) {
           </div>
         </div>
 
-        {/* Score ring */}
         <div className="shrink-0">
           <div className="w-10 h-10 rounded-full border-2 flex items-center justify-center"
             style={{
@@ -212,7 +197,6 @@ export default function StockCard({ result, config }: Props) {
 
       {/* ── STRATEGY TOGGLE + TABS ── */}
       <div className="flex items-center border-b border-[#1e2d4a] overflow-x-auto">
-        {/* Strategy toggle — compact pill left of tabs */}
         {hasST && (
           <div className="flex shrink-0 border-r border-[#1e2d4a] mr-1">
             <button
@@ -240,7 +224,6 @@ export default function StockCard({ result, config }: Props) {
           </div>
         )}
 
-        {/* Tabs */}
         {TABS.map((t) => (
           <button
             key={t}
@@ -280,7 +263,7 @@ export default function StockCard({ result, config }: Props) {
           <div className="p-4 text-[#ff4757] text-xs">{result.error ?? "Error fetching data"}</div>
         ) : (
           <>
-            {tab === "CHART"       && <ChartTab       result={result} />}
+            {tab === "CHART"       && <ChartTab       result={result} config={config} timesfm={timesfm} />}
             {tab === "OVERVIEW"    && <OverviewTab    result={activeResult} />}
             {tab === "BACKTEST"    && <BacktestTab    result={activeResult} />}
             {tab === "MONTE CARLO" && <MonteCarloTab  result={
@@ -292,7 +275,37 @@ export default function StockCard({ result, config }: Props) {
           </>
         )}
       </div>
+
+      {/* ── TIMESFM AI PRICE TARGETS ── */}
+      {timesfm && (
+        <div className="mx-3 mb-3 border border-[#a78bfa]/40 rounded p-3 text-xs">
+          <div className="text-[#a78bfa] font-bold mb-2">🔮 TIMESFM PREDICTIONS</div>
+          <div className="grid grid-cols-3 gap-2 mb-2">
+            <div className="text-center bg-[#0f1629] rounded p-2">
+              <div className="text-[#4a6080]">T1 (5d)</div>
+              <div className="text-white font-bold">{timesfm.t1.toFixed(2)}</div>
+              <div className={timesfm.t1 >= result.current_price ? "text-green-400" : "text-red-400"}>
+                {((timesfm.t1 / result.current_price - 1) * 100).toFixed(1)}%
+              </div>
+            </div>
+            <div className="text-center bg-[#0f1629] rounded p-2">
+              <div className="text-[#4a6080]">T2 (10d)</div>
+              <div className="text-white font-bold">{timesfm.t2.toFixed(2)}</div>
+              <div className={timesfm.t2 >= result.current_price ? "text-green-400" : "text-red-400"}>
+                {((timesfm.t2 / result.current_price - 1) * 100).toFixed(1)}%
+              </div>
+            </div>
+            <div className="text-center bg-[#0f1629] rounded p-2">
+              <div className="text-[#4a6080]">T3 (20d)</div>
+              <div className="text-white font-bold">{timesfm.t3.toFixed(2)}</div>
+              <div className={timesfm.t3 >= result.current_price ? "text-green-400" : "text-red-400"}>
+                {((timesfm.t3 / result.current_price - 1) * 100).toFixed(1)}%
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
-
