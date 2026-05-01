@@ -151,6 +151,13 @@ export default function Dashboard() {
     }
   }, []);
 
+  // ── Fetch TimesFM forecasts on mount if results exist ──────
+  useEffect(() => {
+    if (results.length > 0 && !timesfmData) {
+      fetchTimesfm();
+    }
+  }, [results, timesfmData, fetchTimesfm]);
+
   // ── Main analysis run ─────────────────────────────────────
   const runAnalysis = useCallback(async () => {
     setLoading(true);
