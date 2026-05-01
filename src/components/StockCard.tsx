@@ -1,331 +1,434 @@
 "use client";
+import { StockAnalysisResult, ChartBar, TimesfmPriceTargets } from "@/types";
 import { useState } from "react";
-import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult } from "@/types";
-import { regimeColor } from "@/lib/regime";
-import OverviewTab    from "./tabs/OverviewTab";
-import BacktestTab   from "./tabs/BacktestTab";
-import MonteCarloTab from "./tabs/MonteCarloTab";
-import TradingPlanTab from "./tabs/TradingPlanTab";
-import ChartTab      from "./tabs/ChartTab";
-import FundamentalReport from "@/components/FundamentalReport"; // <-- added
-import { TimesfmPriceTargets } from "@/types";
+import {
+  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, ReferenceLine, Area,
+} from "recharts";
+import { supertrend } from "@/lib/indicators";
 
 interface Props {
   result: StockAnalysisResult;
   config: AppConfig;
+  timesfm?: TimesfmPriceTargets;
 }
 
-type Strategy = "score" | "supertrend";
-const TABS = ["OVERVIEW", "CHART", "BACKTEST", "MONTE CARLO", "PLAN", "FUNDAMENTAL"] as const;
-type Tab = (typeof TABS)[number];
+type Range = "1M" | "3M" | "6M" | "1Y" | "2Y";
+const RANGE_BARS: Record<Range, number> = { "1M": 21, "3M": 63, "6M": 126, "1Y": 252, "2Y": 500 };
 
-function signalBadge(signal: string) {
-  if (signal === "BUY")  return "badge-buy";
-  if (signal === "SELL") return "badge-sell";
-  return "badge-hold";
+function fmtDate(iso: string | undefined): string {
+  if (!iso) return "—";
+  const parts = iso.split("T")[0].split("-");
+  if (parts.length < 3) return iso;
+  const [y, m, d] = parts;
+  return `${m}/${d}/${y.slice(2)}`;
 }
 
-function patternBadge(p: CandlestickPattern) {
-  const color =
-    p.sentiment === "bullish" ? "text-[#00ff88] border-[#00ff88]/30" :
-    p.sentiment === "bearish" ? "text-[#ff4757] border-[#ff4757]/30" :
-    "text-[#ffa502] border-[#ffa502]/30";
+const EntryMarker = (props: { cx?: number; cy?: number; value?: number }) => {
+  if (!props.value || !props.cx || !props.cy) return null;
+  const { cx, cy } = props;
   return (
-    <span key={p.pattern + p.bar_index}
-      className={`text-xs border rounded px-1.5 py-0.5 bg-black/30 ${color}`}>
-      {p.pattern}{p.label !== "Latest" ? ` [${p.label}]` : ""}
-    </span>
+    <g>
+      <polygon points={`${cx},${cy - 9} ${cx - 6},${cy + 3} ${cx + 6},${cy + 3}`} fill="#00ff88" stroke="#00ff88" strokeWidth={1} opacity={0.95} />
+      <line x1={cx} y1={cy + 3} x2={cx} y2={cy + 14} stroke="#00ff88" strokeWidth={1} strokeDasharray="2 2" opacity={0.6} />
+    </g>
   );
-}
+};
+const ExitMarker = (props: { cx?: number; cy?: number; value?: number }) => {
+  if (!props.value || !props.cx || !props.cy) return null;
+  const { cx, cy } = props;
+  return (
+    <g>
+      <polygon points={`${cx},${cy + 9} ${cx - 6},${cy - 3} ${cx + 6},${cy - 3}`} fill="#ff4757" stroke="#ff4757" strokeWidth={1} opacity={0.95} />
+      <line x1={cx} y1={cy - 3} x2={cx} y2={cy - 14} stroke="#ff4757" strokeWidth={1} strokeDasharray="2 2" opacity={0.6} />
+    </g>
+  );
+};
 
-/**
- * Build a "SuperTrend view" of the result by splicing the ST backtest metrics
- * into the result object so all existing tabs render ST data transparently.
- * Only backtest metrics change — price, regime, chart_bars, etc. stay the same.
- */
-function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
-  const cmp = result.comparison;
-  if (!cmp) return result;
+interface TTP { name: string; value: number; color: string; }
+const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: TTP[]; label?: string }) => {
+  if (!active || !payload?.length) return null;
+  const p = (name: string) => payload.find(x => x.name === name)?.value;
+  const close = p("Close"); const sma20 = p("SMA20"); const sma50 = p("SMA50");
+  const ema20 = p("EMA20"); const ema50 = p("EMA50");
+  const stBull = p("ST_Bull"); const stBear = p("ST_Bear");
+  const vol = p("Volume"); const rsi = p("RSI"); const macdH = p("MACD H");
+  const entry = p("Entry"); const exit = p("Exit");
+  const p50 = p("P50"); const p10 = p("P10"); const p90 = p("P90");
+  return (
+    <div className="bg-[#0f1629] border border-[#1e2d4a] rounded px-2.5 py-2 text-xs font-mono shadow-xl max-w-[250px]">
+      <div className="text-[#6b85a0] mb-1.5 border-b border-[#1e2d4a] pb-1">{label}</div>
+      {close  != null && <div className="text-[#c8d8f0]">Close: <span className="text-[#00d4ff] font-bold">{close.toFixed(2)}</span></div>}
+      {sma20  != null && <div className="text-[#00ff88]">SMA20: {sma20.toFixed(2)}</div>}
+      {sma50  != null && <div className="text-[#ff7f50]">SMA50: {sma50.toFixed(2)}</div>}
+      {ema20  != null && <div className="text-[#a78bfa]">EMA20: {ema20.toFixed(2)}</div>}
+      {ema50  != null && <div className="text-[#f59e0b]">EMA50: {ema50.toFixed(2)}</div>}
+      {stBull != null && <div className="text-[#00ff88]">ST 🟢: {stBull.toFixed(2)}</div>}
+      {stBear != null && <div className="text-[#ff4757]">ST 🔴: {stBear.toFixed(2)}</div>}
+      {rsi    != null && <div className="text-[#a78bfa]">RSI: {rsi.toFixed(1)}</div>}
+      {macdH  != null && <div className={macdH >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>MACD H: {macdH.toFixed(3)}</div>}
+      {vol    != null && <div className="text-[#4a6080]">Vol: {(vol / 1_000_000).toFixed(1)}M</div>}
+      {p50    != null && <div className="text-[#a78bfa]">P50 Fcst: {p50.toFixed(2)}</div>}
+      {p10    != null && <div className="text-[#4a6080]">P10 band: {p10.toFixed(2)}</div>}
+      {p90    != null && <div className="text-[#4a6080]">P90 band: {p90.toFixed(2)}</div>}
+      {entry  != null && <div className="text-[#00ff88] font-bold mt-1">▲ ENTRY @ {entry.toFixed(2)}</div>}
+      {exit   != null && <div className="text-[#ff4757] font-bold mt-1">▼ EXIT @ {exit.toFixed(2)}</div>}
+    </div>
+  );
+};
 
-  const stMetrics = cmp.supertrend;
-  const scoreBt = result.backtest;
-  if (!scoreBt) return result;
+export default function ChartTab({ result, config, timesfm }: Props) {
+  const [range, setRange]           = useState<Range>("1Y");
+  const [showSMA, setShowSMA]       = useState(true);
+  const [showEMA20, setShowEMA20]   = useState(false);
+  const [showEMA50, setShowEMA50]   = useState(false);
+  const [showBB, setShowBB]         = useState(true);
+  const [showST, setShowST]         = useState(true);
+  const [showVol, setShowVol]       = useState(true);
+  const [showRSI, setShowRSI]       = useState(false);
+  const [showMACD, setShowMACD]     = useState(false);
+  const [showTrades, setShowTrades] = useState(true);
 
-  // Reconstruct a simplified ST equity curve from trade PnLs
-  // Start at same initialCapital, step through trades in order
-  const initialCapital = scoreBt.equity_curve[0] ?? 10000;
-  const stEquityCurve: number[] = [initialCapital];
-  const stEquityDates: string[] = [scoreBt.equity_dates[0] ?? ""];
-  let runningEq = initialCapital;
-  // Sort trades by entry index
-  const sortedTrades = [...stMetrics.trades].sort((a, b) => a.entry_idx - b.entry_idx);
-  for (const t of sortedTrades) {
-    // Flat equity during pre-entry period
-    const barsBefore = Math.max(0, t.entry_idx - stEquityCurve.length + 1);
-    for (let b = 0; b < barsBefore; b++) stEquityCurve.push(runningEq);
-    // Approximate linear equity during trade
-    const pnl = t.pnl;
-    const barsHeld = Math.max(1, t.bars_held);
-    for (let b = 0; b < barsHeld; b++) {
-      stEquityCurve.push(runningEq + (pnl * (b + 1)) / barsHeld);
-    }
-    runningEq += pnl;
+  const chartBars = result.chart_bars;
+  const bt        = result.backtest;
+  const optParams = result.st_opt_params;
+  const optLabel  = optParams ? `ATR${optParams.atrPeriod} × ${optParams.multiplier}` : null;
+
+  if (!chartBars || chartBars.length === 0) {
+    return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable.</div>;
   }
-  // Pad to match score equity length with final equity
-  while (stEquityCurve.length < scoreBt.equity_curve.length) {
-    stEquityCurve.push(runningEq);
+
+  const barsToShow = Math.min(RANGE_BARS[range], chartBars.length);
+  const sliced: ChartBar[] = chartBars.slice(-barsToShow);
+
+  // Optimized SuperTrend parameters (same as stock card badge)
+  const optAtr = result.st_opt_params?.atrPeriod ?? 10;
+  const optMul = result.st_opt_params?.multiplier ?? 3.0;
+
+  // Compute ST on full chart history (needed for correct band seeding)
+  const allHighs  = chartBars.map(b => b.high);
+  const allLows   = chartBars.map(b => b.low);
+  const allCloses = chartBars.map(b => b.close);
+  const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
+
+  // Slice to current view window
+  const offset = chartBars.length - barsToShow;
+  const optStLine = fullStLine.slice(offset);
+  const optStDir  = fullStDir.slice(offset);
+
+  const entryMap: Record<string, number> = {};
+  const exitMap:  Record<string, number> = {};
+  for (const t of bt?.trades ?? []) {
+    if (t.entry_date) entryMap[t.entry_date] = t.entry_price;
+    if (t.exit_date)  exitMap[t.exit_date] = t.exit_price;
   }
 
-  const winners = stMetrics.trades.filter(t => t.return > 0);
-  const losers  = stMetrics.trades.filter(t => t.return <= 0);
-  const fn = (arr: typeof stMetrics.trades, key: keyof typeof stMetrics.trades[0]) =>
-    arr.length > 0 ? arr.reduce((a, t) => a + (t[key] as number), 0) / arr.length : 0;
+  let chartData = sliced.map((b, i) => ({
+    date: b.date, dateShort: b.date.slice(5),
+    Close: b.close,
+    SMA20: isNaN(b.sma20) ? null : b.sma20, SMA50: isNaN(b.sma50) ? null : b.sma50,
+    EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
+    EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
+    BBU: isNaN(b.bbUpper) ? null : b.bbUpper, BBL: isNaN(b.bbLower) ? null : b.bbLower,
+    ST_Bull: optStDir[i] === 1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
+    ST_Bear: optStDir[i] === -1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
+    Volume: b.volume, RSI: b.rsi, "MACD H": b.macdHist,
+    Entry: entryMap[b.date] ?? null, Exit: exitMap[b.date] ?? null,
+  }));
 
-  const stBt: BacktestResult = {
-    ...scoreBt,
-    trades: stMetrics.trades,
-    num_trades: stMetrics.num_trades,
-    win_rate: stMetrics.win_rate,
-    total_return: stMetrics.total_return,
-    profit_factor: stMetrics.profit_factor,
-    max_drawdown: stMetrics.max_drawdown,
-    sharpe: stMetrics.sharpe,
-    sortino: stMetrics.sortino ?? 0,
-    expectancy: stMetrics.expectancy ?? 0,
-    avg_win: stMetrics.avg_win ?? 0,
-    avg_loss: stMetrics.avg_loss ?? 0,
-    alpha: stMetrics.alpha,
-    alpha_status: stMetrics.alpha >= 0 ? "ADDING VALUE" : "DESTROYING VALUE",
-    exit_reasons: stMetrics.trades.reduce((acc, t) => {
-      acc[t.exit_reason] = (acc[t.exit_reason] ?? 0) + 1; return acc;
-    }, {} as Record<string, number>),
-    stop_loss_price: result.st_value > 0 ? result.st_value : scoreBt.stop_loss_price,
-    r_multiples: stMetrics.trades.map(t => t.r_multiple),
-    equity_curve: stEquityCurve,
-    equity_dates: stEquityDates,
-    total_return_250d: stMetrics.total_return_250d ?? stMetrics.total_return,
-    total_return_500d: stMetrics.total_return_500d ?? stMetrics.total_return,
-    avg_mae: fn(stMetrics.trades, "mae_pct"),
-    avg_mfe: fn(stMetrics.trades, "mfe_pct"),
-    winner_mae: fn(winners, "mae_pct"),
-    winner_mfe: fn(winners, "mfe_pct"),
-    loser_mae:  fn(losers,  "mae_pct"),
-    avg_duration: fn(stMetrics.trades, "bars_held"),
-    median_duration: 0,
-    min_duration: stMetrics.trades.length > 0 ? Math.min(...stMetrics.trades.map(t => t.bars_held)) : 0,
-    max_duration: stMetrics.trades.length > 0 ? Math.max(...stMetrics.trades.map(t => t.bars_held)) : 0,
-    avg_winner_duration: fn(winners, "bars_held"),
-    avg_loser_duration:  fn(losers,  "bars_held"),
-    median_winner_duration: 0,
-    median_loser_duration: 0,
-    kill_switch_triggered: false,
-    calmar_ratio: 0,
-    ulcer_index: 0,
-    omega_ratio: 0,
-    signal_bars: 0,
-  };
+  // ─── TIMESFM FORECAST OVERLAY ──────────────────────────────────
+  if (timesfm) {
+    const p10 = timesfm.p10, p50 = timesfm.p50, p90 = timesfm.p90;
+    const forecastBars = p50.map((v, i) => ({
+      date: `F+${i + 1}`,
+      dateShort: `+${i + 1}`,
+      Close: null as number | null,
+      P50: v,
+      P10: p10[i],
+      P90: p90[i],
+    }));
+    chartData = [...chartData, ...forecastBars];
+  }
 
-  return { ...result, backtest: stBt };
-}
+  const prices = chartData
+    .filter(d => d.Close != null)
+    .map(d => d.Close as number);
 
-export default function StockCard({ result, config }: Props) {
-  const [tab, setTab] = useState<Tab>("OVERVIEW");
-  const [strategy, setStrategy] = useState<Strategy>("score");
+  const extras = [
+    ...(showBB    ? chartData.flatMap(d => [d.BBU, d.BBL]).filter(Boolean) as number[] : []),
+    ...(showST    ? chartData.map(d => d.ST_Bull ?? d.ST_Bear).filter(Boolean) as number[] : []),
+    ...(showEMA20 ? chartData.map(d => d.EMA20).filter(Boolean) as number[] : []),
+    ...(showEMA50 ? chartData.map(d => d.EMA50).filter(Boolean) as number[] : []),
+  ];
+  const allY = [...prices, ...extras];
+  const yPad = (Math.max(...allY) - Math.min(...allY)) * 0.05 || 1;
+  const yMin = Math.min(...allY) - yPad;
+  const yMax = Math.max(...allY) + yPad;
 
-  const bt = result.backtest;
-  const isError = result.signal === "ERROR";
-  const hasST = !!result.comparison;
+  const tickCount  = Math.min(8, chartData.length);
+  const tickStep   = Math.max(1, Math.floor(chartData.length / tickCount));
+  const sparseTicks = chartData
+    .filter((_, i) => i === 0 || i === chartData.length - 1 || i % tickStep === 0)
+    .map(d => d.dateShort);
 
-  // Build the result view for the active strategy
-  const activeResult = strategy === "supertrend" && hasST
-    ? buildSTView(result)
-    : result;
+  const datesInView    = new Set(sliced.map(b => b.date));
+  const allScoreTrades = bt?.trades ?? [];
+  const allStTrades    = result.comparison?.supertrend?.trades ?? [];
+  const tradesInView   = allScoreTrades.filter(t => datesInView.has(t.entry_date) || datesInView.has(t.exit_date));
+  const stTradesInView = allStTrades.filter(t => datesInView.has(t.entry_date) || datesInView.has(t.exit_date));
 
-  const priceFmt = (p: number) => {
-    if (!p || p === 0) return "—";
-    return result.exchange === "HK" ? `HK$${p.toFixed(2)}` : `$${p.toFixed(2)}`;
-  };
+  const subCount = (showVol ? 1 : 0) + (showRSI ? 1 : 0) + (showMACD ? 1 : 0);
+  const priceH   = subCount === 0 ? 280 : subCount === 1 ? 230 : 190;
+  const subH     = 70;
 
-  const chg = result.change_pct ?? 0;
-  const stDir = result.st_direction ?? -1;
+  const Tog = ({ label, active, onClick, activeClass }: { label: string; active: boolean; onClick: () => void; activeClass: string }) => (
+    <button onClick={onClick} className={`px-2 py-0.5 text-xs rounded border transition-all ${active ? activeClass : "border-[#1e2d4a] text-[#4a6080] hover:border-[#4a6080]"}`}>{label}</button>
+  );
+  const RangeBtn = ({ r }: { r: Range }) => (
+    <button onClick={() => setRange(r)} className={`px-2 py-0.5 text-xs rounded border transition-all ${range === r ? "bg-[#00d4ff]/15 border-[#00d4ff] text-[#00d4ff]" : "border-[#1e2d4a] text-[#4a6080] hover:border-[#00d4ff]/40"}`}>{r}</button>
+  );
 
   return (
-    <div className="card flex flex-col">
-      {/* ── CARD HEADER ── */}
-      <div className="p-3 border-b border-[#1e2d4a] flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          {/* Symbol row */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[#00d4ff] font-bold text-sm">{result.symbol}</span>
-            <span className="text-[#4a6080] text-xs">{result.name}</span>
-            <span className={`text-xs px-1.5 py-0.5 rounded border ${signalBadge(result.signal)}`}>
-              {result.signal}
-            </span>
-            {/* ST direction badge inline */}
-            <span className={`text-xs px-1 py-0.5 rounded border font-mono ${
-              stDir === 1
-                ? "border-[#00ff88]/30 text-[#00ff88] bg-[#00ff88]/5"
-                : "border-[#ff4757]/30 text-[#ff4757] bg-[#ff4757]/5"
-            }`}>
-              {stDir === 1 ? "🟢 ST" : "🔴 ST"}
-            </span>
-          </div>
-          {/* Price row */}
-          <div className="flex items-center gap-3 mt-1 flex-wrap">
-            <span className="text-[#c8d8f0] text-sm font-bold">{priceFmt(result.current_price)}</span>
-            <span className={`text-xs font-mono ${chg >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-              {chg >= 0 ? "▲" : "▼"}{Math.abs(chg).toFixed(2)}%
-            </span>
-            <span className={`text-xs font-bold ${
-              (result.score ?? 0) >= 6.5 ? "text-[#00ff88]" :
-              (result.score ?? 0) >= 5.5 ? "text-[#ffa502]" : "text-[#ff4757]"
-            }`}>
-              {result.score?.toFixed(1)} / 10
-            </span>
-            <span className="text-[#4a6080] text-xs">{result.confidence?.toFixed(0)}% conf</span>
-          </div>
-          {/* Regime + patterns */}
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <span className={`text-xs px-1.5 py-0.5 rounded border ${regimeColor(result.regime ?? "")}`}>
-              {(result.regime ?? "UNKNOWN").replace(/_/g, " ")}
-            </span>
-            {bt?.candlestick_patterns?.map((p) => patternBadge(p))}
-          </div>
-        </div>
-
-        {/* Score ring */}
-        <div className="shrink-0">
-          <div className="w-10 h-10 rounded-full border-2 flex items-center justify-center"
-            style={{
-              borderColor:
-                (result.score ?? 0) >= 6.5 ? "#00ff88" :
-                (result.score ?? 0) >= 5.5 ? "#ffa502" : "#ff4757",
-            }}>
-            <span className="text-xs font-bold" style={{
-              color:
-                (result.score ?? 0) >= 6.5 ? "#00ff88" :
-                (result.score ?? 0) >= 5.5 ? "#ffa502" : "#ff4757",
-            }}>
-              {result.score?.toFixed(1)}
-            </span>
-          </div>
-        </div>
+    <div className="p-3 space-y-2">
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex gap-1">{(["1M","3M","6M","1Y","2Y"] as Range[]).map(r => <RangeBtn key={r} r={r} />)}</div>
+        <div className="h-3 w-px bg-[#1e2d4a]" />
+        <Tog label="SMA"   active={showSMA}    onClick={() => setShowSMA(v => !v)}    activeClass="border-[#ffa502]/60 text-[#ffa502] bg-[#ffa502]/10" />
+        <Tog label="EMA20" active={showEMA20}  onClick={() => setShowEMA20(v => !v)}  activeClass="border-[#a78bfa]/60 text-[#a78bfa] bg-[#a78bfa]/10" />
+        <Tog label="EMA50" active={showEMA50}  onClick={() => setShowEMA50(v => !v)}  activeClass="border-[#f59e0b]/70 text-[#f59e0b] bg-[#f59e0b]/10" />
+        <Tog label="BB"    active={showBB}     onClick={() => setShowBB(v => !v)}     activeClass="border-[#00d4ff]/50 text-[#00d4ff] bg-[#00d4ff]/08" />
+        <Tog label="ST"    active={showST}     onClick={() => setShowST(v => !v)}     activeClass="border-[#f97316]/60 text-[#f97316] bg-[#f97316]/10" />
+        <div className="h-3 w-px bg-[#1e2d4a]" />
+        <Tog label="Vol"  active={showVol}  onClick={() => setShowVol(v => !v)}   activeClass="border-[#6b85a0]/60 text-[#6b85a0] bg-[#6b85a0]/10" />
+        <Tog label="RSI"  active={showRSI}  onClick={() => setShowRSI(v => !v)}   activeClass="border-[#a78bfa]/60 text-[#a78bfa] bg-[#a78bfa]/10" />
+        <Tog label="MACD" active={showMACD} onClick={() => setShowMACD(v => !v)}  activeClass="border-[#34d399]/60 text-[#34d399] bg-[#34d399]/10" />
+        <div className="h-3 w-px bg-[#1e2d4a]" />
+        <Tog label={`Trades${showTrades ? ` (${allScoreTrades.length}S ${allStTrades.length}ST)` : ""}`}
+          active={showTrades} onClick={() => setShowTrades(v => !v)}
+          activeClass="border-[#00ff88]/50 text-[#00ff88] bg-[#00ff88]/08" />
       </div>
 
-      {/* ── STRATEGY TOGGLE + TABS ── */}
-      <div className="flex items-center border-b border-[#1e2d4a] overflow-x-auto">
-        {/* Strategy toggle — compact pill left of tabs */}
-        {hasST && (
-          <div className="flex shrink-0 border-r border-[#1e2d4a] mr-1">
-            <button
-              onClick={() => setStrategy("score")}
-              className={`px-2 py-1.5 text-xs font-mono transition-all whitespace-nowrap ${
-                strategy === "score"
-                  ? "text-[#00d4ff] bg-[#00d4ff]/10 border-b-2 border-[#00d4ff]"
-                  : "text-[#4a6080] hover:text-[#6b85a0]"
-              }`}
-              title="Score multi-indicator strategy"
-            >
-              SCR
-            </button>
-            <button
-              onClick={() => setStrategy("supertrend")}
-              className={`px-2 py-1.5 text-xs font-mono transition-all whitespace-nowrap ${
-                strategy === "supertrend"
-                  ? "text-[#ffa502] bg-[#ffa502]/10 border-b-2 border-[#ffa502]"
-                  : "text-[#4a6080] hover:text-[#6b85a0]"
-              }`}
-              title="SuperTrend trend-following strategy"
-            >
-              ST
-            </button>
-          </div>
-        )}
+      {/* Price chart */}
+      <div style={{ height: priceH }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="1 6" stroke="#1e2d4a" vertical={false} />
+            <XAxis dataKey="dateShort" tick={{ fontSize: 9, fill: "#4a6080" }} tickLine={false} axisLine={{ stroke: "#1e2d4a" }} ticks={sparseTicks} />
+            <YAxis domain={[yMin, yMax]} tick={{ fontSize: 9, fill: "#4a6080" }} tickFormatter={(v: number) => v.toFixed(1)} width={46} tickLine={false} />
+            <Tooltip content={<PriceTooltip />} />
+            {showBB && <>
+              <Line dataKey="BBU" stroke="#00d4ff" strokeWidth={1} dot={false} strokeOpacity={0.35} strokeDasharray="3 3" legendType="none" name="BB Upper" />
+              <Line dataKey="BBL" stroke="#00d4ff" strokeWidth={1} dot={false} strokeOpacity={0.35} strokeDasharray="3 3" legendType="none" name="BB Lower" />
+            </>}
+            {showSMA && <>
+              <Line dataKey="SMA20" stroke="#00ff88" strokeWidth={1.5} dot={false} strokeOpacity={0.85} legendType="none" name="SMA20" />
+              <Line dataKey="SMA50" stroke="#ff7f50" strokeWidth={1.5} dot={false} strokeOpacity={0.85} legendType="none" name="SMA50" />
+            </>}
+            {showEMA20 && <Line dataKey="EMA20" stroke="#a78bfa" strokeWidth={1.5} dot={false} strokeOpacity={0.9} strokeDasharray="4 2" legendType="none" name="EMA20" />}
+            {showEMA50 && <Line dataKey="EMA50" stroke="#f59e0b" strokeWidth={1.5} dot={false} strokeOpacity={0.9} strokeDasharray="6 3" legendType="none" name="EMA50" />}
+            {showST && <>
+              <Line dataKey="ST_Bull" stroke="#00ff88" strokeWidth={2} dot={false} strokeOpacity={0.9} strokeDasharray="5 2" legendType="none" name="ST_Bull" connectNulls={false} />
+              <Line dataKey="ST_Bear" stroke="#ff4757" strokeWidth={2} dot={false} strokeOpacity={0.9} strokeDasharray="5 2" legendType="none" name="ST_Bear" connectNulls={false} />
+            </>}
+            <Line dataKey="Close" stroke="#00d4ff" strokeWidth={2} dot={false} name="Close" activeDot={{ r: 3, fill: "#00d4ff", stroke: "#0a0e1a" }} legendType="none" />
+            {showTrades && <>
+              <Line dataKey="Entry" stroke="transparent" dot={<EntryMarker />} activeDot={false} name="Entry" legendType="none" isAnimationActive={false} />
+              <Line dataKey="Exit"  stroke="transparent" dot={<ExitMarker />}  activeDot={false} name="Exit"  legendType="none" isAnimationActive={false} />
+            </>}
+            <ReferenceLine y={result.current_price} stroke="#c8d8f0" strokeDasharray="4 2" strokeOpacity={0.3}
+              label={{ value: result.current_price.toFixed(2), position: "right", fontSize: 9, fill: "#6b85a0" }} />
 
-        {/* Tabs */}
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 py-1.5 text-xs whitespace-nowrap px-2 transition-all ${
-              tab === t
-                ? strategy === "supertrend"
-                  ? "text-[#ffa502] border-b-2 border-[#ffa502] bg-[#ffa502]/5"
-                  : "text-[#00d4ff] border-b-2 border-[#00d4ff] bg-[#00d4ff]/5"
-                : "text-[#4a6080] hover:text-[#6b85a0]"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
+            {/* TimesFM overlay */}
+            {timesfm && (
+              <>
+                <Line dataKey="P50" stroke="#a78bfa" strokeWidth={2} dot={false} strokeDasharray="5 5" name="P50 Forecast" connectNulls={false} />
+                <Area dataKey="P90" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P90 band" />
+                <Area dataKey="P10" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P10 band" />
+              </>
+            )}
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
 
-      {/* ── STRATEGY CONTEXT BANNER ── */}
-      {strategy === "supertrend" && hasST && (
-        <div className="flex items-center gap-2 px-3 py-1 bg-[#ffa502]/5 border-b border-[#ffa502]/20 text-xs">
-          <span className="text-[#ffa502] font-mono font-bold">ST MODE</span>
-          <span className="text-[#4a6080]">·</span>
-          <span className="text-[#4a6080]">exits on trend reversal only · no ATR stop / target / max days</span>
-          <button
-            onClick={() => setStrategy("score")}
-            className="ml-auto text-[#4a6080] hover:text-[#ffa502] transition-colors"
-            title="Switch back to Score strategy"
-          >
-            ← Score
-          </button>
+      {/* Sub-charts (same as before) */}
+      {showVol && (
+        <div style={{ height: subH }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+              <XAxis dataKey="dateShort" hide />
+              <YAxis tick={{ fontSize: 8, fill: "#4a6080" }} width={46} tickFormatter={(v: number) => `${(v / 1_000_000).toFixed(0)}M`} />
+              <Bar dataKey="Volume" name="Volume" fill="#4a6080" opacity={0.6} />
+            </ComposedChart>
+          </ResponsiveContainer>
+          <div className="text-[#4a6080] text-[0.6rem] text-right pr-2 -mt-1">VOLUME</div>
+        </div>
+      )}
+      {showRSI && (
+        <div style={{ height: subH }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+              <XAxis dataKey="dateShort" hide />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 8, fill: "#4a6080" }} width={46} />
+              <CartesianGrid strokeDasharray="1 6" stroke="#1e2d4a" vertical={false} />
+              <ReferenceLine y={70} stroke="#ff4757" strokeDasharray="3 3" strokeOpacity={0.5} />
+              <ReferenceLine y={30} stroke="#00ff88" strokeDasharray="3 3" strokeOpacity={0.5} />
+              <Line dataKey="RSI" name="RSI" stroke="#a78bfa" strokeWidth={1.5} dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+          <div className="text-[#a78bfa] text-[0.6rem] text-right pr-2 -mt-1">RSI(14)</div>
+        </div>
+      )}
+      {showMACD && (
+        <div style={{ height: subH }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+              <XAxis dataKey="dateShort" hide />
+              <YAxis tick={{ fontSize: 8, fill: "#4a6080" }} width={46} tickFormatter={(v: number) => v.toFixed(2)} />
+              <CartesianGrid strokeDasharray="1 6" stroke="#1e2d4a" vertical={false} />
+              <ReferenceLine y={0} stroke="#4a6080" />
+              <Bar dataKey="MACD H" name="MACD H" fill="#34d399" opacity={0.8} />
+            </ComposedChart>
+          </ResponsiveContainer>
+          <div className="text-[#34d399] text-[0.6rem] text-right pr-2 -mt-1">MACD HISTOGRAM</div>
         </div>
       )}
 
-      {/* ── TAB CONTENT ── */}
-      <div className="flex-1 overflow-auto min-h-0">
-        {isError ? (
-          <div className="p-4 text-[#ff4757] text-xs">{result.error ?? "Error fetching data"}</div>
-        ) : (
-          <>
-            {tab === "CHART"       && <ChartTab       result={result} />}
-            {tab === "OVERVIEW"    && <OverviewTab    result={activeResult} />}
-            {tab === "BACKTEST"    && <BacktestTab    result={activeResult} />}
-            {tab === "MONTE CARLO" && <MonteCarloTab  result={
-              strategy === "supertrend" && hasST && result.st_monte_carlo
-                ? { ...activeResult, monte_carlo: result.st_monte_carlo }
-                : activeResult
-            } />}
-            {tab === "PLAN"        && <TradingPlanTab result={activeResult} />}
-            {/* Fundamental Report Tab */}
-            {tab === "FUNDAMENTAL" && <FundamentalReport ticker={result.symbol} />}
-          </>
-        )}
+      {/* Legend */}
+      <div className="flex flex-wrap gap-3 text-[0.65rem] text-[#4a6080] pt-1">
+        <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 bg-[#00d4ff] inline-block rounded" /> Price</span>
+        {showSMA && <>
+          <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 bg-[#00ff88] inline-block rounded" /> SMA20</span>
+          <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 bg-[#ff7f50] inline-block rounded" /> SMA50</span>
+        </>}
+        {showEMA20 && <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #a78bfa" }} /> EMA20</span>}
+        {showEMA50 && <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #f59e0b" }} /> EMA50</span>}
+        {showST && <>
+          <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #00ff88" }} /> ST Bull</span>
+          <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #ff4757" }} /> ST Bear</span>
+        </>}
+        {timesfm && <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #a78bfa" }} /> P50 Forecast</span>}
+        {showTrades && <>
+          <span className="flex items-center gap-1.5"><span className="text-[#00ff88] text-sm leading-none">▲</span> Entry</span>
+          <span className="flex items-center gap-1.5"><span className="text-[#ff4757] text-sm leading-none">▼</span> Exit</span>
+        </>}
       </div>
+
+      {/* ST Status strip (unchanged) */}
+      {(() => {
+        const dir     = optStDir.length ? optStDir[optStDir.length - 1] : -1;
+        const stVal   = optStLine.length ? optStLine[optStLine.length - 1] : 0;
+        const close   = sliced.length ? sliced[sliced.length - 1].close : result.current_price;
+        const dist    = stVal > 0 && close > 0 ? ((close - stVal) / close) * 100 : 0;
+        const openRet = result.st_open_return_pct;
+        return (
+          <div className={`flex items-center gap-3 px-2 py-1 rounded border text-xs font-mono ${dir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
+            <span className={dir === 1 ? "text-[#00ff88] font-bold" : "text-[#ff4757] font-bold"}>
+              {dir === 1 ? "🟢 ST BULLISH" : "🔴 ST BEARISH"}
+            </span>
+            {stVal > 0 && <span className="text-[#4a6080]">line: <span className="text-[#c8d8f0]">{stVal.toFixed(2)}</span></span>}
+            {dir === 1 && <span className="text-[#4a6080]">dist: <span className="text-[#c8d8f0]">{dist.toFixed(1)}%</span></span>}
+            {dir === 1 && openRet !== null && openRet !== undefined && (
+              <span className="text-[#4a6080]">open: <span className={openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span></span>
+            )}
+            {dir === -1 && <span className="text-[#4a6080]">wait for flip to bullish before entry</span>}
+            {optLabel && (
+              <span className="ml-auto text-[#ffa502] border border-[#ffa502]/40 rounded px-1.5 py-0.5 text-[0.6rem] font-mono">
+                {optLabel}
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Score Trades (unchanged) */}
+      {showTrades && allScoreTrades.length > 0 && (
+        <div className="mt-1">
+          <div className="text-[#00d4ff] text-xs mb-1 font-bold">
+            SCORE TRADES — {allScoreTrades.length} total ·{" "}
+            <span className="text-[#00ff88]">{allScoreTrades.filter(t => t.return > 0).length}W</span>{" "}
+            <span className="text-[#ff4757]">{allScoreTrades.filter(t => t.return <= 0).length}L</span>
+            <span className="text-[#4a6080] font-normal ml-2 text-[0.65rem]">({tradesInView.length} in chart view)</span>
+          </div>
+          <div className="overflow-x-auto rounded border border-[#1e2d4a]/60 max-h-64 overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0">
+                <tr className="text-[#4a6080] bg-[#0f1629] border-b border-[#1e2d4a]">
+                  <th className="text-left py-1 px-2">#</th><th className="text-left py-1 px-2">Entry</th>
+                  <th className="text-left py-1 px-2">Exit</th><th className="text-right py-1 px-2">In $</th>
+                  <th className="text-right py-1 px-2">Out $</th><th className="text-right py-1 px-2">Ret%</th>
+                  <th className="text-right py-1 px-2">R</th><th className="text-right py-1 px-2">Bars</th>
+                  <th className="text-left py-1 px-2">Reason</th><th className="text-left py-1 px-2">Regime</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...allScoreTrades].reverse().map(t => {
+                  const inView = datesInView.has(t.entry_date) || datesInView.has(t.exit_date);
+                  return (
+                    <tr key={t.trade_num} className={`border-b border-[#1e2d4a]/30 hover:bg-[#00d4ff]/5 ${t.return > 0 ? "bg-[#00ff88]/3" : "bg-[#ff4757]/3"} ${inView ? "ring-1 ring-inset ring-[#00d4ff]/20" : "opacity-70"}`}>
+                      <td className="py-1 px-2 text-[#4a6080]">{t.trade_num}</td>
+                      <td className="py-1 px-2 font-mono"><span className="text-[#00ff88]">▲</span><span className="text-[#6b85a0] ml-1">{fmtDate(t.entry_date)}</span></td>
+                      <td className="py-1 px-2 font-mono"><span className="text-[#ff4757]">▼</span><span className="text-[#6b85a0] ml-1">{fmtDate(t.exit_date)}</span></td>
+                      <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.entry_price.toFixed(2)}</td>
+                      <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.exit_price.toFixed(2)}</td>
+                      <td className={`py-1 px-2 text-right font-mono font-bold ${t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>{t.return >= 0 ? "+" : ""}{(t.return * 100).toFixed(1)}%</td>
+                      <td className={`py-1 px-2 text-right font-mono ${t.r_multiple > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>{t.r_multiple >= 0 ? "+" : ""}{t.r_multiple.toFixed(2)}R</td>
+                      <td className="py-1 px-2 text-right text-[#6b85a0]">{t.bars_held}</td>
+                      <td className="py-1 px-2 text-[#6b85a0] max-w-[90px] truncate">{t.exit_reason}</td>
+                      <td className="py-1 px-2 text-[#4a6080] text-[0.6rem] max-w-[80px] truncate">{t.entry_regime?.replace(/_/g, " ")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ST Trades (unchanged) */}
+      {allStTrades.length > 0 && showTrades && (
+        <div className="mt-2">
+          <div className="text-[#ffa502] text-xs mb-1 font-bold">
+            ST TRADES — {allStTrades.length} total ·{" "}
+            <span className="text-[#00ff88]">{allStTrades.filter(t => t.return > 0).length}W</span>{" "}
+            <span className="text-[#ff4757]">{allStTrades.filter(t => t.return <= 0).length}L</span>
+            <span className="text-[#4a6080] font-normal ml-2 text-[0.65rem]">
+              ({stTradesInView.length} in view{optLabel ? ` · ${optLabel}` : ""})
+            </span>
+          </div>
+          <div className="overflow-x-auto rounded border border-[#ffa502]/20 max-h-48 overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0">
+                <tr className="text-[#4a6080] bg-[#0f1629] border-b border-[#1e2d4a]">
+                  <th className="text-left py-1 px-2">#</th><th className="text-left py-1 px-2">Entry</th>
+                  <th className="text-left py-1 px-2">Exit</th><th className="text-right py-1 px-2">In $</th>
+                  <th className="text-right py-1 px-2">Out $</th><th className="text-right py-1 px-2">Ret%</th>
+                  <th className="text-right py-1 px-2">R</th><th className="text-right py-1 px-2">Bars</th>
+                  <th className="text-left py-1 px-2">Exit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...allStTrades].reverse().map(t => {
+                  const inView = datesInView.has(t.entry_date) || datesInView.has(t.exit_date);
+                  return (
+                    <tr key={t.trade_num} className={`border-b border-[#1e2d4a]/30 hover:bg-[#ffa502]/5 ${t.return > 0 ? "bg-[#00ff88]/3" : "bg-[#ff4757]/3"} ${inView ? "ring-1 ring-inset ring-[#ffa502]/20" : "opacity-70"}`}>
+                      <td className="py-1 px-2 text-[#4a6080]">{t.trade_num}</td>
+                      <td className="py-1 px-2 font-mono"><span className="text-[#ffa502]">▲</span><span className="text-[#6b85a0] ml-1">{fmtDate(t.entry_date)}</span></td>
+                      <td className="py-1 px-2 font-mono"><span className="text-[#ff4757]">▼</span><span className="text-[#6b85a0] ml-1">{fmtDate(t.exit_date)}</span></td>
+                      <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.entry_price.toFixed(2)}</td>
+                      <td className="py-1 px-2 text-right font-mono text-[#c8d8f0]">{t.exit_price.toFixed(2)}</td>
+                      <td className={`py-1 px-2 text-right font-mono font-bold ${t.return > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>{t.return >= 0 ? "+" : ""}{(t.return * 100).toFixed(1)}%</td>
+                      <td className={`py-1 px-2 text-right font-mono ${t.r_multiple > 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>{t.r_multiple >= 0 ? "+" : ""}{t.r_multiple.toFixed(2)}R</td>
+                      <td className="py-1 px-2 text-right text-[#6b85a0]">{t.bars_held}</td>
+                      <td className="py-1 px-2 text-[#ffa502]/70 text-[0.6rem] truncate">{t.exit_reason}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
-
-  {timesfm && (
-  <div className="mt-3 border border-[#a78bfa]/40 rounded p-3 text-xs">
-    <div className="text-[#a78bfa] font-bold mb-2">🔮 TIMESFM PREDICTIONS</div>
-    <div className="grid grid-cols-3 gap-2">
-      <div className="text-center bg-[#0f1629] rounded p-2">
-        <div className="text-[#4a6080]">T1 (5d)</div>
-        <div className="text-white font-bold">{timesfm.t1.toFixed(2)}</div>
-        <div className={timesfm.t1 >= result.current_price ? "text-green-400" : "text-red-400"}>
-          {((timesfm.t1 / result.current_price - 1) * 100).toFixed(1)}%
-        </div>
-      </div>
-      <div className="text-center bg-[#0f1629] rounded p-2">
-        <div className="text-[#4a6080]">T2 (10d)</div>
-        <div className="text-white font-bold">{timesfm.t2.toFixed(2)}</div>
-        <div className={timesfm.t2 >= result.current_price ? "text-green-400" : "text-red-400"}>
-          {((timesfm.t2 / result.current_price - 1) * 100).toFixed(1)}%
-        </div>
-      </div>
-      <div className="text-center bg-[#0f1629] rounded p-2">
-        <div className="text-[#4a6080]">T3 (20d)</div>
-        <div className="text-white font-bold">{timesfm.t3.toFixed(2)}</div>
-        <div className={timesfm.t3 >= result.current_price ? "text-green-400" : "text-red-400"}>
-          {((timesfm.t3 / result.current_price - 1) * 100).toFixed(1)}%
-        </div>
-      </div>
-    </div>
-    {/* optional mini chart of the forecast bands could go here */}
-  </div>
-)}
 }
