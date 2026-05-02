@@ -120,36 +120,23 @@ export default function ChartTab({ result, config, timesfm }: Props) {
   if (!chartBars || chartBars.length === 0) {
     return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable.</div>;
   }
+
   const barsToShow = Math.min(RANGE_BARS[range], chartBars.length);
   const sliced: ChartBar[] = chartBars.slice(-barsToShow);
+
   if (!sliced || sliced.length === 0) {
     return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable for selected range.</div>;
   }
-  console.log("ChartTab debug:", {
-    barsToShow,
-    sliceStart: chartBars.length - barsToShow,
-    slicedLength: sliced.length,
-    firstBarKeys: Object.keys(sliced[0] || {}),
-    hasHigh: "high" in (sliced[0] || {}),
-    hasLow: "low" in (sliced[0] || {}),
-    hasClose: "close" in (sliced[0] || {}),
-    sampleBar: sliced[0],
-  });
+
   const optAtr = result.st_opt_params?.atrPeriod ?? 10;
   const optMul = result.st_opt_params?.multiplier ?? 3.0;
 
-  // Filter out any bars with missing OHLCV data before SuperTrend calculation
-  const validBars = chartBars.filter(b => 
-    b.high !== undefined && b.low !== undefined && b.close !== undefined &&
-    !isNaN(b.high) && !isNaN(b.low) && !isNaN(b.close)
-  );
-  
-  const allHighs  = validBars.map(b => b.high);
-  const allLows   = validBars.map(b => b.low);
-  const allCloses = validBars.map(b => b.close);
+  const allHighs  = chartBars.map(b => b.high);
+  const allLows   = chartBars.map(b => b.low);
+  const allCloses = chartBars.map(b => b.close);
   const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
-  
-  const offset = chartBars.length - barsToShow;
+
+  const offset = Math.max(0, chartBars.length - barsToShow);
   const optStLine = fullStLine.slice(offset);
   const optStDir  = fullStDir.slice(offset);
 
