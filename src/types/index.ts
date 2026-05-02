@@ -407,6 +407,16 @@ export interface TimesfmPriceTargets {
   p90: number[];
 }
 
+export interface TimesfmStPersistence {
+  current_dir: number;
+  persistence_prob: number;
+  flip_risk: string;
+  p50_distances: number[];
+}
+
 export interface TimesfmForecasts {
-  [symbol: string]: TimesfmPriceTargets;
+  [symbol: string]: {
+    price_targets?: TimesfmPriceTargets;
+    st_persistence?: TimesfmStPersistence;
+  };
 }
