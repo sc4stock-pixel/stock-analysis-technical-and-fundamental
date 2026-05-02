@@ -136,11 +136,17 @@ export default function ChartTab({ result, config, timesfm }: Props) {
   const optAtr = result.st_opt_params?.atrPeriod ?? 10;
   const optMul = result.st_opt_params?.multiplier ?? 3.0;
 
-  const allHighs  = chartBars.map(b => b.high);
-  const allLows   = chartBars.map(b => b.low);
-  const allCloses = chartBars.map(b => b.close);
+  // Filter out any bars with missing OHLCV data before SuperTrend calculation
+  const validBars = chartBars.filter(b => 
+    b.high !== undefined && b.low !== undefined && b.close !== undefined &&
+    !isNaN(b.high) && !isNaN(b.low) && !isNaN(b.close)
+  );
+  
+  const allHighs  = validBars.map(b => b.high);
+  const allLows   = validBars.map(b => b.low);
+  const allCloses = validBars.map(b => b.close);
   const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
-
+  
   const offset = chartBars.length - barsToShow;
   const optStLine = fullStLine.slice(offset);
   const optStDir  = fullStDir.slice(offset);
