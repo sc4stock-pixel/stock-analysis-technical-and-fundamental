@@ -116,26 +116,26 @@ export default function ChartTab({ result, config, timesfm }: Props) {
   const bt        = result.backtest;
   const optParams = result.st_opt_params;
   const optLabel  = optParams ? `ATR${optParams.atrPeriod} × ${optParams.multiplier}` : null;
-
+  
   if (!chartBars || chartBars.length === 0) {
     return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable.</div>;
   }
-
+  
   const barsToShow = Math.min(RANGE_BARS[range], chartBars.length);
   const sliced: ChartBar[] = chartBars.slice(-barsToShow);
-
+  
   if (!sliced || sliced.length === 0) {
     return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable for selected range.</div>;
   }
 
   const optAtr = result.st_opt_params?.atrPeriod ?? 10;
   const optMul = result.st_opt_params?.multiplier ?? 3.0;
-
+  
   const allHighs  = chartBars.map(b => b.high);
   const allLows   = chartBars.map(b => b.low);
   const allCloses = chartBars.map(b => b.close);
   const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
-
+  
   const offset = Math.max(0, chartBars.length - barsToShow);
   const optStLine = fullStLine.slice(offset);
   const optStDir  = fullStDir.slice(offset);
