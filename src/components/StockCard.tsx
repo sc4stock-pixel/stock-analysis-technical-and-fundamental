@@ -7,6 +7,7 @@ import BacktestTab   from "./tabs/BacktestTab";
 import MonteCarloTab from "./tabs/MonteCarloTab";
 import TradingPlanTab from "./tabs/TradingPlanTab";
 import ChartTab      from "./tabs/ChartTab";
+import FundamentalReport from "./tabs/FundamentalReport";
 
 interface Props {
   result: StockAnalysisResult;
@@ -15,7 +16,7 @@ interface Props {
 }
 
 type Strategy = "score" | "supertrend";
-const TABS = ["OVERVIEW", "CHART", "BACKTEST", "MONTE CARLO", "PLAN"] as const;
+const TABS = ["OVERVIEW", "CHART", "BACKTEST", "MONTE CARLO", "PLAN", "FUNDAMENTAL"] as const;
 type Tab = (typeof TABS)[number];
 
 function signalBadge(signal: string) {
