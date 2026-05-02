@@ -2,7 +2,7 @@ name: TimesFM Price Targets
 
 on:
   schedule:
-    - cron: "0 22 * * *"   # daily after market close (UTC)
+    - cron: "58 06 * * *"   # daily after market close (UTC)
   workflow_dispatch:        # manual trigger
 
 permissions:
