@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, TimesfmPriceTargets } from "@/types";
+import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, TimesfmPriceTargets, TimesfmStPersistence } from "@/types";
 import { regimeColor } from "@/lib/regime";
 import OverviewTab    from "./tabs/OverviewTab";
 import BacktestTab   from "./tabs/BacktestTab";
@@ -156,6 +156,20 @@ export default function StockCard({ result, config, timesfm }: Props) {
             }`}>
               {stDir === 1 ? "🟢 ST" : "🔴 ST"}
             </span>
+            {/* TimesFM ST Persistence */}
+            {timesfm?.st_persistence && (
+              <span className={`text-xs px-1 py-0.5 rounded border font-mono ${
+                timesfm.st_persistence.flip_risk === "low"
+                  ? "border-[#00ff88]/30 text-[#00ff88] bg-[#00ff88]/5"
+                  : timesfm.st_persistence.flip_risk === "medium"
+                  ? "border-[#ffa502]/30 text-[#ffa502] bg-[#ffa502]/5"
+                  : timesfm.st_persistence.flip_risk === "high"
+                  ? "border-[#ff4757]/30 text-[#ff4757] bg-[#ff4757]/5"
+                  : "border-[#4a6080]/30 text-[#4a6080] bg-[#4a6080]/5"
+              }`}>
+                🔮 {timesfm.st_persistence.persistence_prob.toFixed(0)}% persist
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3 mt-1 flex-wrap">
             <span className="text-[#c8d8f0] text-sm font-bold">{priceFmt(result.current_price)}</span>
