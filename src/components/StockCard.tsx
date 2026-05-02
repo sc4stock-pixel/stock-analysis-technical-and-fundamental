@@ -7,7 +7,7 @@ import BacktestTab   from "./tabs/BacktestTab";
 import MonteCarloTab from "./tabs/MonteCarloTab";
 import TradingPlanTab from "./tabs/TradingPlanTab";
 import ChartTab      from "./tabs/ChartTab";
-import FundamentalReport from "./tabs/FundamentalReport";
+import FundamentalReport from "./FundamentalReport";
 
 interface Props {
   result: StockAnalysisResult;
