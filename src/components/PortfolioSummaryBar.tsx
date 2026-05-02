@@ -92,10 +92,10 @@ const COLS: ColDef[] = [
   { key: "st_status",  label: "ST",         align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
   { key: "rsi",        label: "RSI",        align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
   { key: "macd_hist",  label: "MACD H",     align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
-  { key: "sc_500d",    label: "SC 500d%",   labelColor: SC_HDR, align: "right",  sortVal: r => r.backtest?.total_return_500d ?? 0 },
-  { key: "st_500d",    label: "ST 500d%",   labelColor: ST_HDR, align: "right",  sortVal: r => r.comparison?.supertrend.total_return_500d ?? 0 },
-  { key: "sc_250d",    label: "SC 250d%",   labelColor: SC_HDR, align: "right",  sortVal: r => r.backtest?.total_return_250d ?? 0 },
-  { key: "st_250d",    label: "ST 250d%",   labelColor: ST_HDR, align: "right",  sortVal: r => r.comparison?.supertrend.total_return_250d ?? 0 },
+  { key: "sc_500d",    label: "SC 2Y%",   labelColor: SC_HDR, align: "right",  sortVal: r => r.backtest?.total_return_500d ?? 0 },
+  { key: "st_500d",    label: "ST 2Yd%",   labelColor: ST_HDR, align: "right",  sortVal: r => r.comparison?.supertrend.total_return_500d ?? 0 },
+  { key: "sc_250d",    label: "SC 1Yd%",   labelColor: SC_HDR, align: "right",  sortVal: r => r.backtest?.total_return_250d ?? 0 },
+  { key: "st_250d",    label: "ST 1Yd%",   labelColor: ST_HDR, align: "right",  sortVal: r => r.comparison?.supertrend.total_return_250d ?? 0 },
   { key: "sc_sharpe",  label: "SC Sharpe",  labelColor: SC_HDR, align: "right",  sortVal: r => r.backtest?.sharpe ?? 0 },
   { key: "sc_alpha",   label: "SC Alpha",   labelColor: SC_HDR, align: "right",  sortVal: r => r.backtest?.alpha ?? 0 },
   { key: "st_sharpe",  label: "ST Sharpe",  labelColor: ST_HDR, align: "right",  sortVal: r => r.comparison?.supertrend.sharpe ?? 0 },
@@ -283,20 +283,20 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
                   <td className={`px-2 py-1.5 text-right font-mono ${rsiC}`}>{n(rsi, 0)}</td>
                   {/* MACD Hist */}
                   <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.macd_hist, 0)}`}>{n(bt?.macd_hist, 3)}</td>
-                  {/* SC 500d% */}
+                  {/* SC 2Y% */}
                   <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return_500d, 0)}`}>
                     {bt?.total_return_500d != null ? sn(bt.total_return_500d, 1, "%") : "—"}
                   </td>
-                  {/* ST 500d% */}
+                  {/* ST 2Yd% */}
                   {(() => {
                     const v = cmp?.supertrend.total_return_500d;
                     return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "—"}</td>;
                   })()}
-                  {/* SC 250d% */}
+                  {/* SC 1Yd% */}
                   <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return_250d, 0)}`}>
                     {bt?.total_return_250d != null ? sn(bt.total_return_250d, 1, "%") : "—"}
                   </td>
-                  {/* ST 250d% */}
+                  {/* ST 1Yd% */}
                   {(() => {
                     const v = cmp?.supertrend.total_return_250d;
                     return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "—"}</td>;
