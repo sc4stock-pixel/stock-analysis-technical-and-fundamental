@@ -2,8 +2,9 @@ name: Update Southbound JSON
 
 on:
   schedule:
-    - cron: '25 05 * * *'      # 12:30 HKT
     - cron: '30 08 * * *'      # 16:30 HKT
+    - cron: '00 02 * * *'      # 10:00 HKT
+    - cron: '30 04 * * *'      # 12:30 HKT
   workflow_dispatch:
 
 permissions:
