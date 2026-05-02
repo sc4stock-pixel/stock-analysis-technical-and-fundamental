@@ -336,7 +336,7 @@ export default function Dashboard() {
                  <StockCard
                     result={result}
                     config={config}
-                    timesfm={timesfmData?.[result.symbol]?.price_targets}
+                    timesfm={timesfmData?.[result.symbol]}
                   />
                 </div>
               );
