@@ -123,7 +123,9 @@ export default function ChartTab({ result, config, timesfm }: Props) {
 
   const barsToShow = Math.min(RANGE_BARS[range], chartBars.length);
   const sliced: ChartBar[] = chartBars.slice(-barsToShow);
-
+  if (!sliced || sliced.length === 0) {
+    return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable for selected range.</div>;
+  }
   const optAtr = result.st_opt_params?.atrPeriod ?? 10;
   const optMul = result.st_opt_params?.multiplier ?? 3.0;
 
