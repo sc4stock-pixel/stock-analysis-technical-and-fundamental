@@ -2,12 +2,13 @@ name: Update Southbound JSON
 
 on:
   schedule:
-    - cron: '20 05 * * *'      # runs daily at 02:00 UTC/10:00HKT (market close)
-  workflow_dispatch:           # allows manual trigger from Actions tab
+    - cron: '25 05 * * *'      # 12:30 HKT
+    - cron: '30 08 * * *'      # 16:30 HKT
+  workflow_dispatch:
 
 permissions:
   contents: write              # <-- Required for scheduled pushes
-  
+
 jobs:
   update:
     runs-on: ubuntu-latest
@@ -15,6 +16,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5 
+
+      - name: Pull latest changes
+        run: git pull --rebase origin main   # <-- Avoid non‑fast‑forward conflicts
 
       - name: Set up Python
         uses: actions/setup-python@v6
