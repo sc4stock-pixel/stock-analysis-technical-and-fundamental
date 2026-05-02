@@ -120,12 +120,15 @@ export default function ChartTab({ result, config, timesfm }: Props) {
   if (!chartBars || chartBars.length === 0) {
     return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable.</div>;
   }
-  console.log("ChartTab mounted:", {
-    chartBarsLength: chartBars.length,
-    firstBar: chartBars[0],
-    lastBar: chartBars[chartBars.length - 1],
-    range,
-    barsToShow: RANGE_BARS[range],
+  console.log("ChartTab debug:", {
+    sliceStart: chartBars.length - barsToShow,
+    barsToShow,
+    slicedLength: sliced.length,
+    firstBarKeys: Object.keys(sliced[0] || {}),
+    hasHigh: "high" in (sliced[0] || {}),
+    hasLow: "low" in (sliced[0] || {}),
+    hasClose: "close" in (sliced[0] || {}),
+    sampleBar: sliced[0],
   });
   
   const barsToShow = Math.min(RANGE_BARS[range], chartBars.length);
