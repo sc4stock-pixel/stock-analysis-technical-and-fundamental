@@ -45,7 +45,7 @@ export async function generateFundamentalPrompts(ticker: string): Promise<Fundam
   }
 
   // ── Abbreviated Deep Dive prompt ──────────────────────────
-  const deepDivePrompt = `You are a fundamental analyst. Give an **abbreviated** Deep Dive on ${ticker}.
+  const deepDivePrompt = `Act as a Quantitative Equity Researcher Analyst. Give an **abbreviated** Deep Dive on ${ticker}.
 Use **bullet points** only — no paragraphs. Keep each bullet to one line.
 
 1. **Business Model** (2-3 bullets):
@@ -97,7 +97,7 @@ Data:
 - Gross margin: ${financials?.grossMargins?.raw ? (financials.grossMargins.raw * 100).toFixed(1) + '%' : 'N/A'}`;
 
   // ── Quantitative Risk & Valuation prompt (4th) ─────────────────
-  const riskValuationPrompt = `Act as a Quantitative Equity Researcher. Generate a risk & valuation report for ${ticker}. In addition to standard financials, apply the following advanced filters:
+  const riskValuationPrompt = `Generate a risk & valuation report for ${ticker}. In addition to standard financials, apply the following advanced filters:
 
 **Capital Efficiency:** Calculate the Rule of 40 and ROIC. Compare ROIC to the 5-year sector median.
 
