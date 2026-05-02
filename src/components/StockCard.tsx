@@ -273,6 +273,7 @@ export default function StockCard({ result, config, timesfm }: Props) {
                 : activeResult
             } />}
             {tab === "PLAN"        && <TradingPlanTab result={activeResult} />}
+            {tab === "FUNDAMENTAL" && <FundamentalReport ticker={result.symbol} />}
           </>
         )}
       </div>
