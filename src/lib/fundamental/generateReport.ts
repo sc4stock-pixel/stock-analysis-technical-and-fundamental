@@ -96,15 +96,6 @@ Data:
 - Revenue growth YoY: ${financials?.revenueGrowth?.raw ? (financials.revenueGrowth.raw * 100).toFixed(1) + '%' : 'N/A'}
 - Gross margin: ${financials?.grossMargins?.raw ? (financials.grossMargins.raw * 100).toFixed(1) + '%' : 'N/A'}`;
 
-  return {
-    ticker,
-    deepDivePrompt,
-    peerComparisonPrompt,
-    bearCasePrompt,
-    fetchedAt: new Date().toISOString(),
-  };
-}
-
   // ── Quantitative Risk & Valuation prompt (4th) ─────────────────
   const riskValuationPrompt = `Act as a Quantitative Equity Researcher. Generate a risk & valuation report for ${ticker}. In addition to standard financials, apply the following advanced filters:
 
@@ -136,3 +127,4 @@ Use any available data from the following snapshot, but supplement with real-tim
     riskValuationPrompt,
     fetchedAt: new Date().toISOString(),
   };
+}
