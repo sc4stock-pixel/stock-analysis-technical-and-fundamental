@@ -6,7 +6,7 @@ export interface FundamentalPrompts {
   deepDivePrompt: string;
   peerComparisonPrompt: string;
   bearCasePrompt: string;
-  riskValuationPrompt: string;   // ← new field
+  riskValuationPrompt: string;
   fetchedAt: string;
 }
 
