@@ -416,8 +416,5 @@ export interface TimesfmStPersistence {
 }
 
 export interface TimesfmForecasts {
-  [symbol: string]: {
-    price_targets?: TimesfmPriceTargets;
-    st_persistence?: TimesfmStPersistence;
-  };
+  [symbol: string]: TimesfmPriceTargets;
 }
