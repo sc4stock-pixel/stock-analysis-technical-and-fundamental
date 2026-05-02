@@ -405,6 +405,7 @@ export interface TimesfmPriceTargets {
   p10: number[];
   p50: number[];
   p90: number[];
+  st_persistence?: TimesfmStPersistence;
 }
 
 export interface TimesfmStPersistence {
