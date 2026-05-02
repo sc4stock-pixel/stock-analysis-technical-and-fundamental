@@ -2,9 +2,7 @@ name: Update Southbound JSON
 
 on:
   schedule:
-    - cron: '00 02 * * *'      # runs daily at 02:00 UTC/10:00HKT (market close)
-    - cron: '30 04 * * *'      # runs daily at 04:30 UTC/12:30HKT (market close)
-    - cron: '30 08 * * *'      # runs daily at 08:30 UTC/16:30HKT (market close)
+    - cron: '11 05 * * *'      # runs daily at 02:00 UTC/10:00HKT (market close)
   workflow_dispatch:           # allows manual trigger from Actions tab
 
 jobs:
