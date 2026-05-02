@@ -408,7 +408,5 @@ export interface TimesfmPriceTargets {
 }
 
 export interface TimesfmForecasts {
-  [symbol: string]: {
-    price_targets?: TimesfmPriceTargets;
-  };
+  [symbol: string]: TimesfmPriceTargets;
 }
