@@ -39,7 +39,6 @@ function patternBadge(p: CandlestickPattern) {
 }
 
 function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
-  // ... (unchanged – same as original)
   const cmp = result.comparison;
   if (!cmp) return result;
 
@@ -321,3 +320,6 @@ export default function StockCard({ result, config, timesfm }: Props) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
