@@ -121,7 +121,7 @@ Produce all four reports in order, separated by clear headings.`
                   : 'border-[#00d4ff] text-[#00d4ff] bg-[#00d4ff]/10 hover:bg-[#00d4ff]/20'
               }`}
             >
-              {copied === 'combined' ? '✅ Copied!' : '📋 Copy Combined Prompt (All 3 Reports)'}
+              {copied === 'combined' ? '✅ Copied!' : '📋 Copy Combined Prompt (All 4 Reports)'}
             </button>
             <span className="text-[#4a6080] text-xs">
               ({combinedPrompt.length.toLocaleString()} chars)
