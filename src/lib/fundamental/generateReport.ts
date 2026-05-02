@@ -6,6 +6,7 @@ export interface FundamentalPrompts {
   deepDivePrompt: string;
   peerComparisonPrompt: string;
   bearCasePrompt: string;
+  riskValuationPrompt: string;   // ← new field
   fetchedAt: string;
 }
 
@@ -103,3 +104,35 @@ Data:
     fetchedAt: new Date().toISOString(),
   };
 }
+
+  // ── Quantitative Risk & Valuation prompt (4th) ─────────────────
+  const riskValuationPrompt = `Act as a Quantitative Equity Researcher. Generate a risk & valuation report for ${ticker}. In addition to standard financials, apply the following advanced filters:
+
+**Capital Efficiency:** Calculate the Rule of 40 and ROIC. Compare ROIC to the 5-year sector median.
+
+**Valuation Context:** Provide current P/E and P/S vs. their 5-year historical means. Use a 'Z-Score' approach (Is it >1 standard deviation from the mean?).
+
+**The 'Moat' Analysis:** Evaluate R&D as a % of Revenue. Is the company out-investing its peers to maintain its lead?
+
+**Earnings Quality:** Check the gap between Net Income and Free Cash Flow. If FCF is significantly lower than Net Income, flag it as 'Aggressive Accounting/Low Quality.'
+
+**Volatility Risk:** Report the 30-day realized volatility vs. the VIX and provide the Maximum Drawdown (MDD) over the last 12 months.
+
+Use any available data from the following snapshot, but supplement with real-time web searches where necessary:
+- Description: ${description}
+- Sector: ${sector}, Industry: ${industry}
+- P/S TTM: ${keyStats?.psTrailing12Months?.raw ?? 'N/A'}, P/FCF: ${keyStats?.priceToFreeCashFlows?.raw ?? 'N/A'}, EV/EBITDA: ${keyStats?.enterpriseToEbitda?.raw ?? 'N/A'}
+- GM: ${financials?.grossMargins?.raw ? (financials.grossMargins.raw * 100).toFixed(1) + '%' : 'N/A'}, RevGr: ${financials?.revenueGrowth?.raw ? (financials.revenueGrowth.raw * 100).toFixed(1) + '%' : 'N/A'}
+- Insider trades: ${JSON.stringify(insiders.slice(0, 5))}
+- Customer concentration: ${concentration}
+- Margin trend: ${JSON.stringify(marginData?.margins)}
+`;
+
+  return {
+    ticker,
+    deepDivePrompt,
+    peerComparisonPrompt,
+    bearCasePrompt,
+    riskValuationPrompt,
+    fetchedAt: new Date().toISOString(),
+  };
