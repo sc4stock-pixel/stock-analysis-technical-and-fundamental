@@ -293,7 +293,7 @@ export default function StockCard({ result, config, timesfm }: Props) {
       </div>
 
       {/* ── TIMESFM AI PRICE TARGETS ── */}
-      {timesfm && (
+      {timesfm && timesfm.t1 !== undefined && (
         <div className="mx-3 mb-3 border border-[#a78bfa]/40 rounded p-3 text-xs">
           <div className="text-[#a78bfa] font-bold mb-2">🔮 TIMESFM PREDICTIONS</div>
           <div className="grid grid-cols-3 gap-2 mb-2">
@@ -321,7 +321,3 @@ export default function StockCard({ result, config, timesfm }: Props) {
           </div>
         </div>
       )}
-
-    </div>
-  );
-}
