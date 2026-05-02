@@ -2,7 +2,7 @@ name: TimesFM Price Targets
 
 on:
   schedule:
-    - cron: "09 15 * * *"   # daily after market close (UTC)
+    - cron: "30 16 * * *"   # daily after market close (UTC)
       timezone: 'Asia/Hong_Kong' # Added functionality
   workflow_dispatch:        # manual trigger
 
