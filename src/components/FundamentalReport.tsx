@@ -10,6 +10,7 @@ interface PromptsData {
   deepDivePrompt: string;
   peerComparisonPrompt: string;
   bearCasePrompt: string;
+  riskValuationPrompt: string;
   fetchedAt: string;
 }
 
@@ -56,7 +57,7 @@ export default function FundamentalReport({ ticker }: Props) {
   };
 
   const combinedPrompt = prompts
-    ? `You are a fundamental analyst. Generate the following three reports for ${prompts.ticker}:
+    ? `You are a fundamental analyst. Generate the following four reports for ${prompts.ticker}:
 
 --- DEEP DIVE ---
 ${prompts.deepDivePrompt}
@@ -67,7 +68,10 @@ ${prompts.peerComparisonPrompt}
 --- BEAR CASE ---
 ${prompts.bearCasePrompt}
 
-Produce all three reports in order, separated by clear headings.`
+--- RISK & VALUATION ---
+${prompts.riskValuationPrompt}
+
+Produce all four reports in order, separated by clear headings.`
     : '';
 
   return (
@@ -94,6 +98,15 @@ Produce all three reports in order, separated by clear headings.`
               className="text-[#00d4ff] underline hover:text-[#00ff88]"
             >
               chat.deepseek.com
+            </a>
+            {' or '}
+            <a
+              href="https://gemini.google.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[#00d4ff] underline hover:text-[#00ff88]"
+            >
+              gemini.google.com
             </a>
             {' '}(free).
           </p>
@@ -141,6 +154,13 @@ Produce all three reports in order, separated by clear headings.`
                 copied={copied}
                 onCopy={copyToClipboard}
                 index={3}
+              />
+              <PromptBlock
+                title="📊 Quantitative Risk & Valuation"
+                prompt={prompts.riskValuationPrompt}
+                copied={copied}
+                onCopy={copyToClipboard}
+                index={4}
               />
             </div>
           </details>
