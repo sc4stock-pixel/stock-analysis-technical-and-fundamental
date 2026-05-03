@@ -7,7 +7,6 @@ import {
   Tooltip, ResponsiveContainer, ReferenceLine, Area,
 } from "recharts";
 
-// TimesfmPriceTargets imported inline to avoid circular deps
 interface TimesfmPriceTargets {
   t1: number;
   t2: number;
@@ -108,31 +107,180 @@ const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: 
       {macdH  != null && <div className={macdH >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>MACD H: {macdH.toFixed(3)}</div>}
       {vol    != null && <div className="text-[#4a6080]">Vol: {(vol / 1_000_000).toFixed(1)}M</div>}
       {p50    != null && <div className="text-[#a78bfa]">P50 Fcst: {p50.toFixed(2)}</div>}
-      {p10    != null && <div className="text-[#4a6080]">P10 band: {p10.toFixed(2)}</div>}
-      {p90    != null && <div className="text-[#4a6080]">P90 band: {p90.toFixed(2)}</div>}
+      {p10    != null && <div className="text-[#4a6080]">P10: {p10.toFixed(2)}</div>}
+      {p90    != null && <div className="text-[#4a6080]">P90: {p90.toFixed(2)}</div>}
       {entry  != null && <div className="text-[#00ff88] font-bold mt-1">▲ ENTRY @ {entry.toFixed(2)}</div>}
       {exit   != null && <div className="text-[#ff4757] font-bold mt-1">▼ EXIT @ {exit.toFixed(2)}</div>}
     </div>
   );
 };
 
-export default function ChartTab({ result, config, timesfm }: Props) {
-  const [range, setRange]           = useState<Range>("1Y");
-  const [showSMA, setShowSMA]       = useState(true);
-  const [showEMA20, setShowEMA20]   = useState(false);
-  const [showEMA50, setShowEMA50]   = useState(false);
-  const [showBB, setShowBB]         = useState(true);
-  const [showST, setShowST]         = useState(true);
-  const [showVol, setShowVol]       = useState(true);
-  const [showRSI, setShowRSI]       = useState(false);
-  const [showMACD, setShowMACD]     = useState(false);
-  const [showTrades, setShowTrades] = useState(true);
+// ── Phase 1: TimesFM Price Targets Panel ─────────────────────
+function TimesfmTargetsPanel({ timesfm, currentPrice }: {
+  timesfm: TimesfmPriceTargets;
+  currentPrice: number;
+}) {
+  const pct = (target: number) =>
+    currentPrice > 0 ? ((target / currentPrice - 1) * 100).toFixed(1) : "—";
+  const isUp = (target: number) => currentPrice > 0 && target >= currentPrice;
 
-  // ── EARLY RETURNS before any data access ─────────────────────
+  return (
+    <div className="border border-[#a78bfa]/40 rounded p-3 text-xs bg-[#080d1a]">
+      <div className="text-[#a78bfa] font-bold mb-2 tracking-widest text-[0.7rem]">🔮 TIMESFM PRICE TARGETS</div>
+      <div className="grid grid-cols-3 gap-2 mb-1.5">
+        {[
+          { label: "T1 (5d)",  val: timesfm.t1 },
+          { label: "T2 (10d)", val: timesfm.t2 },
+          { label: "T3 (20d)", val: timesfm.t3 },
+        ].map(({ label, val }) => (
+          <div key={label} className="text-center bg-[#0f1629] rounded p-2 border border-[#1e2d4a]">
+            <div className="text-[#4a6080] text-[0.58rem] mb-0.5">{label}</div>
+            <div className="text-[#c8d8f0] font-bold font-mono">{val?.toFixed(2) ?? "—"}</div>
+            <div className={`text-[0.58rem] font-mono ${isUp(val) ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+              {isUp(val) ? "+" : ""}{pct(val)}%
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="text-[0.58rem] text-[#4a6080]">
+        P10–P90 confidence band shown on chart · TimesFM 2.5-200M
+      </div>
+    </div>
+  );
+}
+
+// ── Phase 2: ST Persistence Panel ────────────────────────────
+function STPersistencePanel({ persistence, currentDir }: {
+  persistence: NonNullable<TimesfmPriceTargets["st_persistence"]>;
+  currentDir: number;
+}) {
+  const { persistence_prob, flip_risk, p50_distances } = persistence;
+  const distances = Array.isArray(p50_distances) ? p50_distances : [];
+  const dirSign = currentDir === 1 ? 1 : -1;
+
+  const riskColor =
+    flip_risk === "low"    ? "#00ff88" :
+    flip_risk === "medium" ? "#ffa502" :
+    flip_risk === "high"   ? "#ff4757" : "#4a6080";
+
+  const riskBorder =
+    flip_risk === "low"    ? "border-[#00ff88]/30 bg-[#00ff88]/5" :
+    flip_risk === "medium" ? "border-[#ffa502]/30 bg-[#ffa502]/5" :
+    flip_risk === "high"   ? "border-[#ff4757]/30 bg-[#ff4757]/5" :
+                             "border-[#1e2d4a] bg-[#080d1a]";
+
+  // Persistence breakdown at 5 / 10 / 20 bars
+  const calc = (n: number) => {
+    const slice = distances.slice(0, n);
+    if (slice.length === 0) return null;
+    const count = slice.filter(v => v * dirSign > 0).length;
+    return Math.round((count / slice.length) * 100);
+  };
+
+  const bars = [
+    { label: "5 bars",  pct: calc(5),  n: Math.min(5,  distances.length) },
+    { label: "10 bars", pct: calc(10), n: Math.min(10, distances.length) },
+    { label: "20 bars", pct: calc(20), n: Math.min(20, distances.length) },
+  ].filter(b => b.n > 0);
+
+  const maxAbs = distances.length > 0 ? Math.max(...distances.map(v => Math.abs(v)), 1) : 1;
+
+  return (
+    <div className={`rounded border px-3 py-2 ${riskBorder}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[#a78bfa] text-[0.7rem] font-bold tracking-widest">🔮 ST PERSISTENCE</span>
+          <span className="text-[#4a6080] text-[0.58rem]">TimesFM · next {distances.length} bars</span>
+        </div>
+        <span className="text-[0.65rem] font-bold font-mono px-1.5 py-0.5 rounded border"
+          style={{ color: riskColor, borderColor: `${riskColor}50`, backgroundColor: `${riskColor}15` }}>
+          {(flip_risk ?? "unknown").toUpperCase()} FLIP RISK
+        </span>
+      </div>
+
+      {/* Overall probability bar */}
+      <div className="mb-2">
+        <div className="flex justify-between text-[0.6rem] text-[#4a6080] mb-0.5">
+          <span>Direction persistence probability</span>
+          <span style={{ color: riskColor }} className="font-bold font-mono">{persistence_prob.toFixed(0)}%</span>
+        </div>
+        <div className="h-1.5 bg-[#1e2d4a] rounded overflow-hidden">
+          <div className="h-1.5 rounded transition-all"
+            style={{ width: `${Math.min(100, persistence_prob)}%`, backgroundColor: riskColor }} />
+        </div>
+      </div>
+
+      {/* 5 / 10 / 20 bar breakdown */}
+      {bars.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          {bars.map(({ label, pct }) => {
+            if (pct === null) return null;
+            const c = pct >= 70 ? "#00ff88" : pct >= 40 ? "#ffa502" : "#ff4757";
+            return (
+              <div key={label} className="bg-[#080d1a] border border-[#1e2d4a] rounded p-1.5 text-center">
+                <div className="text-[#4a6080] text-[0.55rem] mb-0.5">{label}</div>
+                <div className="font-bold font-mono text-sm" style={{ color: c }}>{pct}%</div>
+                <div className="text-[#4a6080] text-[0.5rem]">persist</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Distance sparkline */}
+      {distances.length > 0 && (
+        <div className="mb-2">
+          <div className="text-[#4a6080] text-[0.55rem] mb-1">Forecast ST distance (P50) — {currentDir === 1 ? "positive" : "negative"} = trend holds</div>
+          <div className="flex items-end gap-0.5 h-8">
+            {distances.map((d, i) => {
+              const holds = d * dirSign > 0;
+              const heightPct = Math.max(10, (Math.abs(d) / maxAbs) * 100);
+              return (
+                <div key={i} title={`+${i + 1} bar: ${d.toFixed(2)}`}
+                  className="flex-1 flex flex-col items-center justify-end h-full">
+                  <div className="w-full rounded-sm"
+                    style={{ height: `${heightPct}%`, backgroundColor: holds ? "#00ff88" : "#ff4757", opacity: 0.75 }} />
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex justify-between text-[#4a6080] text-[0.5rem] mt-0.5">
+            <span>+1</span>
+            <span>+{distances.length}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Interpretation */}
+      <div className="text-[0.6rem] leading-relaxed border-t border-[#1e2d4a]/50 pt-1.5">
+        {flip_risk === "low"    && <span className="text-[#00ff88]">✓ High confidence trend continues — consider holding / adding.</span>}
+        {flip_risk === "medium" && <span className="text-[#ffa502]">⚠ Moderate confidence — tighten stops, watch for reversal signals.</span>}
+        {flip_risk === "high"   && <span className="text-[#ff4757]">✗ Trend flip likely — consider reducing exposure or tightening stops.</span>}
+        {!["low","medium","high"].includes(flip_risk ?? "") && <span className="text-[#4a6080]">Insufficient data for persistence assessment.</span>}
+      </div>
+    </div>
+  );
+}
+
+export default function ChartTab({ result, config, timesfm }: Props) {
+  // ── ALL HOOKS MUST BE FIRST — no early returns before this block ──
+  const [range, setRange]               = useState<Range>("1Y");
+  const [showSMA, setShowSMA]           = useState(true);
+  const [showEMA20, setShowEMA20]       = useState(false);
+  const [showEMA50, setShowEMA50]       = useState(false);
+  const [showBB, setShowBB]             = useState(true);
+  const [showST, setShowST]             = useState(true);
+  const [showVol, setShowVol]           = useState(true);
+  const [showRSI, setShowRSI]           = useState(false);
+  const [showMACD, setShowMACD]         = useState(false);
+  const [showTrades, setShowTrades]     = useState(true);
+  const [showForecast, setShowForecast] = useState(true);
+
+  // ── GUARDS (after all hooks) ──────────────────────────────────
   if (!result) {
     return <div className="p-4 text-[#4a6080] text-xs">No result data.</div>;
   }
-
   const rawChartBars = result.chart_bars;
   if (!rawChartBars || !Array.isArray(rawChartBars) || rawChartBars.length === 0) {
     return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable.</div>;
@@ -147,21 +295,19 @@ export default function ChartTab({ result, config, timesfm }: Props) {
   const sliced: ChartBar[] = chartBars.slice(-barsToShow);
 
   if (sliced.length === 0) {
-    return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable for selected range.</div>;
+    return <div className="p-4 text-[#4a6080] text-xs">No data for selected range.</div>;
   }
 
-  // ── Compute optimized ST on full chartBars, slice to view ────
-  const optAtr = optParams?.atrPeriod ?? 10;
-  const optMul = optParams?.multiplier ?? 3.0;
-
-  const allHighs:  number[] = chartBars.map(b => (b.high  ?? b.close ?? 0));
-  const allLows:   number[] = chartBars.map(b => (b.low   ?? b.close ?? 0));
-  const allCloses: number[] = chartBars.map(b => (b.close ?? 0));
-
+  // ── Compute optimized ST ──────────────────────────────────────
+  const optAtr     = optParams?.atrPeriod ?? 10;
+  const optMul     = optParams?.multiplier ?? 3.0;
+  const allHighs   = chartBars.map(b => b.high  ?? b.close ?? 0);
+  const allLows    = chartBars.map(b => b.low   ?? b.close ?? 0);
+  const allCloses  = chartBars.map(b => b.close ?? 0);
   const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
-  const offset    = Math.max(0, chartBars.length - barsToShow);
-  const optStLine = Array.isArray(fullStLine) ? fullStLine.slice(offset) : [];
-  const optStDir  = Array.isArray(fullStDir)  ? fullStDir.slice(offset)  : [];
+  const offset     = Math.max(0, chartBars.length - barsToShow);
+  const optStLine  = Array.isArray(fullStLine) ? fullStLine.slice(offset) : [];
+  const optStDir   = Array.isArray(fullStDir)  ? fullStDir.slice(offset)  : [];
 
   // ── Trade maps ───────────────────────────────────────────────
   const entryMap: Record<string, number> = {};
@@ -178,55 +324,57 @@ export default function ChartTab({ result, config, timesfm }: Props) {
     return {
       date: b.date ?? "", dateShort: (b.date ?? "").slice(5),
       Close: b.close ?? null,
-      SMA20: (b.sma20 != null && !isNaN(b.sma20)) ? b.sma20 : null,
-      SMA50: (b.sma50 != null && !isNaN(b.sma50)) ? b.sma50 : null,
-      EMA20: (b.ema20 != null && !isNaN(b.ema20)) ? b.ema20 : null,
-      EMA50: (b.ema50 != null && !isNaN(b.ema50)) ? b.ema50 : null,
+      SMA20: (b.sma20 != null && !isNaN(b.sma20))     ? b.sma20   : null,
+      SMA50: (b.sma50 != null && !isNaN(b.sma50))     ? b.sma50   : null,
+      EMA20: (b.ema20 != null && !isNaN(b.ema20))     ? b.ema20   : null,
+      EMA50: (b.ema50 != null && !isNaN(b.ema50))     ? b.ema50   : null,
       BBU:   (b.bbUpper != null && !isNaN(b.bbUpper)) ? b.bbUpper : null,
       BBL:   (b.bbLower != null && !isNaN(b.bbLower)) ? b.bbLower : null,
-      ST_Bull: (stVal !== null && stDir === 1)  ? stVal : null,
-      ST_Bear: (stVal !== null && stDir === -1) ? stVal : null,
-      Volume: b.volume ?? null,
-      RSI:    b.rsi ?? null,
+      ST_Bull: stVal !== null && stDir === 1  ? stVal : null,
+      ST_Bear: stVal !== null && stDir === -1 ? stVal : null,
+      Volume:   b.volume  ?? null,
+      RSI:      b.rsi     ?? null,
       "MACD H": b.macdHist ?? null,
       Entry: entryMap[b.date ?? ""] ?? null,
-      Exit:  exitMap[b.date ?? ""]  ?? null,
+      Exit:  exitMap[b.date  ?? ""] ?? null,
     };
   });
 
-  // ── TimesFM forecast overlay (Phase 1) ────────────────────────
-  if (timesfm && Array.isArray(timesfm.p50) && timesfm.p50.length > 0) {
-    const p10 = timesfm.p10 ?? [];
-    const p50 = timesfm.p50;
-    const p90 = timesfm.p90 ?? [];
-    const forecastBars: ChartDataPoint[] = p50.map((v, i) => ({
-      date: `F+${i + 1}`, dateShort: `+${i + 1}`,
-      Close: null, SMA20: null, SMA50: null, EMA20: null, EMA50: null,
-      BBU: null, BBL: null, ST_Bull: null, ST_Bear: null,
-      Volume: null, RSI: null, "MACD H": null, Entry: null, Exit: null,
-      P50: v,
-      P10: p10[i] ?? undefined,
-      P90: p90[i] ?? undefined,
-    }));
-    chartData = [...chartData, ...forecastBars];
+  // ── Phase 1: append forecast bars ────────────────────────────
+  const hasForecast = showForecast && timesfm != null &&
+    Array.isArray(timesfm.p50) && timesfm.p50.length > 0;
+
+  if (hasForecast && timesfm) {
+    const p10 = Array.isArray(timesfm.p10) ? timesfm.p10 : [];
+    const p90 = Array.isArray(timesfm.p90) ? timesfm.p90 : [];
+    chartData = [
+      ...chartData,
+      ...timesfm.p50.map((v, i) => ({
+        date: `F+${i + 1}`, dateShort: `+${i + 1}`,
+        Close: null, SMA20: null, SMA50: null, EMA20: null, EMA50: null,
+        BBU: null, BBL: null, ST_Bull: null, ST_Bear: null,
+        Volume: null, RSI: null, "MACD H": null, Entry: null, Exit: null,
+        P50: v, P10: p10[i], P90: p90[i],
+      })),
+    ];
   }
 
-  // ── Y-axis domain ─────────────────────────────────────────────
+  // ── Y domain ─────────────────────────────────────────────────
   const prices = chartData.map(d => d.Close).filter((v): v is number => v != null);
   const extras: number[] = [
+    ...(hasForecast && timesfm ? [...(timesfm.p10 ?? []), ...(timesfm.p90 ?? [])].filter((v): v is number => v != null) : []),
     ...(showBB    ? chartData.flatMap(d => [d.BBU, d.BBL]).filter((v): v is number => v != null) : []),
     ...(showST    ? chartData.map(d => d.ST_Bull ?? d.ST_Bear).filter((v): v is number => v != null) : []),
     ...(showEMA20 ? chartData.map(d => d.EMA20).filter((v): v is number => v != null) : []),
     ...(showEMA50 ? chartData.map(d => d.EMA50).filter((v): v is number => v != null) : []),
   ];
   const allY = [...prices, ...extras];
-  const yPad = allY.length > 0 ? (Math.max(...allY) - Math.min(...allY)) * 0.05 || 1 : 1;
+  const yPad = allY.length > 1 ? (Math.max(...allY) - Math.min(...allY)) * 0.05 || 1 : 5;
   const yMin = allY.length > 0 ? Math.min(...allY) - yPad : 0;
   const yMax = allY.length > 0 ? Math.max(...allY) + yPad : 100;
 
-  // ── X-axis ticks ──────────────────────────────────────────────
-  const tickCount  = Math.min(8, chartData.length);
-  const tickStep   = Math.max(1, Math.floor(chartData.length / tickCount));
+  // ── X ticks ──────────────────────────────────────────────────
+  const tickStep   = Math.max(1, Math.floor(chartData.length / Math.min(8, chartData.length)));
   const sparseTicks = chartData
     .filter((_, i) => i === 0 || i === chartData.length - 1 || i % tickStep === 0)
     .map(d => d.dateShort);
@@ -242,39 +390,53 @@ export default function ChartTab({ result, config, timesfm }: Props) {
   const priceH   = subCount === 0 ? 280 : subCount === 1 ? 230 : 190;
   const subH     = 70;
 
-  const Tog = ({ label, active, onClick, activeClass }: { label: string; active: boolean; onClick: () => void; activeClass: string }) => (
-    <button onClick={onClick} className={`px-2 py-0.5 text-xs rounded border transition-all ${active ? activeClass : "border-[#1e2d4a] text-[#4a6080] hover:border-[#4a6080]"}`}>{label}</button>
-  );
-  const RangeBtn = ({ r }: { r: Range }) => (
-    <button onClick={() => setRange(r)} className={`px-2 py-0.5 text-xs rounded border transition-all ${range === r ? "bg-[#00d4ff]/15 border-[#00d4ff] text-[#00d4ff]" : "border-[#1e2d4a] text-[#4a6080] hover:border-[#00d4ff]/40"}`}>{r}</button>
+  // ── ST status ─────────────────────────────────────────────────
+  const lastDir   = optStDir.length  > 0 ? (optStDir[optStDir.length   - 1] ?? -1) : -1;
+  const lastST    = optStLine.length > 0 ? (optStLine[optStLine.length  - 1] ?? 0)  : 0;
+  const lastClose = sliced.length    > 0 ? (sliced[sliced.length - 1].close ?? result.current_price) : result.current_price;
+  const stDist    = lastST > 0 && lastClose > 0 ? ((lastClose - lastST) / lastClose) * 100 : 0;
+  const openRet   = result.st_open_return_pct;
+
+  const Tog = ({ label, active, onClick, activeClass }: {
+    label: string; active: boolean; onClick: () => void; activeClass: string;
+  }) => (
+    <button onClick={onClick}
+      className={`px-2 py-0.5 text-xs rounded border transition-all ${active ? activeClass : "border-[#1e2d4a] text-[#4a6080] hover:border-[#4a6080]"}`}>
+      {label}
+    </button>
   );
 
-  // ── ST status values ──────────────────────────────────────────
-  const lastOptDir = optStDir.length > 0 ? (optStDir[optStDir.length - 1] ?? -1) : -1;
-  const lastOptST  = optStLine.length > 0 ? (optStLine[optStLine.length - 1] ?? 0) : 0;
-  const lastClose  = sliced.length > 0 ? (sliced[sliced.length - 1].close ?? result.current_price) : result.current_price;
-  const stDist     = lastOptST > 0 && lastClose > 0 ? ((lastClose - lastOptST) / lastClose) * 100 : 0;
-  const openRet    = result.st_open_return_pct;
+  const RangeBtn = ({ r }: { r: Range }) => (
+    <button onClick={() => setRange(r)}
+      className={`px-2 py-0.5 text-xs rounded border transition-all ${range === r ? "bg-[#00d4ff]/15 border-[#00d4ff] text-[#00d4ff]" : "border-[#1e2d4a] text-[#4a6080] hover:border-[#00d4ff]/40"}`}>
+      {r}
+    </button>
+  );
 
   return (
     <div className="p-3 space-y-2">
+
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-1.5">
         <div className="flex gap-1">{(["1M","3M","6M","1Y","2Y"] as Range[]).map(r => <RangeBtn key={r} r={r} />)}</div>
         <div className="h-3 w-px bg-[#1e2d4a]" />
-        <Tog label="SMA"   active={showSMA}    onClick={() => setShowSMA(v => !v)}    activeClass="border-[#ffa502]/60 text-[#ffa502] bg-[#ffa502]/10" />
-        <Tog label="EMA20" active={showEMA20}  onClick={() => setShowEMA20(v => !v)}  activeClass="border-[#a78bfa]/60 text-[#a78bfa] bg-[#a78bfa]/10" />
-        <Tog label="EMA50" active={showEMA50}  onClick={() => setShowEMA50(v => !v)}  activeClass="border-[#f59e0b]/70 text-[#f59e0b] bg-[#f59e0b]/10" />
-        <Tog label="BB"    active={showBB}     onClick={() => setShowBB(v => !v)}     activeClass="border-[#00d4ff]/50 text-[#00d4ff] bg-[#00d4ff]/08" />
-        <Tog label="ST"    active={showST}     onClick={() => setShowST(v => !v)}     activeClass="border-[#f97316]/60 text-[#f97316] bg-[#f97316]/10" />
+        <Tog label="SMA"   active={showSMA}    onClick={() => setShowSMA(v=>!v)}    activeClass="border-[#ffa502]/60 text-[#ffa502] bg-[#ffa502]/10" />
+        <Tog label="EMA20" active={showEMA20}  onClick={() => setShowEMA20(v=>!v)}  activeClass="border-[#a78bfa]/60 text-[#a78bfa] bg-[#a78bfa]/10" />
+        <Tog label="EMA50" active={showEMA50}  onClick={() => setShowEMA50(v=>!v)}  activeClass="border-[#f59e0b]/70 text-[#f59e0b] bg-[#f59e0b]/10" />
+        <Tog label="BB"    active={showBB}     onClick={() => setShowBB(v=>!v)}     activeClass="border-[#00d4ff]/50 text-[#00d4ff] bg-[#00d4ff]/08" />
+        <Tog label="ST"    active={showST}     onClick={() => setShowST(v=>!v)}     activeClass="border-[#f97316]/60 text-[#f97316] bg-[#f97316]/10" />
         <div className="h-3 w-px bg-[#1e2d4a]" />
-        <Tog label="Vol"  active={showVol}  onClick={() => setShowVol(v => !v)}   activeClass="border-[#6b85a0]/60 text-[#6b85a0] bg-[#6b85a0]/10" />
-        <Tog label="RSI"  active={showRSI}  onClick={() => setShowRSI(v => !v)}   activeClass="border-[#a78bfa]/60 text-[#a78bfa] bg-[#a78bfa]/10" />
-        <Tog label="MACD" active={showMACD} onClick={() => setShowMACD(v => !v)}  activeClass="border-[#34d399]/60 text-[#34d399] bg-[#34d399]/10" />
+        <Tog label="Vol"   active={showVol}    onClick={() => setShowVol(v=>!v)}    activeClass="border-[#6b85a0]/60 text-[#6b85a0] bg-[#6b85a0]/10" />
+        <Tog label="RSI"   active={showRSI}    onClick={() => setShowRSI(v=>!v)}    activeClass="border-[#a78bfa]/60 text-[#a78bfa] bg-[#a78bfa]/10" />
+        <Tog label="MACD"  active={showMACD}   onClick={() => setShowMACD(v=>!v)}   activeClass="border-[#34d399]/60 text-[#34d399] bg-[#34d399]/10" />
         <div className="h-3 w-px bg-[#1e2d4a]" />
         <Tog label={`Trades${showTrades ? ` (${allScoreTrades.length}S ${allStTrades.length}ST)` : ""}`}
-          active={showTrades} onClick={() => setShowTrades(v => !v)}
+          active={showTrades} onClick={() => setShowTrades(v=>!v)}
           activeClass="border-[#00ff88]/50 text-[#00ff88] bg-[#00ff88]/08" />
+        {timesfm && (
+          <Tog label="🔮 AI Forecast" active={showForecast} onClick={() => setShowForecast(v=>!v)}
+            activeClass="border-[#a78bfa]/60 text-[#a78bfa] bg-[#a78bfa]/10" />
+        )}
       </div>
 
       {/* Price chart */}
@@ -299,18 +461,20 @@ export default function ChartTab({ result, config, timesfm }: Props) {
               <Line dataKey="ST_Bull" stroke="#00ff88" strokeWidth={2} dot={false} strokeOpacity={0.9} strokeDasharray="5 2" legendType="none" name="ST_Bull" connectNulls={false} />
               <Line dataKey="ST_Bear" stroke="#ff4757" strokeWidth={2} dot={false} strokeOpacity={0.9} strokeDasharray="5 2" legendType="none" name="ST_Bear" connectNulls={false} />
             </>}
-            <Line dataKey="Close" stroke="#00d4ff" strokeWidth={2} dot={false} name="Close" activeDot={{ r: 3, fill: "#00d4ff", stroke: "#0a0e1a" }} legendType="none" />
+            <Line dataKey="Close" stroke="#00d4ff" strokeWidth={2} dot={false} name="Close"
+              activeDot={{ r: 3, fill: "#00d4ff", stroke: "#0a0e1a" }} legendType="none" />
             {showTrades && <>
               <Line dataKey="Entry" stroke="transparent" dot={<EntryMarker />} activeDot={false} name="Entry" legendType="none" isAnimationActive={false} />
               <Line dataKey="Exit"  stroke="transparent" dot={<ExitMarker />}  activeDot={false} name="Exit"  legendType="none" isAnimationActive={false} />
             </>}
             <ReferenceLine y={result.current_price} stroke="#c8d8f0" strokeDasharray="4 2" strokeOpacity={0.3}
               label={{ value: result.current_price.toFixed(2), position: "right", fontSize: 9, fill: "#6b85a0" }} />
-            {/* Phase 1: TimesFM forecast overlay */}
-            {timesfm && Array.isArray(timesfm.p50) && timesfm.p50.length > 0 && <>
-              <Line dataKey="P50" stroke="#a78bfa" strokeWidth={2} dot={false} strokeDasharray="5 5" name="P50 Forecast" connectNulls={false} />
-              <Area dataKey="P90" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P90 band" />
-              <Area dataKey="P10" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P10 band" />
+            {/* Phase 1: forecast overlay */}
+            {hasForecast && <>
+              <Area dataKey="P90" stroke="none" fill="#a78bfa" fillOpacity={0.08} legendType="none" name="P90 band" />
+              <Area dataKey="P10" stroke="none" fill="#a78bfa" fillOpacity={0.08} legendType="none" name="P10 band" />
+              <Line dataKey="P50" stroke="#a78bfa" strokeWidth={2} dot={false} strokeDasharray="5 5"
+                legendType="none" name="P50 Forecast" connectNulls={false} />
             </>}
           </ComposedChart>
         </ResponsiveContainer>
@@ -372,7 +536,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
           <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #00ff88" }} /> ST Bull</span>
           <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #ff4757" }} /> ST Bear</span>
         </>}
-        {timesfm && <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #a78bfa" }} /> P50 Forecast</span>}
+        {hasForecast && <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #a78bfa" }} /> P50 Forecast</span>}
         {showTrades && <>
           <span className="flex items-center gap-1.5"><span className="text-[#00ff88] text-sm leading-none">▲</span> Entry</span>
           <span className="flex items-center gap-1.5"><span className="text-[#ff4757] text-sm leading-none">▼</span> Exit</span>
@@ -380,22 +544,32 @@ export default function ChartTab({ result, config, timesfm }: Props) {
       </div>
 
       {/* ST Status strip */}
-      <div className={`flex items-center gap-3 px-2 py-1 rounded border text-xs font-mono ${lastOptDir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
-        <span className={lastOptDir === 1 ? "text-[#00ff88] font-bold" : "text-[#ff4757] font-bold"}>
-          {lastOptDir === 1 ? "🟢 ST BULLISH" : "🔴 ST BEARISH"}
+      <div className={`flex items-center gap-3 px-2 py-1 rounded border text-xs font-mono ${lastDir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
+        <span className={lastDir === 1 ? "text-[#00ff88] font-bold" : "text-[#ff4757] font-bold"}>
+          {lastDir === 1 ? "🟢 ST BULLISH" : "🔴 ST BEARISH"}
         </span>
-        {lastOptST > 0 && <span className="text-[#4a6080]">line: <span className="text-[#c8d8f0]">{lastOptST.toFixed(2)}</span></span>}
-        {lastOptDir === 1 && <span className="text-[#4a6080]">dist: <span className="text-[#c8d8f0]">{stDist.toFixed(1)}%</span></span>}
-        {lastOptDir === 1 && openRet !== null && openRet !== undefined && (
+        {lastST > 0 && <span className="text-[#4a6080]">line: <span className="text-[#c8d8f0]">{lastST.toFixed(2)}</span></span>}
+        {lastDir === 1 && <span className="text-[#4a6080]">dist: <span className="text-[#c8d8f0]">{stDist.toFixed(1)}%</span></span>}
+        {lastDir === 1 && openRet != null && (
           <span className="text-[#4a6080]">open: <span className={openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span></span>
         )}
-        {lastOptDir === -1 && <span className="text-[#4a6080]">wait for flip to bullish before entry</span>}
+        {lastDir === -1 && <span className="text-[#4a6080]">wait for flip before entry</span>}
         {optLabel && (
-          <span className="ml-auto text-[#ffa502] border border-[#ffa502]/40 rounded px-1.5 py-0.5 text-[0.6rem] font-mono">
+          <span className="ml-auto text-[#ffa502] border border-[#ffa502]/40 rounded px-1.5 py-0.5 text-[0.6rem]">
             {optLabel}
           </span>
         )}
       </div>
+
+      {/* Phase 1 — Price Targets panel */}
+      {showForecast && timesfm && timesfm.t1 != null && (
+        <TimesfmTargetsPanel timesfm={timesfm} currentPrice={result.current_price} />
+      )}
+
+      {/* Phase 2 — ST Persistence panel */}
+      {showForecast && timesfm?.st_persistence && (
+        <STPersistencePanel persistence={timesfm.st_persistence} currentDir={lastDir} />
+      )}
 
       {/* Score Trades */}
       {showTrades && allScoreTrades.length > 0 && (
@@ -448,9 +622,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
             ST TRADES — {allStTrades.length} total ·{" "}
             <span className="text-[#00ff88]">{allStTrades.filter(t => t.return > 0).length}W</span>{" "}
             <span className="text-[#ff4757]">{allStTrades.filter(t => t.return <= 0).length}L</span>
-            <span className="text-[#4a6080] font-normal ml-2 text-[0.65rem]">
-              ({stTradesInView.length} in view{optLabel ? ` · ${optLabel}` : ""})
-            </span>
+            <span className="text-[#4a6080] font-normal ml-2 text-[0.65rem]">({stTradesInView.length} in view{optLabel ? ` · ${optLabel}` : ""})</span>
           </div>
           <div className="overflow-x-auto rounded border border-[#ffa502]/20 max-h-48 overflow-y-auto">
             <table className="w-full text-xs">
@@ -485,6 +657,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
           </div>
         </div>
       )}
+
     </div>
   );
 }
