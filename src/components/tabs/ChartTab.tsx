@@ -194,7 +194,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
     };
   });
 
-  // ── TimesFM forecast overlay ──────────────────────────────────
+  // ── TimesFM forecast overlay (Phase 1) ────────────────────────
   if (timesfm && Array.isArray(timesfm.p50) && timesfm.p50.length > 0) {
     const p10 = timesfm.p10 ?? [];
     const p50 = timesfm.p50;
@@ -306,6 +306,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
             </>}
             <ReferenceLine y={result.current_price} stroke="#c8d8f0" strokeDasharray="4 2" strokeOpacity={0.3}
               label={{ value: result.current_price.toFixed(2), position: "right", fontSize: 9, fill: "#6b85a0" }} />
+            {/* Phase 1: TimesFM forecast overlay */}
             {timesfm && Array.isArray(timesfm.p50) && timesfm.p50.length > 0 && <>
               <Line dataKey="P50" stroke="#a78bfa" strokeWidth={2} dot={false} strokeDasharray="5 5" name="P50 Forecast" connectNulls={false} />
               <Area dataKey="P90" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P90 band" />
