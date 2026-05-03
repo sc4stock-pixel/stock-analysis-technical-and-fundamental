@@ -1,11 +1,27 @@
 "use client";
 import { useState } from "react";
-import { StockAnalysisResult, ChartBar, TimesfmPriceTargets, AppConfig } from "@/types";
+import { StockAnalysisResult, ChartBar, AppConfig } from "@/types";
 import { supertrend } from "@/lib/indicators";
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, Area,
 } from "recharts";
+
+// TimesfmPriceTargets imported inline to avoid circular deps
+interface TimesfmPriceTargets {
+  t1: number;
+  t2: number;
+  t3: number;
+  p10: number[];
+  p50: number[];
+  p90: number[];
+  st_persistence?: {
+    current_dir: number;
+    persistence_prob: number;
+    flip_risk: string;
+    p50_distances: number[];
+  };
+}
 
 interface Props {
   result: StockAnalysisResult;
@@ -34,6 +50,7 @@ const EntryMarker = (props: { cx?: number; cy?: number; value?: number }) => {
     </g>
   );
 };
+
 const ExitMarker = (props: { cx?: number; cy?: number; value?: number }) => {
   if (!props.value || !props.cx || !props.cy) return null;
   const { cx, cy } = props;
@@ -45,7 +62,6 @@ const ExitMarker = (props: { cx?: number; cy?: number; value?: number }) => {
   );
 };
 
-// Unified data point for actual bars and forecast bars
 interface ChartDataPoint {
   date: string;
   dateShort: string;
@@ -112,34 +128,42 @@ export default function ChartTab({ result, config, timesfm }: Props) {
   const [showMACD, setShowMACD]     = useState(false);
   const [showTrades, setShowTrades] = useState(true);
 
-  const chartBars = result.chart_bars ?? [];
+  // ── EARLY RETURNS before any data access ─────────────────────
+  if (!result) {
+    return <div className="p-4 text-[#4a6080] text-xs">No result data.</div>;
+  }
+
+  const rawChartBars = result.chart_bars;
+  if (!rawChartBars || !Array.isArray(rawChartBars) || rawChartBars.length === 0) {
+    return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable.</div>;
+  }
+
+  const chartBars: ChartBar[] = rawChartBars;
   const bt        = result.backtest;
   const optParams = result.st_opt_params;
   const optLabel  = optParams ? `ATR${optParams.atrPeriod} × ${optParams.multiplier}` : null;
-  
-  if (chartBars.length === 0) {
-    return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable.</div>;
-  }
-  
+
   const barsToShow = Math.min(RANGE_BARS[range], chartBars.length);
   const sliced: ChartBar[] = chartBars.slice(-barsToShow);
-  
+
   if (sliced.length === 0) {
     return <div className="p-4 text-[#4a6080] text-xs">Chart data unavailable for selected range.</div>;
   }
-  
+
+  // ── Compute optimized ST on full chartBars, slice to view ────
   const optAtr = optParams?.atrPeriod ?? 10;
   const optMul = optParams?.multiplier ?? 3.0;
-  
-  // Compute optimized ST on full chartBars array, then slice to view window
-  const allHighs  = chartBars.map(b => b.high  ?? 0);
-  const allLows   = chartBars.map(b => b.low   ?? 0);
-  const allCloses = chartBars.map(b => b.close ?? 0);
+
+  const allHighs:  number[] = chartBars.map(b => (b.high  ?? b.close ?? 0));
+  const allLows:   number[] = chartBars.map(b => (b.low   ?? b.close ?? 0));
+  const allCloses: number[] = chartBars.map(b => (b.close ?? 0));
+
   const [fullStLine, fullStDir] = supertrend(allHighs, allLows, allCloses, optAtr, optMul);
-  const offset   = Math.max(0, chartBars.length - barsToShow);
-  const optStLine = fullStLine.slice(offset);
-  const optStDir  = fullStDir.slice(offset);
-  
+  const offset    = Math.max(0, chartBars.length - barsToShow);
+  const optStLine = Array.isArray(fullStLine) ? fullStLine.slice(offset) : [];
+  const optStDir  = Array.isArray(fullStDir)  ? fullStDir.slice(offset)  : [];
+
+  // ── Trade maps ───────────────────────────────────────────────
   const entryMap: Record<string, number> = {};
   const exitMap:  Record<string, number> = {};
   for (const t of bt?.trades ?? []) {
@@ -147,63 +171,68 @@ export default function ChartTab({ result, config, timesfm }: Props) {
     if (t.exit_date)  exitMap[t.exit_date]   = t.exit_price;
   }
 
-  let chartData: ChartDataPoint[] = sliced.map((b, i) => ({
-    date: b.date, dateShort: b.date.slice(5),
-    Close: b.close,
-    SMA20: isNaN(b.sma20) ? null : b.sma20,
-    SMA50: isNaN(b.sma50) ? null : b.sma50,
-    EMA20: (!b.ema20 || isNaN(b.ema20)) ? null : b.ema20,
-    EMA50: (!b.ema50 || isNaN(b.ema50)) ? null : b.ema50,
-    BBU: isNaN(b.bbUpper) ? null : b.bbUpper,
-    BBL: isNaN(b.bbLower) ? null : b.bbLower,
-    ST_Bull: optStDir[i] === 1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
-    ST_Bear: optStDir[i] === -1 && !isNaN(optStLine[i]) ? optStLine[i] : null,
-    Volume: b.volume,
-    RSI: b.rsi,
-    "MACD H": b.macdHist,
-    Entry: entryMap[b.date] ?? null,
-    Exit: exitMap[b.date] ?? null,
-  }));
+  // ── Build chart data ─────────────────────────────────────────
+  let chartData: ChartDataPoint[] = sliced.map((b, i) => {
+    const stVal = (optStLine[i] != null && !isNaN(optStLine[i])) ? optStLine[i] : null;
+    const stDir = optStDir[i] ?? -1;
+    return {
+      date: b.date ?? "", dateShort: (b.date ?? "").slice(5),
+      Close: b.close ?? null,
+      SMA20: (b.sma20 != null && !isNaN(b.sma20)) ? b.sma20 : null,
+      SMA50: (b.sma50 != null && !isNaN(b.sma50)) ? b.sma50 : null,
+      EMA20: (b.ema20 != null && !isNaN(b.ema20)) ? b.ema20 : null,
+      EMA50: (b.ema50 != null && !isNaN(b.ema50)) ? b.ema50 : null,
+      BBU:   (b.bbUpper != null && !isNaN(b.bbUpper)) ? b.bbUpper : null,
+      BBL:   (b.bbLower != null && !isNaN(b.bbLower)) ? b.bbLower : null,
+      ST_Bull: (stVal !== null && stDir === 1)  ? stVal : null,
+      ST_Bear: (stVal !== null && stDir === -1) ? stVal : null,
+      Volume: b.volume ?? null,
+      RSI:    b.rsi ?? null,
+      "MACD H": b.macdHist ?? null,
+      Entry: entryMap[b.date ?? ""] ?? null,
+      Exit:  exitMap[b.date ?? ""]  ?? null,
+    };
+  });
 
-  // ── TIMESFM FORECAST OVERLAY ──────────────────────────────
-  if (timesfm) {
-    const p10 = timesfm.p10, p50 = timesfm.p50, p90 = timesfm.p90;
+  // ── TimesFM forecast overlay ──────────────────────────────────
+  if (timesfm && Array.isArray(timesfm.p50) && timesfm.p50.length > 0) {
+    const p10 = timesfm.p10 ?? [];
+    const p50 = timesfm.p50;
+    const p90 = timesfm.p90 ?? [];
     const forecastBars: ChartDataPoint[] = p50.map((v, i) => ({
-      date: `F+${i + 1}`,
-      dateShort: `+${i + 1}`,
-      Close: null,
-      SMA20: null, SMA50: null, EMA20: null, EMA50: null,
-      BBU: null, BBL: null,
-      ST_Bull: null, ST_Bear: null,
-      Volume: null, RSI: null, "MACD H": null,
-      Entry: null, Exit: null,
-      P50: v, P10: p10[i], P90: p90[i],
+      date: `F+${i + 1}`, dateShort: `+${i + 1}`,
+      Close: null, SMA20: null, SMA50: null, EMA20: null, EMA50: null,
+      BBU: null, BBL: null, ST_Bull: null, ST_Bear: null,
+      Volume: null, RSI: null, "MACD H": null, Entry: null, Exit: null,
+      P50: v,
+      P10: p10[i] ?? undefined,
+      P90: p90[i] ?? undefined,
     }));
     chartData = [...chartData, ...forecastBars];
   }
 
-  const prices = chartData
-    .filter(d => d.Close != null)
-    .map(d => d.Close as number);
-
-  const extras = [
-    ...(showBB    ? chartData.flatMap(d => [d.BBU, d.BBL]).filter(Boolean) as number[] : []),
-    ...(showST    ? chartData.map(d => d.ST_Bull ?? d.ST_Bear).filter(Boolean) as number[] : []),
-    ...(showEMA20 ? chartData.map(d => d.EMA20).filter(Boolean) as number[] : []),
-    ...(showEMA50 ? chartData.map(d => d.EMA50).filter(Boolean) as number[] : []),
+  // ── Y-axis domain ─────────────────────────────────────────────
+  const prices = chartData.map(d => d.Close).filter((v): v is number => v != null);
+  const extras: number[] = [
+    ...(showBB    ? chartData.flatMap(d => [d.BBU, d.BBL]).filter((v): v is number => v != null) : []),
+    ...(showST    ? chartData.map(d => d.ST_Bull ?? d.ST_Bear).filter((v): v is number => v != null) : []),
+    ...(showEMA20 ? chartData.map(d => d.EMA20).filter((v): v is number => v != null) : []),
+    ...(showEMA50 ? chartData.map(d => d.EMA50).filter((v): v is number => v != null) : []),
   ];
   const allY = [...prices, ...extras];
-  const yPad = (Math.max(...allY) - Math.min(...allY)) * 0.05 || 1;
-  const yMin = Math.min(...allY) - yPad;
-  const yMax = Math.max(...allY) + yPad;
+  const yPad = allY.length > 0 ? (Math.max(...allY) - Math.min(...allY)) * 0.05 || 1 : 1;
+  const yMin = allY.length > 0 ? Math.min(...allY) - yPad : 0;
+  const yMax = allY.length > 0 ? Math.max(...allY) + yPad : 100;
 
+  // ── X-axis ticks ──────────────────────────────────────────────
   const tickCount  = Math.min(8, chartData.length);
   const tickStep   = Math.max(1, Math.floor(chartData.length / tickCount));
   const sparseTicks = chartData
     .filter((_, i) => i === 0 || i === chartData.length - 1 || i % tickStep === 0)
     .map(d => d.dateShort);
 
-  const datesInView    = new Set(sliced.map(b => b.date));
+  // ── Trade lists ───────────────────────────────────────────────
+  const datesInView    = new Set(sliced.map(b => b.date ?? ""));
   const allScoreTrades = bt?.trades ?? [];
   const allStTrades    = result.comparison?.supertrend?.trades ?? [];
   const tradesInView   = allScoreTrades.filter(t => datesInView.has(t.entry_date) || datesInView.has(t.exit_date));
@@ -219,6 +248,13 @@ export default function ChartTab({ result, config, timesfm }: Props) {
   const RangeBtn = ({ r }: { r: Range }) => (
     <button onClick={() => setRange(r)} className={`px-2 py-0.5 text-xs rounded border transition-all ${range === r ? "bg-[#00d4ff]/15 border-[#00d4ff] text-[#00d4ff]" : "border-[#1e2d4a] text-[#4a6080] hover:border-[#00d4ff]/40"}`}>{r}</button>
   );
+
+  // ── ST status values ──────────────────────────────────────────
+  const lastOptDir = optStDir.length > 0 ? (optStDir[optStDir.length - 1] ?? -1) : -1;
+  const lastOptST  = optStLine.length > 0 ? (optStLine[optStLine.length - 1] ?? 0) : 0;
+  const lastClose  = sliced.length > 0 ? (sliced[sliced.length - 1].close ?? result.current_price) : result.current_price;
+  const stDist     = lastOptST > 0 && lastClose > 0 ? ((lastClose - lastOptST) / lastClose) * 100 : 0;
+  const openRet    = result.st_open_return_pct;
 
   return (
     <div className="p-3 space-y-2">
@@ -270,15 +306,11 @@ export default function ChartTab({ result, config, timesfm }: Props) {
             </>}
             <ReferenceLine y={result.current_price} stroke="#c8d8f0" strokeDasharray="4 2" strokeOpacity={0.3}
               label={{ value: result.current_price.toFixed(2), position: "right", fontSize: 9, fill: "#6b85a0" }} />
-
-            {/* TimesFM forecast overlay */}
-            {timesfm && (
-              <>
-                <Line dataKey="P50" stroke="#a78bfa" strokeWidth={2} dot={false} strokeDasharray="5 5" name="P50 Forecast" connectNulls={false} />
-                <Area dataKey="P90" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P90 band" />
-                <Area dataKey="P10" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P10 band" />
-              </>
-            )}
+            {timesfm && Array.isArray(timesfm.p50) && timesfm.p50.length > 0 && <>
+              <Line dataKey="P50" stroke="#a78bfa" strokeWidth={2} dot={false} strokeDasharray="5 5" name="P50 Forecast" connectNulls={false} />
+              <Area dataKey="P90" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P90 band" />
+              <Area dataKey="P10" stroke="none" fill="#a78bfa" fillOpacity={0.1} name="P10 band" />
+            </>}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -347,31 +379,22 @@ export default function ChartTab({ result, config, timesfm }: Props) {
       </div>
 
       {/* ST Status strip */}
-      {(() => {
-        const dir     = optStDir.length ? optStDir[optStDir.length - 1] : -1;
-        const stVal   = optStLine.length ? optStLine[optStLine.length - 1] : 0;
-        const close   = sliced.length ? sliced[sliced.length - 1].close : result.current_price;
-        const dist    = stVal > 0 && close > 0 ? ((close - stVal) / close) * 100 : 0;
-        const openRet = result.st_open_return_pct;
-        return (
-          <div className={`flex items-center gap-3 px-2 py-1 rounded border text-xs font-mono ${dir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
-            <span className={dir === 1 ? "text-[#00ff88] font-bold" : "text-[#ff4757] font-bold"}>
-              {dir === 1 ? "🟢 ST BULLISH" : "🔴 ST BEARISH"}
-            </span>
-            {stVal > 0 && <span className="text-[#4a6080]">line: <span className="text-[#c8d8f0]">{stVal.toFixed(2)}</span></span>}
-            {dir === 1 && <span className="text-[#4a6080]">dist: <span className="text-[#c8d8f0]">{dist.toFixed(1)}%</span></span>}
-            {dir === 1 && openRet !== null && openRet !== undefined && (
-              <span className="text-[#4a6080]">open: <span className={openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span></span>
-            )}
-            {dir === -1 && <span className="text-[#4a6080]">wait for flip to bullish before entry</span>}
-            {optLabel && (
-              <span className="ml-auto text-[#ffa502] border border-[#ffa502]/40 rounded px-1.5 py-0.5 text-[0.6rem] font-mono">
-                {optLabel}
-              </span>
-            )}
-          </div>
-        );
-      })()}
+      <div className={`flex items-center gap-3 px-2 py-1 rounded border text-xs font-mono ${lastOptDir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
+        <span className={lastOptDir === 1 ? "text-[#00ff88] font-bold" : "text-[#ff4757] font-bold"}>
+          {lastOptDir === 1 ? "🟢 ST BULLISH" : "🔴 ST BEARISH"}
+        </span>
+        {lastOptST > 0 && <span className="text-[#4a6080]">line: <span className="text-[#c8d8f0]">{lastOptST.toFixed(2)}</span></span>}
+        {lastOptDir === 1 && <span className="text-[#4a6080]">dist: <span className="text-[#c8d8f0]">{stDist.toFixed(1)}%</span></span>}
+        {lastOptDir === 1 && openRet !== null && openRet !== undefined && (
+          <span className="text-[#4a6080]">open: <span className={openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span></span>
+        )}
+        {lastOptDir === -1 && <span className="text-[#4a6080]">wait for flip to bullish before entry</span>}
+        {optLabel && (
+          <span className="ml-auto text-[#ffa502] border border-[#ffa502]/40 rounded px-1.5 py-0.5 text-[0.6rem] font-mono">
+            {optLabel}
+          </span>
+        )}
+      </div>
 
       {/* Score Trades */}
       {showTrades && allScoreTrades.length > 0 && (
