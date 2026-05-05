@@ -83,6 +83,7 @@ interface ChartDataPoint {
   P50: number | null;
   TunnelLo: number | null;
   TunnelHi: number | null;
+  TunnelBand: [number, number] | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -264,9 +265,10 @@ export default function ChartTab({ result, config, timesfm }: Props) {
       "MACD H": b.macdHist ?? null,
       Entry:    entryMap[b.date ?? ""] ?? null,
       Exit:     exitMap[b.date  ?? ""] ?? null,
-      P50:      null,
-      TunnelLo: null,
-      TunnelHi: null,
+      P50:        null,
+      TunnelLo:   null,
+      TunnelHi:   null,
+      TunnelBand: null,
     };
   });
 
@@ -288,7 +290,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
       Close: null, SMA20: null, SMA50: null, EMA20: null, EMA50: null,
       BBU: null, BBL: null, ST_Bull: null, ST_Bear: null,
       Volume: null, RSI: null, "MACD H": null, Entry: null, Exit: null,
-      P50: lastClose, TunnelLo: lastClose, TunnelHi: lastClose,
+      P50: lastClose, TunnelLo: lastClose, TunnelHi: lastClose, TunnelBand: [lastClose, lastClose] as [number,number],
     },
     ...timesfm!.p50.map((v, i) => ({
       date: `F+${i + 1}`, dateShort: `+${i + 1}d`,
@@ -298,6 +300,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
       P50: v,
       TunnelLo: timesfm!.p10[i] ?? v,
       TunnelHi: timesfm!.p90[i] ?? v,
+      TunnelBand: [timesfm!.p10[i] ?? v, timesfm!.p90[i] ?? v] as [number, number],
     })),
   ] : [];
 
@@ -411,33 +414,23 @@ export default function ChartTab({ result, config, timesfm }: Props) {
                 label={{ value: "▶ Forecast", position: "insideTopRight", fontSize: 8, fill: "#a78bfa" }} />
             )}
 
-            {/* Phase 1: Confidence tunnel — P10 baseline + P10→P90 band */}
+            {/* Phase 1: Confidence tunnel — [P10, P90] band + P50 median line */}
             {hasForecast && <>
-              {/* Lower boundary (P10) */}
+              {/* Band: TunnelBand=[lo,hi] renders as a proper filled region */}
               <Area
-                dataKey="TunnelLo"
+                dataKey="TunnelBand"
                 stroke="#a78bfa"
                 strokeWidth={0.8}
-                strokeOpacity={0.4}
-                strokeDasharray="3 3"
-                fill="transparent"
-                legendType="none"
-                name="P10"
-                connectNulls={false}
-              />
-              {/* Upper boundary (P90) fills down to P10 — the cloud */}
-              <Area
-                dataKey="TunnelHi"
-                stroke="#a78bfa"
-                strokeWidth={0.8}
-                strokeOpacity={0.4}
+                strokeOpacity={0.5}
                 strokeDasharray="3 3"
                 fill="url(#tunnelGrad)"
+                fillOpacity={1}
                 legendType="none"
-                name="P90"
+                name="Tunnel"
                 connectNulls={false}
+                isAnimationActive={false}
               />
-              {/* P50 median forecast */}
+              {/* P50 median forecast line */}
               <Line
                 dataKey="P50"
                 stroke="#a78bfa"
@@ -447,6 +440,7 @@ export default function ChartTab({ result, config, timesfm }: Props) {
                 legendType="none"
                 name="P50"
                 connectNulls={false}
+                isAnimationActive={false}
               />
             </>}
 
