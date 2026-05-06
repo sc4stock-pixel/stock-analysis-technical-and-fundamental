@@ -6,6 +6,10 @@
 """
 import json, sys, os
 from datetime import datetime, timezone
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # Fallback
 import numpy as np
 import yfinance as yf
 
@@ -41,10 +45,15 @@ stocks = [
 # ── Initialize output with metadata at root level (backward compatible) ──
 # Structure: { "_metadata": {...}, "9988.HK": {...}, "0700.HK": {...}, ... }
 # This keeps stocks at root level (existing code works) and adds metadata
+
+# Get HK timezone time
+hk_tz = ZoneInfo("Asia/Hong_Kong")
+hk_now = datetime.now(hk_tz)
+
 output = {
     "_metadata": {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "generated_at_hk": datetime.now().strftime("%Y-%m-%d %H:%M:%S HKT"),
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_hk": hk_now.strftime("%Y-%m-%d %H:%M:%S HKT"),
         "model": "TimesFM 2.5 200M PyTorch",
         "data_source": "yfinance",
         "horizon_days": 20,
