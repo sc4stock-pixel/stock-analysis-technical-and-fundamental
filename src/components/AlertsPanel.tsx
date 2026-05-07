@@ -1,7 +1,7 @@
-“use client”;
-import { useState, useMemo } from “react”;
-import { StockAnalysisResult } from “@/types”;
-import { supertrend, ema, sma } from “@/lib/indicators”;
+"use client";
+import { useState, useMemo } from "react";
+import { StockAnalysisResult } from "@/types";
+import { supertrend, ema, sma } from "@/lib/indicators";
 
 interface Props {
 results: StockAnalysisResult[];
@@ -17,7 +17,7 @@ const FLIP_ALERT_DAYS = 3;
 
 function computeOptimizedFlip(
 result: StockAnalysisResult
-): { flipType: “BULLISH” | “BEARISH” | null; barsSince: number } {
+): { flipType: "BULLISH" | "BEARISH" | null; barsSince: number } {
 const bars = result.chart_bars;
 if (!bars || bars.length < 2) return { flipType: null, barsSince: 999 };
 
@@ -34,8 +34,8 @@ if (dir.length < 2) return { flipType: null, barsSince: 999 };
 for (let i = dir.length - 1; i >= 1; i–) {
 if (dir[i] !== dir[i - 1]) {
 const barsSince = dir.length - 1 - i;
-if (dir[i] === 1) return { flipType: “BULLISH”, barsSince };
-if (dir[i] === -1) return { flipType: “BEARISH”, barsSince };
+if (dir[i] === 1) return { flipType: "BULLISH", barsSince };
+if (dir[i] === -1) return { flipType: "BEARISH", barsSince };
 }
 }
 return { flipType: null, barsSince: 999 };
@@ -265,14 +265,14 @@ if (alerts.length === 0) return null;
 return (
 <div className="bg-[#0f1629] border border-[#1e2d4a] rounded p-3 my-3">
 <div
-className=“flex items-center justify-between cursor-pointer select-none”
+className="flex items-center justify-between cursor-pointer select-none"
 onClick={() => setCollapsed(!collapsed)}
 >
 <div className="flex items-center gap-2">
 <span className="text-[#f59e0b] text-sm font-bold">⚡ ALERTS</span>
 <span className="text-[#4a6080] text-xs">({alerts.length})</span>
 </div>
-<span className="text-[#4a6080] text-xs">{collapsed ? “▼” : “▲”}</span>
+<span className="text-[#4a6080] text-xs">{collapsed ? "▼" : "▲"}</span>
 </div>
 {!collapsed && (
 <div className="mt-2 space-y-1.5">
@@ -286,8 +286,8 @@ className="flex items-start gap-2 text-[0.7rem] border-b border-[#1e2d4a]/30 pb-
 <span className="shrink-0 mt-0.5">{alert.icon}</span>
 <span>
 {parts.map((part, i) =>
-part.startsWith(”<strong>”) ? (
-<strong key={i}>{part.replace(/</?strong>/g, “”)}</strong>
+part.startsWith("<strong>") ? (
+<strong key={i}>{part.replace(/</?strong>/g, "")}</strong>
 ) : (
 part
 )
