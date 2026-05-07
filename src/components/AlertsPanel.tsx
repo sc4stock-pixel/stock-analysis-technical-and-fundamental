@@ -1,355 +1,300 @@
 "use client";
-import { useState, useCallback } from "react";
-import { StockAnalysisResult, TimesfmForecasts } from "@/types";
+import { useState, useMemo } from "react";
+import { StockAnalysisResult } from "@/types";
+import { supertrend, ema, sma } from "@/lib/indicators";
 
 interface Props {
   results: StockAnalysisResult[];
-  onRowClick: (symbol: string) => void;
-  timesfmData?: TimesfmForecasts | null;
 }
 
-function grade(score: number): { label: string; color: string } {
-  if (score >= 8.0) return { label: "A+", color: "text-[#00ff88] font-bold" };
-  if (score >= 7.0) return { label: "A",  color: "text-[#00ff88] font-bold" };
-  if (score >= 6.0) return { label: "B",  color: "text-[#00d4ff] font-bold" };
-  if (score >= 5.0) return { label: "C",  color: "text-[#ffa502]" };
-  if (score >= 4.0) return { label: "D",  color: "text-[#ff7f50]" };
-  return { label: "F", color: "text-[#ff4757]" };
+interface Alert {
+  icon: string;
+  text: string;
+  priority: number; // lower = higher priority
 }
 
-function regimeCell(regime: string): { icon: string; short: string; color: string } {
-  const r = regime ?? "UNKNOWN";
-  const G = "text-[#00ff88]", R = "text-[#ff4757]", A = "text-[#ffa502]",
-        C = "text-[#00d4ff]", D = "text-[#c8d8f0]";
-  if (r === "STRONG_UPTREND")               return { icon: "🚀",   short: "Strong UP",    color: G };
-  if (r === "STRONG_DOWNTREND")             return { icon: "💣",   short: "Strong DN",    color: R };
-  if (r === "STRENGTHENING_UPTREND")        return { icon: "↗↗",  short: "Str'ing UP",   color: G };
-  if (r === "STRENGTHENING_DOWNTREND")      return { icon: "↓↓",  short: "Str'ing DN",   color: R };
-  if (r === "WEAKENING_UPTREND")            return { icon: "↗↘",  short: "Weakening UP", color: A };
-  if (r === "WEAKENING_DOWNTREND")          return { icon: "↘↘",  short: "Weakening DN", color: R };
-  if (r === "EXHAUSTING_UPTREND")           return { icon: "🔥↗", short: "Exhaust UP",   color: A };
-  if (r === "EXHAUSTING_DOWNTREND")         return { icon: "🔥↓", short: "Exhaust DN",   color: R };
-  if (r === "UPTREND")                      return { icon: "↗",   short: "Uptrend",      color: G };
-  if (r === "DOWNTREND")                    return { icon: "↓",   short: "Downtrend",    color: R };
-  if (r === "WEAK_UPTREND")                 return { icon: "↗",   short: "Weak UP",      color: G };
-  if (r === "WEAK_DOWNTREND")               return { icon: "↘",   short: "Weak DN",      color: R };
-  if (r === "WEAK_UPTREND_STRENGTHENING")   return { icon: "↗↑",  short: "Wk UP↑",       color: G };
-  if (r === "WEAK_DOWNTREND_STRENGTHENING") return { icon: "↘↑",  short: "Wk DN↑",       color: A };
-  if (r === "WEAK_UPTREND_WEAKENING")       return { icon: "↗↘",  short: "Wk UP↓",       color: A };
-  if (r === "WEAK_DOWNTREND_WEAKENING")     return { icon: "↓↓",  short: "Wk DN↓",       color: R };
-  if (r === "BEAR_RALLY")                   return { icon: "📉↑", short: "Bear Rally",    color: A };
-  if (r === "WEAK_BEAR_RALLY")              return { icon: "📉",  short: "Wk Bear Rly",  color: A };
-  if (r === "RANGING")                      return { icon: "↔",   short: "Ranging",       color: C };
-  if (r === "OVERBOUGHT")                   return { icon: "🔴",  short: "Overbought",    color: A };
-  if (r === "OVERSOLD")                     return { icon: "🟢",  short: "Oversold",      color: G };
-  if (r === "NEUTRAL")                      return { icon: "--",   short: "Neutral",       color: D };
-  if (r.startsWith("HIGH_VOL_") && r.includes("UPTREND")) return { icon: "🚀⚡", short: "HV UP", color: G };
-  if (r.startsWith("HIGH_VOL_"))            return { icon: "⚡",  short: "High Vol", color: A };
-  if (r.startsWith("EXTREME_VOL"))          return { icon: "⚡⚡", short: "Extr Vol", color: R };
-  return { icon: "--", short: r.replace(/_/g, " ").slice(0, 12), color: D };
-}
+const FLIP_ALERT_DAYS = 3;
 
-function signalBadge(s: string) {
-  if (s === "BUY")  return <span className="badge-buy  px-1.5 py-0.5 rounded text-xs font-bold">BUY</span>;
-  if (s === "SELL") return <span className="badge-sell px-1.5 py-0.5 rounded text-xs font-bold">SELL</span>;
-  return                   <span className="badge-hold px-1.5 py-0.5 rounded text-xs">HOLD</span>;
-}
+function computeOptimizedFlip(
+  result: StockAnalysisResult
+): { flipType: "BULLISH" | "BEARISH" | null; barsSince: number } {
+  const bars = result.chart_bars;
+  if (!bars || bars.length < 2) return { flipType: null, barsSince: 999 };
 
-const n  = (v: number | null | undefined, d = 1, sfx = "") =>
-  v == null || isNaN(Number(v)) ? "--" : `${Number(v).toFixed(d)}${sfx}`;
-const sn = (v: number | null | undefined, d = 1, sfx = "") =>
-  v == null || isNaN(Number(v)) ? "--" : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${sfx}`;
-const numColor = (v: number | null | undefined, good = 0) =>
-  v == null || isNaN(Number(v)) ? "text-[#4a6080]" : Number(v) >= good ? "text-[#00ff88]" : "text-[#ff4757]";
+  const optAtr = result.st_opt_params?.atrPeriod ?? 10;
+  const optMul = result.st_opt_params?.multiplier ?? 3.0;
 
-type ColKey =
-  | "symbol" | "price" | "change_pct" | "regime" | "grade" | "score"
-  | "signal" | "st_status" | "tfm_10d" | "rsi" | "macd_hist"
-  | "sc_500d" | "st_500d" | "sc_250d" | "st_250d"
-  | "sc_sharpe" | "sc_alpha" | "st_sharpe" | "st_alpha";
+  const highs  = bars.map(b => b.high);
+  const lows   = bars.map(b => b.low);
+  const closes = bars.map(b => b.close);
 
-interface ColDef {
-  key: ColKey;
-  label: string;
-  labelColor?: string;
-  align: "left" | "right" | "center";
-  sortVal: (r: StockAnalysisResult, tfm?: TimesfmForecasts | null) => number;
-}
+  const [, dir] = supertrend(highs, lows, closes, optAtr, optMul);
+  if (dir.length < 2) return { flipType: null, barsSince: 999 };
 
-const SC_HDR = "text-[#00d4ff]";
-const ST_HDR = "text-[#ffa502]";
-const TFM_HDR = "text-[#a78bfa]";
-
-const COLS: ColDef[] = [
-  { key: "symbol",     label: "Ticker",     align: "left",   sortVal: r => r.symbol.charCodeAt(0) },
-  { key: "price",      label: "Price",      align: "right",  sortVal: r => r.current_price },
-  { key: "change_pct", label: "Chg%",       align: "right",  sortVal: r => r.change_pct ?? 0 },
-  { key: "regime",     label: "Regime",     align: "left",   sortVal: r => r.regime?.charCodeAt(0) ?? 0 },
-  { key: "grade",      label: "Grd",        align: "center", sortVal: r => r.score ?? 0 },
-  { key: "score",      label: "Score",      align: "right",  sortVal: r => r.score ?? 0 },
-  { key: "signal",     label: "Signal",     align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
-  { key: "st_status",  label: "ST",         align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
-  { key: "tfm_10d",    label: "TFM 10d",    labelColor: TFM_HDR, align: "right",
-    sortVal: (r, tfm) => {
-      const t2 = tfm?.[r.symbol]?.t2;
-      if (!t2 || !r.current_price) return -999;
-      return (t2 - r.current_price) / r.current_price * 100;
+  for (let i = dir.length - 1; i >= 1; i--) {
+    if (dir[i] !== dir[i - 1]) {
+      const barsSince = dir.length - 1 - i;
+      if (dir[i] === 1) return { flipType: "BULLISH", barsSince };
+      if (dir[i] === -1) return { flipType: "BEARISH", barsSince };
     }
-  },
-  { key: "rsi",        label: "RSI",        align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
-  { key: "macd_hist",  label: "MACD H",     align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
-  { key: "sc_500d",    label: "SC 2Y%",     labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.total_return_500d ?? 0 },
-  { key: "st_500d",    label: "ST 2Y%",     labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.total_return_500d ?? 0 },
-  { key: "sc_250d",    label: "SC 1Y%",     labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.total_return_250d ?? 0 },
-  { key: "st_250d",    label: "ST 1Y%",     labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.total_return_250d ?? 0 },
-  { key: "sc_sharpe",  label: "SC Sharpe",  labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.sharpe ?? 0 },
-  { key: "sc_alpha",   label: "SC Alpha",   labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.alpha ?? 0 },
-  { key: "st_sharpe",  label: "ST Sharpe",  labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.sharpe ?? 0 },
-  { key: "st_alpha",   label: "ST Alpha",   labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.alpha ?? 0 },
-];
+  }
+  return { flipType: null, barsSince: 999 };
+}
 
-export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }: Props) {
-  const [sortKey, setSortKey] = useState<ColKey>("signal");
-  const [sortDir, setSortDir] = useState<1 | -1>(-1);
-  const [flashSymbol, setFlashSymbol] = useState<string | null>(null);
+// ── NEW: Detect SMA50 crossover re-entry ─────────────────────
+// Fires when ST is bullish but the flip was blocked by SMA50,
+// and price has now crossed above SMA50 (within last 2 bars).
+function computeSMA50Reentry(
+  result: StockAnalysisResult
+): { reentry: boolean; barsSince: number } {
+  const bars = result.chart_bars;
+  if (!bars || bars.length < 52) return { reentry: false, barsSince: 999 };
 
-  const handleSort = useCallback((key: ColKey) => {
-    if (sortKey === key) setSortDir(d => (d === -1 ? 1 : -1));
-    else { setSortKey(key); setSortDir(-1); }
-  }, [sortKey]);
+  const optAtr = result.st_opt_params?.atrPeriod ?? 10;
+  const optMul = result.st_opt_params?.multiplier ?? 3.0;
 
-  const handleRowClick = useCallback((symbol: string) => {
-    setFlashSymbol(symbol);
-    setTimeout(() => setFlashSymbol(null), 600);
-    onRowClick(symbol);
-  }, [onRowClick]);
+  const highs  = bars.map(b => b.high);
+  const lows   = bars.map(b => b.low);
+  const closes = bars.map(b => b.close);
 
-  if (results.length === 0) return null;
+  const [, dir] = supertrend(highs, lows, closes, optAtr, optMul);
 
-  const col    = COLS.find(c => c.key === sortKey)!;
-  const sorted = [...results].sort((a, b) => sortDir * (col.sortVal(b, timesfmData) - col.sortVal(a, timesfmData)));
+  // ST must currently be bullish
+  const currentDir = dir[dir.length - 1] ?? -1;
+  if (currentDir !== 1) return { reentry: false, barsSince: 999 };
 
-  const buy      = results.filter(r => r.signal === "BUY").length;
-  const sell     = results.filter(r => r.signal === "SELL").length;
-  const hold     = results.filter(r => r.signal === "HOLD").length;
-  const withBt   = results.filter(r => (r.backtest?.num_trades ?? 0) > 0);
-  const avgSharpe  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.sharpe ?? 0), 0) / withBt.length : 0;
-  const avgWinRate = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.win_rate ?? 0), 0) / withBt.length : 0;
-  const avgAlpha   = results.length ? results.reduce((a, r) => a + (r.backtest?.alpha ?? 0), 0) / results.length : 0;
-  const avgSc500d  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.total_return_500d ?? 0), 0) / withBt.length : 0;
-  const avgSc250d  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.total_return_250d ?? 0), 0) / withBt.length : 0;
+  // Compute SMA50 from closes
+  const sma50arr = sma(closes, 50);
 
-  const stBull      = results.filter(r => (r.st_direction ?? -1) === 1).length;
-  const stBear      = results.filter(r => (r.st_direction ?? -1) === -1).length;
-  const withST      = results.filter(r => (r.comparison?.supertrend.num_trades ?? 0) > 0);
-  const avgST500d   = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.total_return_500d ?? 0), 0) / withST.length : 0;
-  const avgST250d   = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.total_return_250d ?? 0), 0) / withST.length : 0;
-  const avgSTSharpe = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.sharpe ?? 0), 0) / withST.length : 0;
-  const avgSTAlpha  = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.alpha ?? 0), 0) / withST.length : 0;
-  const avgSTWin    = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.win_rate ?? 0), 0) / withST.length : 0;
+  // Check last 2 bars for SMA50 upward crossover
+  const n = closes.length;
+  for (let lookback = 1; lookback <= 2; lookback++) {
+    const i = n - 1 - (lookback - 1);
+    if (i < 1) continue;
+    const curClose  = closes[i];
+    const prevClose = closes[i - 1];
+    const curSMA50  = sma50arr[i];
+    const prevSMA50 = sma50arr[i - 1];
+    if (
+      curClose  != null && prevClose != null &&
+      curSMA50  != null && prevSMA50 != null &&
+      !isNaN(curSMA50) && !isNaN(prevSMA50) &&
+      curClose > curSMA50 && prevClose <= prevSMA50
+    ) {
+      return { reentry: true, barsSince: lookback - 1 };
+    }
+  }
 
-  // TFM coverage stats
-  const tfmCount = results.filter(r => timesfmData?.[r.symbol]?.t2 != null).length;
+  return { reentry: false, barsSince: 999 };
+}
 
-  const SortTh = ({ col: c }: { col: ColDef }) => {
-    const active = sortKey === c.key;
-    const baseColor   = c.labelColor ?? "text-[#4a6080]";
-    const activeColor = c.labelColor ?? "text-[#00d4ff]";
-    return (
-      <th
-        onClick={() => handleSort(c.key)}
-        className={`px-2 py-1.5 font-mono font-normal whitespace-nowrap cursor-pointer select-none
-          ${c.align === "center" ? "text-center" : c.align === "right" ? "text-right" : "text-left"}
-          transition-colors hover:opacity-100
-          ${active ? `${activeColor} opacity-100` : `${baseColor} opacity-70 hover:opacity-90`}`}
-      >
-        {c.label}
-        <span className="ml-0.5 text-[0.6rem]">
-          {active ? (sortDir === -1 ? "▼" : "▲") : "⇅"}
-        </span>
-      </th>
-    );
-  };
+function generateAlerts(results: StockAnalysisResult[]): Alert[] {
+  const alerts: Alert[] = [];
+
+  for (const r of results) {
+    const bt = r.backtest;
+    const comparison = r.comparison;
+
+    // 1. RSI divergence
+    if (bt?.rsi_divergence_type && bt.rsi_divergence_type !== "None") {
+      alerts.push({
+        icon: "⚠️",
+        text: `<strong>${r.symbol}</strong>: RSI ${bt.rsi_divergence_type} Divergence`,
+        priority: 5,
+      });
+    }
+
+    // 2. Correlation
+    if (r.kelly?.correlated_with) {
+      alerts.push({
+        icon: "🔗",
+        text: `<strong>${r.symbol}</strong>: Correlated with ${r.kelly.correlated_with}`,
+        priority: 8,
+      });
+    }
+
+    const stReturn500  = comparison?.supertrend?.total_return ?? 0;
+    const stReturn250  = comparison?.supertrend?.total_return_250d ?? 0;
+    const scoreReturn500 = comparison?.score?.total_return ?? bt?.total_return ?? 0;
+    const scoreReturn250 = comparison?.score?.total_return_250d ?? 0;
+    const scoreSignal  = r.signal;
+
+    // 3. SMA50 crossover re-entry (HIGHEST PRIORITY — actionable BUY signal)
+    const { reentry, barsSince: reentryBars } = computeSMA50Reentry(r);
+    if (reentry) {
+      const daysText = reentryBars === 0 ? "TODAY" : `${reentryBars}d ago`;
+      const stOut500 = stReturn500 > scoreReturn500;
+      const stOut250 = stReturn250 > scoreReturn250;
+      if (stOut500 || stOut250) {
+        const period = stOut500 ? "500d" : "250d";
+        const stRet  = stOut500 ? stReturn500 : stReturn250;
+        const scRet  = stOut500 ? scoreReturn500 : scoreReturn250;
+        alerts.push({
+          icon: "🚀",
+          text: `<strong>${r.symbol}</strong>: ST RE-ENTRY ✅ Price crossed above SMA50 (${daysText}) — ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% vs Sc: ${scRet >= 0 ? "+" : ""}${scRet.toFixed(1)}%`,
+          priority: 1,
+        });
+      } else {
+        alerts.push({
+          icon: "🚀",
+          text: `<strong>${r.symbol}</strong>: ST RE-ENTRY ✅ Price crossed above SMA50 (${daysText}) — ST bullish re-entry triggered`,
+          priority: 1,
+        });
+      }
+    }
+
+    // 4. SuperTrend flip alerts (optimized)
+    const { flipType, barsSince } = computeOptimizedFlip(r);
+
+    if (flipType === "BULLISH" && barsSince <= FLIP_ALERT_DAYS) {
+      const daysText = barsSince === 0 ? "TODAY" : `${barsSince}d ago`;
+      const stOut500 = stReturn500 > scoreReturn500;
+      const stOut250 = stReturn250 > scoreReturn250;
+
+      // Only show flip alert if no re-entry alert already shown
+      if (!reentry) {
+        if (stOut500 || stOut250) {
+          const period = stOut500 ? "500d" : "250d";
+          const stRet  = stOut500 ? stReturn500 : stReturn250;
+          const scRet  = stOut500 ? scoreReturn500 : scoreReturn250;
+          alerts.push({
+            icon: "🟢",
+            text: `<strong>${r.symbol}</strong>: ST FLIPPED BULLISH 📈 (${daysText}) - ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% vs Sc: ${scRet >= 0 ? "+" : ""}${scRet.toFixed(1)}%`,
+            priority: 2,
+          });
+        } else if (scoreSignal !== "BUY") {
+          alerts.push({
+            icon: "🟢",
+            text: `<strong>${r.symbol}</strong>: SuperTrend FLIPPED BULLISH 📈 (${daysText})`,
+            priority: 2,
+          });
+        }
+      }
+    } else if (flipType === "BEARISH" && barsSince <= FLIP_ALERT_DAYS) {
+      const daysText = barsSince === 0 ? "TODAY" : `${barsSince}d ago`;
+      const stOut500 = stReturn500 > scoreReturn500;
+      const stOut250 = stReturn250 > scoreReturn250;
+
+      if (stOut500 || stOut250) {
+        const period = stOut500 ? "500d" : "250d";
+        const stRet  = stOut500 ? stReturn500 : stReturn250;
+        alerts.push({
+          icon: "🔴",
+          text: `<strong>${r.symbol}</strong>: ST FLIPPED BEARISH 📉 (${daysText}) - ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% outperforms`,
+          priority: 2,
+        });
+      } else {
+        alerts.push({
+          icon: "🔴",
+          text: `<strong>${r.symbol}</strong>: SuperTrend FLIPPED BEARISH 📉 (${daysText})`,
+          priority: 2,
+        });
+      }
+    }
+
+    // 5. Score BUY signal
+    const recentBullishFlip = flipType === "BULLISH" && barsSince <= FLIP_ALERT_DAYS;
+    if (scoreSignal === "BUY" && !recentBullishFlip) {
+      const scOut500 = scoreReturn500 > stReturn500;
+      const scOut250 = scoreReturn250 > stReturn250;
+
+      if (scOut500 || scOut250) {
+        const period = scOut500 ? "500d" : "250d";
+        const scRet  = scOut500 ? scoreReturn500 : scoreReturn250;
+        const stRet  = scOut500 ? stReturn500 : stReturn250;
+        alerts.push({
+          icon: "✅",
+          text: `<strong>${r.symbol}</strong>: Score BUY Signal (Sc ${period}: ${scRet >= 0 ? "+" : ""}${scRet.toFixed(1)}% vs ST: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}%)`,
+          priority: 3,
+        });
+      }
+    }
+
+    // 6. Candlestick patterns
+    const patterns = bt?.candlestick_patterns || [];
+    const signal = r.signal;
+    const recentPatterns = patterns.filter(p => {
+      if (p.bar_index !== undefined && p.bar_index <= 3) return true;
+      if (p.label && (p.label === "Latest" || /^[1-3]d ago/.test(p.label))) return true;
+      return false;
+    });
+
+    const confirmBay: Record<string, string[]> = {
+      BUY:  ["Hammer", "Inverted Hammer", "Bull Engulfing", "Bull Marubozu"],
+      SELL: ["Shooting Star", "Bear Engulfing", "Bear Marubozu", "Hanging Man"],
+    };
+    const cautionBay: Record<string, string[]> = {
+      BUY:  ["Shooting Star", "Bear Engulfing", "Bear Marubozu", "Hanging Man"],
+      SELL: ["Hammer", "Inverted Hammer", "Bull Engulfing", "Bull Marubozu"],
+    };
+
+    for (const p of recentPatterns) {
+      const label = p.label === "Latest" ? "Today" : p.label || "";
+      const curConfirm = confirmBay[signal] || [];
+      const curCaution = cautionBay[signal] || [];
+      if (curConfirm.includes(p.pattern)) {
+        alerts.push({
+          icon: "✅",
+          text: `<strong>${r.symbol}</strong>: ${p.pattern} (${label}) - Confirms ${signal}`,
+          priority: 4,
+        });
+      } else if (curCaution.includes(p.pattern)) {
+        alerts.push({
+          icon: "⚠️",
+          text: `<strong>${r.symbol}</strong>: ${p.pattern} (${label}) - Caution on ${signal}`,
+          priority: 5,
+        });
+      }
+    }
+  }
+
+  // Sort by priority
+  alerts.sort((a, b) => a.priority - b.priority);
+  return alerts;
+}
+
+export default function AlertsPanel({ results }: Props) {
+  const [collapsed, setCollapsed] = useState(false);
+  const alerts = useMemo(() => generateAlerts(results), [results]);
+
+  if (alerts.length === 0) return null;
 
   return (
-    <div className="mx-4 my-3">
-      {/* Header strip */}
-      <div className="mb-2 space-y-1">
-        <div className="flex items-center gap-3 text-xs flex-wrap">
-          <span className="text-[#00d4ff] font-bold tracking-widest">◈ SCORE</span>
-          <span>
-            {buy  > 0 && <span className="text-[#00ff88] font-bold mr-2">▲{buy} BUY</span>}
-            {sell > 0 && <span className="text-[#ff4757] font-bold mr-2">▼{sell} SELL</span>}
-            {hold > 0 && <span className="text-[#ffa502]">◆{hold} HOLD</span>}
-          </span>
-          <span className="text-[#1e2d4a]">|</span>
-          <span className="text-[#4a6080]">500d <span className={numColor(avgSc500d, 0)}>{sn(avgSc500d, 1, "%")}</span></span>
-          <span className="text-[#4a6080]">250d <span className={numColor(avgSc250d, 0)}>{sn(avgSc250d, 1, "%")}</span></span>
-          <span className="text-[#4a6080]">SC Sharpe <span className={numColor(avgSharpe, 0.5)}>{avgSharpe.toFixed(2)}</span></span>
-          <span className="text-[#4a6080]">Win% <span className={numColor(avgWinRate, 50)}>{avgWinRate.toFixed(0)}%</span></span>
-          <span className="text-[#4a6080]">SC α <span className={numColor(avgAlpha, 0)}>{sn(avgAlpha, 1, "%")}</span></span>
+    <div className="bg-[#0f1629] border border-[#1e2d4a] rounded p-3 my-3">
+      <div
+        className="flex items-center justify-between cursor-pointer select-none"
+        onClick={() => setCollapsed(!collapsed)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-[#f59e0b] text-sm font-bold">⚡ ALERTS</span>
+          <span className="text-[#4a6080] text-xs">({alerts.length})</span>
         </div>
-        <div className="flex items-center gap-3 text-xs flex-wrap">
-          <span className="text-[#ffa502] font-bold tracking-widest">◈ ST</span>
-          <span>
-            <span className="text-[#00ff88] font-bold mr-2">🟢{stBull} BULL</span>
-            <span className="text-[#ff4757]">🔴{stBear} BEAR</span>
-          </span>
-          <span className="text-[#1e2d4a]">|</span>
-          <span className="text-[#4a6080]">500d <span className={numColor(avgST500d, 0)}>{sn(avgST500d, 1, "%")}</span></span>
-          <span className="text-[#4a6080]">250d <span className={numColor(avgST250d, 0)}>{sn(avgST250d, 1, "%")}</span></span>
-          <span className="text-[#4a6080]">ST Sharpe <span className={numColor(avgSTSharpe, 0.5)}>{avgSTSharpe.toFixed(2)}</span></span>
-          <span className="text-[#4a6080]">Win% <span className={numColor(avgSTWin, 50)}>{avgSTWin.toFixed(0)}%</span></span>
-          <span className="text-[#4a6080]">ST α <span className={numColor(avgSTAlpha, 0)}>{sn(avgSTAlpha, 1, "%")}</span></span>
-          {tfmCount > 0 && (
-            <span className="text-[#a78bfa] font-mono text-[0.6rem] border border-[#a78bfa]/30 rounded px-1.5 py-0.5">
-              🔮 TFM {tfmCount}/{results.length}
-            </span>
-          )}
-          <span className="text-[#4a6080] text-[0.65rem] ml-auto">↕ Click header to sort &nbsp;·&nbsp; ↵ Click row to jump</span>
-        </div>
+        <span className="text-[#4a6080] text-xs">{collapsed ? "▼" : "▲"}</span>
       </div>
-
-      {/* Table */}
-      <div className="overflow-x-auto rounded border border-[#1e2d4a]">
-        <table className="w-full text-xs min-w-[980px]">
-          <thead>
-            <tr className="bg-[#0f1629] border-b border-[#1e2d4a] uppercase tracking-wider">
-              {COLS.map(c => <SortTh key={c.key} col={c} />)}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r, idx) => {
-              const bt  = r.backtest;
-              const cmp = r.comparison;
-              const rl  = regimeCell(r.regime);
-              const g   = grade(r.score ?? 0);
-              const rsi = bt?.rsi ?? 50;
-              const rsiC = rsi < 30 ? "text-[#00ff88]" : rsi > 70 ? "text-[#ff4757]" : "text-[#c8d8f0]";
-              const chg  = r.change_pct ?? 0;
-              const isFlashing = flashSymbol === r.symbol;
-
-              // TFM 10d calculation
-              const tfm = timesfmData?.[r.symbol];
-              const tfmT2 = tfm?.t2;
-              const tfmPct = (tfmT2 != null && r.current_price > 0)
-                ? (tfmT2 - r.current_price) / r.current_price * 100
-                : null;
-
-              return (
-                <tr
-                  key={r.symbol}
-                  onClick={() => handleRowClick(r.symbol)}
-                  title={`Click to jump to ${r.symbol} card`}
-                  className={`border-b border-[#1e2d4a]/40 cursor-pointer select-none transition-all
-                    ${isFlashing ? "bg-[#00d4ff]/20 border-[#00d4ff]/40"
-                      : idx % 2 === 0 ? "bg-[#0a0e1a] hover:bg-[#00d4ff]/8 active:bg-[#00d4ff]/20"
-                      : "bg-[#0f1629] hover:bg-[#00d4ff]/8 active:bg-[#00d4ff]/20"}`}
-                >
-                  {/* Ticker */}
-                  <td className="px-2 py-1.5">
-                    <div className="text-[#00d4ff] font-bold leading-tight">{r.symbol}</div>
-                    <div className="text-[#4a6080] text-[0.6rem] leading-tight truncate max-w-[80px]">{r.name}</div>
-                  </td>
-                  {/* Price */}
-                  <td className="px-2 py-1.5 text-right font-mono text-[#c8d8f0] whitespace-nowrap">
-                    {r.current_price > 0 ? r.current_price.toFixed(2) : "--"}
-                  </td>
-                  {/* Chg% */}
-                  <td className={`px-2 py-1.5 text-right font-mono whitespace-nowrap ${numColor(chg, 0)}`}>
-                    {chg >= 0 ? "▲" : "▼"}{Math.abs(chg).toFixed(2)}%
-                  </td>
-                  {/* Regime */}
-                  <td className={`px-2 py-1.5 whitespace-nowrap ${rl.color}`}>
-                    <span className="mr-1">{rl.icon}</span>{rl.short}
-                  </td>
-                  {/* Grade */}
-                  <td className={`px-2 py-1.5 text-center text-sm ${g.color}`}>{g.label}</td>
-                  {/* Score */}
-                  <td className={`px-2 py-1.5 text-right font-mono font-bold ${(r.score ?? 0) >= 6.5 ? "text-[#00ff88]" : (r.score ?? 0) >= 5.5 ? "text-[#ffa502]" : "text-[#ff4757]"}`}>
-                    {r.score?.toFixed(1) ?? "--"}
-                  </td>
-                  {/* Signal */}
-                  <td className="px-2 py-1.5 text-center">{signalBadge(r.signal)}</td>
-                  {/* ST Status */}
-                  <td className="px-2 py-1.5 text-center font-mono text-xs whitespace-nowrap">
-                    {(() => {
-                      const dir = r.st_direction ?? -1;
-                      const dist = r.st_stop_distance_pct ?? 0;
-                      const openRet = r.st_open_return_pct;
-                      if (dir !== 1) return <span className="text-[#ff4757]" title="ST Bearish">🔴</span>;
-                      if (openRet !== null && openRet !== undefined) {
-                        const retColor = openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]";
-                        return (
-                          <span title={`Open: ${openRet>=0?"+":""}${openRet.toFixed(1)}% · Stop dist: ${dist.toFixed(1)}%`}>
-                            <span className="text-[#00ff88]">🟢 </span>
-                            <span className={`font-bold ${retColor}`}>{openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%</span>
-                            <span className="text-[#2a3d5a]"> ·</span>
-                            <span className="text-[#4a6080]"> {dist.toFixed(1)}%</span>
-                          </span>
-                        );
-                      }
-                      return (
-                        <span title={`ST Bullish, no position · Stop dist: ${dist.toFixed(1)}%`}>
-                          <span className="text-[#00ff88]">🟢 </span>
-                          <span className="text-[#4a6080] italic">{dist.toFixed(1)}%↑</span>
-                        </span>
-                      );
-                    })()}
-                  </td>
-                  {/* TFM 10d */}
-                  <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap"
-                    title={tfmT2 != null ? `TimesFM T2 target: ${tfmT2.toFixed(2)}` : "No forecast"}>
-                    {tfmPct == null ? (
-                      <span className="text-[#4a6080]">--</span>
+      {!collapsed && (
+        <div className="mt-2 space-y-1.5">
+          {alerts.map((alert, idx) => {
+            const parts = alert.text.split(/(<strong>.*?<\/strong>)/g);
+            return (
+              <div
+                key={idx}
+                className="flex items-start gap-2 text-[0.7rem] border-b border-[#1e2d4a]/30 pb-1 last:border-0"
+              >
+                <span className="shrink-0 mt-0.5">{alert.icon}</span>
+                <span>
+                  {parts.map((part, i) =>
+                    part.startsWith("<strong>") ? (
+                      <strong key={i}>{part.replace(/<\/?strong>/g, "")}</strong>
                     ) : (
-                      <span className={tfmPct >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>
-                        {tfmPct >= 0 ? "▲+" : "▼"}{Math.abs(tfmPct).toFixed(1)}%
-                      </span>
-                    )}
-                  </td>
-                  {/* RSI */}
-                  <td className={`px-2 py-1.5 text-right font-mono ${rsiC}`}>{n(rsi, 0)}</td>
-                  {/* MACD Hist */}
-                  <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.macd_hist, 0)}`}>{n(bt?.macd_hist, 3)}</td>
-                  {/* SC 2Y% */}
-                  <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return_500d, 0)}`}>
-                    {bt?.total_return_500d != null ? sn(bt.total_return_500d, 1, "%") : "--"}
-                  </td>
-                  {/* ST 2Y% */}
-                  {(() => {
-                    const v = cmp?.supertrend.total_return_500d;
-                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "--"}</td>;
-                  })()}
-                  {/* SC 1Y% */}
-                  <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return_250d, 0)}`}>
-                    {bt?.total_return_250d != null ? sn(bt.total_return_250d, 1, "%") : "--"}
-                  </td>
-                  {/* ST 1Y% */}
-                  {(() => {
-                    const v = cmp?.supertrend.total_return_250d;
-                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "--"}</td>;
-                  })()}
-                  {/* SC Sharpe */}
-                  <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.sharpe, 0.5)}`}>{n(bt?.sharpe, 2)}</td>
-                  {/* SC Alpha */}
-                  <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.alpha, 0)}`}>{sn(bt?.alpha, 1, "%")}</td>
-                  {/* ST Sharpe */}
-                  {(() => {
-                    const v = cmp?.supertrend.sharpe;
-                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0.5)}`}>{v != null ? n(v, 2) : "--"}</td>;
-                  })()}
-                  {/* ST Alpha */}
-                  {(() => {
-                    const v = cmp?.supertrend.alpha;
-                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "--"}</td>;
-                  })()}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                      part
+                    )
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
