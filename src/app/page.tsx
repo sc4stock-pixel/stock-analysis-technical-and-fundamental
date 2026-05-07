@@ -8,14 +8,14 @@ import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
 import StockCard from "@/components/StockCard";
 import dynamic from "next/dynamic";
 import AlertsPanel from "@/components/AlertsPanel";
+import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import type { TimesfmForecasts } from "@/types";
-import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 
 const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
 const MacroPanelHK = dynamic(() => import("@/components/MacroPanelHK"), { ssr: false });
 
-// ── Apply macro adjustments — US adj to US stocks, HK adj to HK stocks ──
+// ── Apply macro adjustments ───────────────────────────────────
 function applyDualMacroAdjustment(
   results: StockAnalysisResult[],
   usMbs:  number | null,
@@ -54,6 +54,7 @@ export default function Dashboard() {
   // HK macro state
   const [hkMacroData, setHKMacroData]       = useState<HKMacroData | null>(null);
   const [hkMacroLoading, setHKMacroLoading] = useState(false);
+
   // TimesFM
   const [timesfmData, setTimesfmData] = useState<TimesfmForecasts | null>(null);
   const [timesfmLoading, setTimesfmLoading] = useState(false);
@@ -66,7 +67,7 @@ export default function Dashboard() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-  
+
   const scrollToTop = useCallback(() => window.scrollTo({ top: 0, behavior: "smooth" }), []);
 
   // ── Fetch US macro ────────────────────────────────────────
@@ -107,7 +108,7 @@ export default function Dashboard() {
     }
   }, [config.macro?.enabled, config.stocks.PORTFOLIO]);
 
-  // ── Refresh macros (standalone) ───────────────────────────
+  // ── Refresh macros ────────────────────────────────────────
   const refreshUSMacro = useCallback(async () => {
     const usResult = await fetchUSMacro();
     if (results.length > 0 && config.macro?.enabled) {
@@ -132,7 +133,7 @@ export default function Dashboard() {
     }
   }, [fetchHKMacro, results.length, config.macro, macroData]);
 
-  // ── Fetch TimesFM forecasts ──────────────────────────────
+  // ── Fetch TimesFM ─────────────────────────────────────────
   const fetchTimesfm = useCallback(async () => {
     setTimesfmLoading(true);
     try {
@@ -145,7 +146,7 @@ export default function Dashboard() {
     }
   }, []);
 
-  // ── Fetch TimesFM forecasts on mount if results exist ──────
+  // Fetch TimesFM on mount if results exist
   useEffect(() => {
     if (results.length > 0 && !timesfmData) {
       fetchTimesfm();
@@ -160,7 +161,6 @@ export default function Dashboard() {
     setResults([]);
     setHighlightedSymbol(null);
 
-    // Fetch both macro engines in parallel (non-blocking)
     const [usPromise, hkPromise] = [fetchUSMacro(), fetchHKMacro()];
 
     const portfolio    = config.stocks.PORTFOLIO;
@@ -186,7 +186,6 @@ export default function Dashboard() {
       setProgress(Math.round(((i + 1) / portfolio.length) * 100));
     }
 
-    // Apply dual macro adjustments once both resolve
     const [usResult, hkResult] = await Promise.all([usPromise, hkPromise]);
     if (config.macro?.enabled) {
       const adjusted = applyDualMacroAdjustment(
@@ -198,7 +197,6 @@ export default function Dashboard() {
       setResults(adjusted);
     }
 
-    // Fetch TimesFM after analysis, independent of macro state
     fetchTimesfm();
 
     setLastUpdated(new Date().toLocaleTimeString());
@@ -295,13 +293,27 @@ export default function Dashboard() {
       {/* ── PORTFOLIO SUMMARY TABLE ── */}
       {results.length > 0 && (
         <div className="border-b border-[#1e2d4a]">
-          <PortfolioSummaryBar results={results} onRowClick={scrollToCard} timesfmData={timesfmData} />
+          <PortfolioSummaryBar
+            results={results}
+            onRowClick={scrollToCard}
+            timesfmData={timesfmData}
+          />
+        </div>
+      )}
+
+      {/* ── OPEN ST POSITIONS PANEL ── */}
+      {results.length > 0 && (
+        <div className="border-b border-[#1e2d4a]">
+          <OpenPositionsPanel results={results} onRowClick={scrollToCard} />
         </div>
       )}
 
       {/* ── ALERTS PANEL ── */}
-      {results.length > 0 && <AlertsPanel results={results} />}
-      {results.length > 0 && <OpenPositionsPanel results={results} />}
+      {results.length > 0 && (
+        <div className="px-4">
+          <AlertsPanel results={results} />
+        </div>
+      )}
 
       {/* ── STOCK CARDS ── */}
       <main className="p-4">
@@ -335,7 +347,7 @@ export default function Dashboard() {
                       ? "ring-2 ring-[#00d4ff] ring-offset-2 ring-offset-[#0a0e1a] shadow-[0_0_20px_rgba(0,212,255,0.25)]"
                       : ""
                   }`}>
-                 <StockCard
+                  <StockCard
                     result={result}
                     config={config}
                     timesfm={timesfmData?.[result.symbol]}
