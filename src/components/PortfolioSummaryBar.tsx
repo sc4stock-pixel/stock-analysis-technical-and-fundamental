@@ -1,7 +1,6 @@
 “use client”;
 import { useState, useCallback } from “react”;
-import { StockAnalysisResult } from “@/types”;
-import { TimesfmForecasts } from “@/types”;
+import { StockAnalysisResult, TimesfmForecasts } from “@/types”;
 
 interface Props {
 results: StockAnalysisResult[];
@@ -43,11 +42,11 @@ if (r === “WEAK_BEAR_RALLY”)              return { icon: “📉”,  short:
 if (r === “RANGING”)                      return { icon: “↔”,   short: “Ranging”,       color: C };
 if (r === “OVERBOUGHT”)                   return { icon: “🔴”,  short: “Overbought”,    color: A };
 if (r === “OVERSOLD”)                     return { icon: “🟢”,  short: “Oversold”,      color: G };
-if (r === “NEUTRAL”)                      return { icon: “—”,   short: “Neutral”,       color: D };
+if (r === “NEUTRAL”)                      return { icon: “–”,   short: “Neutral”,       color: D };
 if (r.startsWith(“HIGH_VOL_”) && r.includes(“UPTREND”)) return { icon: “🚀⚡”, short: “HV UP”, color: G };
 if (r.startsWith(“HIGH_VOL_”))            return { icon: “⚡”,  short: “High Vol”, color: A };
 if (r.startsWith(“EXTREME_VOL”))          return { icon: “⚡⚡”, short: “Extr Vol”, color: R };
-return { icon: “—”, short: r.replace(/_/g, “ “).slice(0, 12), color: D };
+return { icon: “–”, short: r.replace(/_/g, “ “).slice(0, 12), color: D };
 }
 
 function signalBadge(s: string) {
@@ -57,9 +56,9 @@ return                   <span className="badge-hold px-1.5 py-0.5 rounded text-
 }
 
 const n  = (v: number | null | undefined, d = 1, sfx = “”) =>
-v == null || isNaN(Number(v)) ? “—” : `${Number(v).toFixed(d)}${sfx}`;
+v == null || isNaN(Number(v)) ? “–” : `${Number(v).toFixed(d)}${sfx}`;
 const sn = (v: number | null | undefined, d = 1, sfx = “”) =>
-v == null || isNaN(Number(v)) ? “—” : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${sfx}`;
+v == null || isNaN(Number(v)) ? “–” : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${sfx}`;
 const numColor = (v: number | null | undefined, good = 0) =>
 v == null || isNaN(Number(v)) ? “text-[#4a6080]” : Number(v) >= good ? “text-[#00ff88]” : “text-[#ff4757]”;
 
@@ -252,7 +251,7 @@ return (
               </td>
               {/* Price */}
               <td className="px-2 py-1.5 text-right font-mono text-[#c8d8f0] whitespace-nowrap">
-                {r.current_price > 0 ? r.current_price.toFixed(2) : "—"}
+                {r.current_price > 0 ? r.current_price.toFixed(2) : "--"}
               </td>
               {/* Chg% */}
               <td className={`px-2 py-1.5 text-right font-mono whitespace-nowrap ${numColor(chg, 0)}`}>
@@ -266,7 +265,7 @@ return (
               <td className={`px-2 py-1.5 text-center text-sm ${g.color}`}>{g.label}</td>
               {/* Score */}
               <td className={`px-2 py-1.5 text-right font-mono font-bold ${(r.score ?? 0) >= 6.5 ? "text-[#00ff88]" : (r.score ?? 0) >= 5.5 ? "text-[#ffa502]" : "text-[#ff4757]"}`}>
-                {r.score?.toFixed(1) ?? "—"}
+                {r.score?.toFixed(1) ?? "--"}
               </td>
               {/* Signal */}
               <td className="px-2 py-1.5 text-center">{signalBadge(r.signal)}</td>
@@ -300,7 +299,7 @@ return (
               <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap"
                 title={tfmT2 != null ? `TimesFM T2 target: ${tfmT2.toFixed(2)}` : "No forecast"}>
                 {tfmPct == null ? (
-                  <span className="text-[#4a6080]">—</span>
+                  <span className="text-[#4a6080]">--</span>
                 ) : (
                   <span className={tfmPct >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>
                     {tfmPct >= 0 ? "▲+" : "▼"}{Math.abs(tfmPct).toFixed(1)}%
@@ -313,21 +312,21 @@ return (
               <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.macd_hist, 0)}`}>{n(bt?.macd_hist, 3)}</td>
               {/* SC 2Y% */}
               <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return_500d, 0)}`}>
-                {bt?.total_return_500d != null ? sn(bt.total_return_500d, 1, "%") : "—"}
+                {bt?.total_return_500d != null ? sn(bt.total_return_500d, 1, "%") : "--"}
               </td>
               {/* ST 2Y% */}
               {(() => {
                 const v = cmp?.supertrend.total_return_500d;
-                return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "—"}</td>;
+                return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "--"}</td>;
               })()}
               {/* SC 1Y% */}
               <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return_250d, 0)}`}>
-                {bt?.total_return_250d != null ? sn(bt.total_return_250d, 1, "%") : "—"}
+                {bt?.total_return_250d != null ? sn(bt.total_return_250d, 1, "%") : "--"}
               </td>
               {/* ST 1Y% */}
               {(() => {
                 const v = cmp?.supertrend.total_return_250d;
-                return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "—"}</td>;
+                return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "--"}</td>;
               })()}
               {/* SC Sharpe */}
               <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.sharpe, 0.5)}`}>{n(bt?.sharpe, 2)}</td>
@@ -336,12 +335,12 @@ return (
               {/* ST Sharpe */}
               {(() => {
                 const v = cmp?.supertrend.sharpe;
-                return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0.5)}`}>{v != null ? n(v, 2) : "—"}</td>;
+                return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0.5)}`}>{v != null ? n(v, 2) : "--"}</td>;
               })()}
               {/* ST Alpha */}
               {(() => {
                 const v = cmp?.supertrend.alpha;
-                return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "—"}</td>;
+                return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "--"}</td>;
               })()}
             </tr>
           );
