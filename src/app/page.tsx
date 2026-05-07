@@ -294,7 +294,7 @@ export default function Dashboard() {
       {/* ── PORTFOLIO SUMMARY TABLE ── */}
       {results.length > 0 && (
         <div className="border-b border-[#1e2d4a]">
-          <PortfolioSummaryBar results={results} onRowClick={scrollToCard} />
+          <PortfolioSummaryBar results={results} onRowClick={scrollToCard} timesfmData={timesfmData} />
         </div>
       )}
 
