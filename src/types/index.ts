@@ -278,6 +278,10 @@ export interface StockAnalysisResult {
   st_value: number;
   st_stop_distance_pct: number;
   st_open_return_pct: number | null;
+  st_open_entry_date?:  string | null;
+  st_open_entry_price?: number | null;
+  st_open_days_held?:   number | null;
+  st_open_r_multiple?:  number | null;
   st_opt_params?: {
     atrPeriod:  number;
     multiplier: number;
