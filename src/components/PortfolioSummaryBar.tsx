@@ -1,6 +1,6 @@
-“use client”;
-import { useState, useCallback } from “react”;
-import { StockAnalysisResult, TimesfmForecasts } from “@/types”;
+"use client";
+import { useState, useCallback } from "react";
+import { StockAnalysisResult, TimesfmForecasts } from "@/types";
 
 interface Props {
 results: StockAnalysisResult[];
@@ -9,107 +9,107 @@ timesfmData?: TimesfmForecasts | null;
 }
 
 function grade(score: number): { label: string; color: string } {
-if (score >= 8.0) return { label: “A+”, color: “text-[#00ff88] font-bold” };
-if (score >= 7.0) return { label: “A”,  color: “text-[#00ff88] font-bold” };
-if (score >= 6.0) return { label: “B”,  color: “text-[#00d4ff] font-bold” };
-if (score >= 5.0) return { label: “C”,  color: “text-[#ffa502]” };
-if (score >= 4.0) return { label: “D”,  color: “text-[#ff7f50]” };
-return { label: “F”, color: “text-[#ff4757]” };
+if (score >= 8.0) return { label: "A+", color: "text-[#00ff88] font-bold" };
+if (score >= 7.0) return { label: "A",  color: "text-[#00ff88] font-bold" };
+if (score >= 6.0) return { label: "B",  color: "text-[#00d4ff] font-bold" };
+if (score >= 5.0) return { label: "C",  color: "text-[#ffa502]" };
+if (score >= 4.0) return { label: "D",  color: "text-[#ff7f50]" };
+return { label: "F", color: "text-[#ff4757]" };
 }
 
 function regimeCell(regime: string): { icon: string; short: string; color: string } {
-const r = regime ?? “UNKNOWN”;
-const G = “text-[#00ff88]”, R = “text-[#ff4757]”, A = “text-[#ffa502]”,
-C = “text-[#00d4ff]”, D = “text-[#c8d8f0]”;
-if (r === “STRONG_UPTREND”)               return { icon: “🚀”,   short: “Strong UP”,    color: G };
-if (r === “STRONG_DOWNTREND”)             return { icon: “💣”,   short: “Strong DN”,    color: R };
-if (r === “STRENGTHENING_UPTREND”)        return { icon: “↗↗”,  short: “Str’ing UP”,   color: G };
-if (r === “STRENGTHENING_DOWNTREND”)      return { icon: “↓↓”,  short: “Str’ing DN”,   color: R };
-if (r === “WEAKENING_UPTREND”)            return { icon: “↗↘”,  short: “Weakening UP”, color: A };
-if (r === “WEAKENING_DOWNTREND”)          return { icon: “↘↘”,  short: “Weakening DN”, color: R };
-if (r === “EXHAUSTING_UPTREND”)           return { icon: “🔥↗”, short: “Exhaust UP”,   color: A };
-if (r === “EXHAUSTING_DOWNTREND”)         return { icon: “🔥↓”, short: “Exhaust DN”,   color: R };
-if (r === “UPTREND”)                      return { icon: “↗”,   short: “Uptrend”,      color: G };
-if (r === “DOWNTREND”)                    return { icon: “↓”,   short: “Downtrend”,    color: R };
-if (r === “WEAK_UPTREND”)                 return { icon: “↗”,   short: “Weak UP”,      color: G };
-if (r === “WEAK_DOWNTREND”)               return { icon: “↘”,   short: “Weak DN”,      color: R };
-if (r === “WEAK_UPTREND_STRENGTHENING”)   return { icon: “↗↑”,  short: “Wk UP↑”,       color: G };
-if (r === “WEAK_DOWNTREND_STRENGTHENING”) return { icon: “↘↑”,  short: “Wk DN↑”,       color: A };
-if (r === “WEAK_UPTREND_WEAKENING”)       return { icon: “↗↘”,  short: “Wk UP↓”,       color: A };
-if (r === “WEAK_DOWNTREND_WEAKENING”)     return { icon: “↓↓”,  short: “Wk DN↓”,       color: R };
-if (r === “BEAR_RALLY”)                   return { icon: “📉↑”, short: “Bear Rally”,    color: A };
-if (r === “WEAK_BEAR_RALLY”)              return { icon: “📉”,  short: “Wk Bear Rly”,  color: A };
-if (r === “RANGING”)                      return { icon: “↔”,   short: “Ranging”,       color: C };
-if (r === “OVERBOUGHT”)                   return { icon: “🔴”,  short: “Overbought”,    color: A };
-if (r === “OVERSOLD”)                     return { icon: “🟢”,  short: “Oversold”,      color: G };
-if (r === “NEUTRAL”)                      return { icon: “–”,   short: “Neutral”,       color: D };
-if (r.startsWith(“HIGH_VOL_”) && r.includes(“UPTREND”)) return { icon: “🚀⚡”, short: “HV UP”, color: G };
-if (r.startsWith(“HIGH_VOL_”))            return { icon: “⚡”,  short: “High Vol”, color: A };
-if (r.startsWith(“EXTREME_VOL”))          return { icon: “⚡⚡”, short: “Extr Vol”, color: R };
-return { icon: “–”, short: r.replace(/_/g, “ “).slice(0, 12), color: D };
+const r = regime ?? "UNKNOWN";
+const G = "text-[#00ff88]", R = "text-[#ff4757]", A = "text-[#ffa502]",
+C = "text-[#00d4ff]", D = "text-[#c8d8f0]";
+if (r === "STRONG_UPTREND")               return { icon: "🚀",   short: "Strong UP",    color: G };
+if (r === "STRONG_DOWNTREND")             return { icon: "💣",   short: "Strong DN",    color: R };
+if (r === "STRENGTHENING_UPTREND")        return { icon: "↗↗",  short: "Str’ing UP",   color: G };
+if (r === "STRENGTHENING_DOWNTREND")      return { icon: "↓↓",  short: "Str’ing DN",   color: R };
+if (r === "WEAKENING_UPTREND")            return { icon: "↗↘",  short: "Weakening UP", color: A };
+if (r === "WEAKENING_DOWNTREND")          return { icon: "↘↘",  short: "Weakening DN", color: R };
+if (r === "EXHAUSTING_UPTREND")           return { icon: "🔥↗", short: "Exhaust UP",   color: A };
+if (r === "EXHAUSTING_DOWNTREND")         return { icon: "🔥↓", short: "Exhaust DN",   color: R };
+if (r === "UPTREND")                      return { icon: "↗",   short: "Uptrend",      color: G };
+if (r === "DOWNTREND")                    return { icon: "↓",   short: "Downtrend",    color: R };
+if (r === "WEAK_UPTREND")                 return { icon: "↗",   short: "Weak UP",      color: G };
+if (r === "WEAK_DOWNTREND")               return { icon: "↘",   short: "Weak DN",      color: R };
+if (r === "WEAK_UPTREND_STRENGTHENING")   return { icon: "↗↑",  short: "Wk UP↑",       color: G };
+if (r === "WEAK_DOWNTREND_STRENGTHENING") return { icon: "↘↑",  short: "Wk DN↑",       color: A };
+if (r === "WEAK_UPTREND_WEAKENING")       return { icon: "↗↘",  short: "Wk UP↓",       color: A };
+if (r === "WEAK_DOWNTREND_WEAKENING")     return { icon: "↓↓",  short: "Wk DN↓",       color: R };
+if (r === "BEAR_RALLY")                   return { icon: "📉↑", short: "Bear Rally",    color: A };
+if (r === "WEAK_BEAR_RALLY")              return { icon: "📉",  short: "Wk Bear Rly",  color: A };
+if (r === "RANGING")                      return { icon: "↔",   short: "Ranging",       color: C };
+if (r === "OVERBOUGHT")                   return { icon: "🔴",  short: "Overbought",    color: A };
+if (r === "OVERSOLD")                     return { icon: "🟢",  short: "Oversold",      color: G };
+if (r === "NEUTRAL")                      return { icon: "–",   short: "Neutral",       color: D };
+if (r.startsWith("HIGH_VOL_") && r.includes("UPTREND")) return { icon: "🚀⚡", short: "HV UP", color: G };
+if (r.startsWith("HIGH_VOL_"))            return { icon: "⚡",  short: "High Vol", color: A };
+if (r.startsWith("EXTREME_VOL"))          return { icon: "⚡⚡", short: "Extr Vol", color: R };
+return { icon: "–", short: r.replace(/_/g, " ").slice(0, 12), color: D };
 }
 
 function signalBadge(s: string) {
-if (s === “BUY”)  return <span className="badge-buy  px-1.5 py-0.5 rounded text-xs font-bold">BUY</span>;
-if (s === “SELL”) return <span className="badge-sell px-1.5 py-0.5 rounded text-xs font-bold">SELL</span>;
+if (s === "BUY")  return <span className="badge-buy  px-1.5 py-0.5 rounded text-xs font-bold">BUY</span>;
+if (s === "SELL") return <span className="badge-sell px-1.5 py-0.5 rounded text-xs font-bold">SELL</span>;
 return                   <span className="badge-hold px-1.5 py-0.5 rounded text-xs">HOLD</span>;
 }
 
-const n  = (v: number | null | undefined, d = 1, sfx = “”) =>
-v == null || isNaN(Number(v)) ? “–” : `${Number(v).toFixed(d)}${sfx}`;
-const sn = (v: number | null | undefined, d = 1, sfx = “”) =>
-v == null || isNaN(Number(v)) ? “–” : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${sfx}`;
+const n  = (v: number | null | undefined, d = 1, sfx = "") =>
+v == null || isNaN(Number(v)) ? "–" : `${Number(v).toFixed(d)}${sfx}`;
+const sn = (v: number | null | undefined, d = 1, sfx = "") =>
+v == null || isNaN(Number(v)) ? "–" : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${sfx}`;
 const numColor = (v: number | null | undefined, good = 0) =>
-v == null || isNaN(Number(v)) ? “text-[#4a6080]” : Number(v) >= good ? “text-[#00ff88]” : “text-[#ff4757]”;
+v == null || isNaN(Number(v)) ? "text-[#4a6080]" : Number(v) >= good ? "text-[#00ff88]" : "text-[#ff4757]";
 
 type ColKey =
-| “symbol” | “price” | “change_pct” | “regime” | “grade” | “score”
-| “signal” | “st_status” | “tfm_10d” | “rsi” | “macd_hist”
-| “sc_500d” | “st_500d” | “sc_250d” | “st_250d”
-| “sc_sharpe” | “sc_alpha” | “st_sharpe” | “st_alpha”;
+| "symbol" | "price" | "change_pct" | "regime" | "grade" | "score"
+| "signal" | "st_status" | "tfm_10d" | "rsi" | "macd_hist"
+| "sc_500d" | "st_500d" | "sc_250d" | "st_250d"
+| "sc_sharpe" | "sc_alpha" | "st_sharpe" | "st_alpha";
 
 interface ColDef {
 key: ColKey;
 label: string;
 labelColor?: string;
-align: “left” | “right” | “center”;
+align: "left" | "right" | "center";
 sortVal: (r: StockAnalysisResult, tfm?: TimesfmForecasts | null) => number;
 }
 
-const SC_HDR = “text-[#00d4ff]”;
-const ST_HDR = “text-[#ffa502]”;
-const TFM_HDR = “text-[#a78bfa]”;
+const SC_HDR = "text-[#00d4ff]";
+const ST_HDR = "text-[#ffa502]";
+const TFM_HDR = "text-[#a78bfa]";
 
 const COLS: ColDef[] = [
-{ key: “symbol”,     label: “Ticker”,     align: “left”,   sortVal: r => r.symbol.charCodeAt(0) },
-{ key: “price”,      label: “Price”,      align: “right”,  sortVal: r => r.current_price },
-{ key: “change_pct”, label: “Chg%”,       align: “right”,  sortVal: r => r.change_pct ?? 0 },
-{ key: “regime”,     label: “Regime”,     align: “left”,   sortVal: r => r.regime?.charCodeAt(0) ?? 0 },
-{ key: “grade”,      label: “Grd”,        align: “center”, sortVal: r => r.score ?? 0 },
-{ key: “score”,      label: “Score”,      align: “right”,  sortVal: r => r.score ?? 0 },
-{ key: “signal”,     label: “Signal”,     align: “center”, sortVal: r => r.signal === “BUY” ? 2 : r.signal === “HOLD” ? 1 : 0 },
-{ key: “st_status”,  label: “ST”,         align: “center”, sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
-{ key: “tfm_10d”,    label: “TFM 10d”,    labelColor: TFM_HDR, align: “right”,
+{ key: "symbol",     label: "Ticker",     align: "left",   sortVal: r => r.symbol.charCodeAt(0) },
+{ key: "price",      label: "Price",      align: "right",  sortVal: r => r.current_price },
+{ key: "change_pct", label: "Chg%",       align: "right",  sortVal: r => r.change_pct ?? 0 },
+{ key: "regime",     label: "Regime",     align: "left",   sortVal: r => r.regime?.charCodeAt(0) ?? 0 },
+{ key: "grade",      label: "Grd",        align: "center", sortVal: r => r.score ?? 0 },
+{ key: "score",      label: "Score",      align: "right",  sortVal: r => r.score ?? 0 },
+{ key: "signal",     label: "Signal",     align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
+{ key: "st_status",  label: "ST",         align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
+{ key: "tfm_10d",    label: "TFM 10d",    labelColor: TFM_HDR, align: "right",
 sortVal: (r, tfm) => {
 const t2 = tfm?.[r.symbol]?.t2;
 if (!t2 || !r.current_price) return -999;
 return (t2 - r.current_price) / r.current_price * 100;
 }
 },
-{ key: “rsi”,        label: “RSI”,        align: “right”,  sortVal: r => r.backtest?.rsi ?? 0 },
-{ key: “macd_hist”,  label: “MACD H”,     align: “right”,  sortVal: r => r.backtest?.macd_hist ?? 0 },
-{ key: “sc_500d”,    label: “SC 2Y%”,     labelColor: SC_HDR, align: “right”, sortVal: r => r.backtest?.total_return_500d ?? 0 },
-{ key: “st_500d”,    label: “ST 2Y%”,     labelColor: ST_HDR, align: “right”, sortVal: r => r.comparison?.supertrend.total_return_500d ?? 0 },
-{ key: “sc_250d”,    label: “SC 1Y%”,     labelColor: SC_HDR, align: “right”, sortVal: r => r.backtest?.total_return_250d ?? 0 },
-{ key: “st_250d”,    label: “ST 1Y%”,     labelColor: ST_HDR, align: “right”, sortVal: r => r.comparison?.supertrend.total_return_250d ?? 0 },
-{ key: “sc_sharpe”,  label: “SC Sharpe”,  labelColor: SC_HDR, align: “right”, sortVal: r => r.backtest?.sharpe ?? 0 },
-{ key: “sc_alpha”,   label: “SC Alpha”,   labelColor: SC_HDR, align: “right”, sortVal: r => r.backtest?.alpha ?? 0 },
-{ key: “st_sharpe”,  label: “ST Sharpe”,  labelColor: ST_HDR, align: “right”, sortVal: r => r.comparison?.supertrend.sharpe ?? 0 },
-{ key: “st_alpha”,   label: “ST Alpha”,   labelColor: ST_HDR, align: “right”, sortVal: r => r.comparison?.supertrend.alpha ?? 0 },
+{ key: "rsi",        label: "RSI",        align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
+{ key: "macd_hist",  label: "MACD H",     align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
+{ key: "sc_500d",    label: "SC 2Y%",     labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.total_return_500d ?? 0 },
+{ key: "st_500d",    label: "ST 2Y%",     labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.total_return_500d ?? 0 },
+{ key: "sc_250d",    label: "SC 1Y%",     labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.total_return_250d ?? 0 },
+{ key: "st_250d",    label: "ST 1Y%",     labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.total_return_250d ?? 0 },
+{ key: "sc_sharpe",  label: "SC Sharpe",  labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.sharpe ?? 0 },
+{ key: "sc_alpha",   label: "SC Alpha",   labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.alpha ?? 0 },
+{ key: "st_sharpe",  label: "ST Sharpe",  labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.sharpe ?? 0 },
+{ key: "st_alpha",   label: "ST Alpha",   labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.alpha ?? 0 },
 ];
 
 export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }: Props) {
-const [sortKey, setSortKey] = useState<ColKey>(“signal”);
+const [sortKey, setSortKey] = useState<ColKey>("signal");
 const [sortDir, setSortDir] = useState<1 | -1>(-1);
 const [flashSymbol, setFlashSymbol] = useState<string | null>(null);
 
@@ -129,9 +129,9 @@ if (results.length === 0) return null;
 const col    = COLS.find(c => c.key === sortKey)!;
 const sorted = […results].sort((a, b) => sortDir * (col.sortVal(b, timesfmData) - col.sortVal(a, timesfmData)));
 
-const buy      = results.filter(r => r.signal === “BUY”).length;
-const sell     = results.filter(r => r.signal === “SELL”).length;
-const hold     = results.filter(r => r.signal === “HOLD”).length;
+const buy      = results.filter(r => r.signal === "BUY").length;
+const sell     = results.filter(r => r.signal === "SELL").length;
+const hold     = results.filter(r => r.signal === "HOLD").length;
 const withBt   = results.filter(r => (r.backtest?.num_trades ?? 0) > 0);
 const avgSharpe  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.sharpe ?? 0), 0) / withBt.length : 0;
 const avgWinRate = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.win_rate ?? 0), 0) / withBt.length : 0;
@@ -153,8 +153,8 @@ const tfmCount = results.filter(r => timesfmData?.[r.symbol]?.t2 != null).length
 
 const SortTh = ({ col: c }: { col: ColDef }) => {
 const active = sortKey === c.key;
-const baseColor   = c.labelColor ?? “text-[#4a6080]”;
-const activeColor = c.labelColor ?? “text-[#00d4ff]”;
+const baseColor   = c.labelColor ?? "text-[#4a6080]";
+const activeColor = c.labelColor ?? "text-[#00d4ff]";
 return (
 <th
 onClick={() => handleSort(c.key)}
@@ -162,7 +162,7 @@ className={`px-2 py-1.5 font-mono font-normal whitespace-nowrap cursor-pointer s
 >
 {c.label}
 <span className="ml-0.5 text-[0.6rem]">
-{active ? (sortDir === -1 ? “▼” : “▲”) : “⇅”}
+{active ? (sortDir === -1 ? "▼" : "▲") : "⇅"}
 </span>
 </th>
 );
@@ -180,11 +180,11 @@ return (
 {hold > 0 && <span className="text-[#ffa502]">◆{hold} HOLD</span>}
 </span>
 <span className="text-[#1e2d4a]">|</span>
-<span className="text-[#4a6080]">500d <span className={numColor(avgSc500d, 0)}>{sn(avgSc500d, 1, “%”)}</span></span>
-<span className="text-[#4a6080]">250d <span className={numColor(avgSc250d, 0)}>{sn(avgSc250d, 1, “%”)}</span></span>
+<span className="text-[#4a6080]">500d <span className={numColor(avgSc500d, 0)}>{sn(avgSc500d, 1, "%")}</span></span>
+<span className="text-[#4a6080]">250d <span className={numColor(avgSc250d, 0)}>{sn(avgSc250d, 1, "%")}</span></span>
 <span className="text-[#4a6080]">SC Sharpe <span className={numColor(avgSharpe, 0.5)}>{avgSharpe.toFixed(2)}</span></span>
 <span className="text-[#4a6080]">Win% <span className={numColor(avgWinRate, 50)}>{avgWinRate.toFixed(0)}%</span></span>
-<span className="text-[#4a6080]">SC α <span className={numColor(avgAlpha, 0)}>{sn(avgAlpha, 1, “%”)}</span></span>
+<span className="text-[#4a6080]">SC α <span className={numColor(avgAlpha, 0)}>{sn(avgAlpha, 1, "%")}</span></span>
 </div>
 <div className="flex items-center gap-3 text-xs flex-wrap">
 <span className="text-[#ffa502] font-bold tracking-widest">◈ ST</span>
@@ -193,11 +193,11 @@ return (
 <span className="text-[#ff4757]">🔴{stBear} BEAR</span>
 </span>
 <span className="text-[#1e2d4a]">|</span>
-<span className="text-[#4a6080]">500d <span className={numColor(avgST500d, 0)}>{sn(avgST500d, 1, “%”)}</span></span>
-<span className="text-[#4a6080]">250d <span className={numColor(avgST250d, 0)}>{sn(avgST250d, 1, “%”)}</span></span>
+<span className="text-[#4a6080]">500d <span className={numColor(avgST500d, 0)}>{sn(avgST500d, 1, "%")}</span></span>
+<span className="text-[#4a6080]">250d <span className={numColor(avgST250d, 0)}>{sn(avgST250d, 1, "%")}</span></span>
 <span className="text-[#4a6080]">ST Sharpe <span className={numColor(avgSTSharpe, 0.5)}>{avgSTSharpe.toFixed(2)}</span></span>
 <span className="text-[#4a6080]">Win% <span className={numColor(avgSTWin, 50)}>{avgSTWin.toFixed(0)}%</span></span>
-<span className="text-[#4a6080]">ST α <span className={numColor(avgSTAlpha, 0)}>{sn(avgSTAlpha, 1, “%”)}</span></span>
+<span className="text-[#4a6080]">ST α <span className={numColor(avgSTAlpha, 0)}>{sn(avgSTAlpha, 1, "%")}</span></span>
 {tfmCount > 0 && (
 <span className="text-[#a78bfa] font-mono text-[0.6rem] border border-[#a78bfa]/30 rounded px-1.5 py-0.5">
 🔮 TFM {tfmCount}/{results.length}
