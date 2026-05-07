@@ -15,7 +15,6 @@ import type { TimesfmForecasts } from "@/types";
 const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
 const MacroPanelHK = dynamic(() => import("@/components/MacroPanelHK"), { ssr: false });
 
-// ── Apply macro adjustments ───────────────────────────────────
 function applyDualMacroAdjustment(
   results: StockAnalysisResult[],
   usMbs:  number | null,
@@ -47,21 +46,15 @@ export default function Dashboard() {
   const [highlightedSymbol, setHighlightedSymbol] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
 
-  // US macro state
   const [macroData, setMacroData]       = useState<MacroData | null>(null);
   const [macroLoading, setMacroLoading] = useState(false);
-
-  // HK macro state
   const [hkMacroData, setHKMacroData]       = useState<HKMacroData | null>(null);
   const [hkMacroLoading, setHKMacroLoading] = useState(false);
-
-  // TimesFM
   const [timesfmData, setTimesfmData] = useState<TimesfmForecasts | null>(null);
   const [timesfmLoading, setTimesfmLoading] = useState(false);
 
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Scroll-to-top ─────────────────────────────────────────
   useEffect(() => {
     const onScroll = () => setShowScrollTop(window.scrollY > 300);
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -70,7 +63,6 @@ export default function Dashboard() {
 
   const scrollToTop = useCallback(() => window.scrollTo({ top: 0, behavior: "smooth" }), []);
 
-  // ── Fetch US macro ────────────────────────────────────────
   const fetchUSMacro = useCallback(async (): Promise<MacroData | null> => {
     if (!config.macro?.enabled) return null;
     setMacroLoading(true);
@@ -88,7 +80,6 @@ export default function Dashboard() {
     }
   }, [config.macro?.enabled]);
 
-  // ── Fetch HK macro ────────────────────────────────────────
   const fetchHKMacro = useCallback(async (): Promise<HKMacroData | null> => {
     if (!config.macro?.enabled) return null;
     const hasHK = config.stocks.PORTFOLIO.some(s => s.exchange === "HK");
@@ -108,7 +99,6 @@ export default function Dashboard() {
     }
   }, [config.macro?.enabled, config.stocks.PORTFOLIO]);
 
-  // ── Refresh macros ────────────────────────────────────────
   const refreshUSMacro = useCallback(async () => {
     const usResult = await fetchUSMacro();
     if (results.length > 0 && config.macro?.enabled) {
@@ -133,7 +123,6 @@ export default function Dashboard() {
     }
   }, [fetchHKMacro, results.length, config.macro, macroData]);
 
-  // ── Fetch TimesFM ─────────────────────────────────────────
   const fetchTimesfm = useCallback(async () => {
     setTimesfmLoading(true);
     try {
@@ -146,14 +135,12 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Fetch TimesFM on mount if results exist
   useEffect(() => {
     if (results.length > 0 && !timesfmData) {
       fetchTimesfm();
     }
   }, [results, timesfmData, fetchTimesfm]);
 
-  // ── Main analysis run ─────────────────────────────────────
   const runAnalysis = useCallback(async () => {
     setLoading(true);
     setProgress(0);
@@ -204,7 +191,6 @@ export default function Dashboard() {
     setLoading(false);
   }, [config, fetchUSMacro, fetchHKMacro, fetchTimesfm]);
 
-  // ── Scroll to card ────────────────────────────────────────
   const scrollToCard = useCallback((symbol: string) => {
     const id = `card-${symbol.replace(/\./g, "-")}`;
     const el = document.getElementById(id);
@@ -221,18 +207,17 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-[#0a0e1a]">
 
-      {/* ── TOP BAR ── */}
+      {/* TOP BAR */}
       <header className="border-b border-[#1e2d4a] bg-[#0f1629] px-4 py-2.5 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <span className="text-[#00d4ff] font-bold text-sm tracking-widest">▶ TA DASHBOARD</span>
-          <span className="text-[#4a6080] text-xs">V15.2</span>
+          <span className="text-[#4a6080] text-xs">V15.3</span>
           {lastUpdated && <span className="text-[#4a6080] text-xs">· Updated {lastUpdated}</span>}
           {loading && (
             <span className="text-[#ffa502] text-xs blink">
               · {progressSymbol ? `Scanning ${progressSymbol}…` : "Scanning…"} {progress}%
             </span>
           )}
-          {/* US MBS badge */}
           {config.macro?.enabled && (
             <span className={`text-[0.6rem] font-mono px-2 py-0.5 rounded border transition-colors ${
               macroData
@@ -244,7 +229,6 @@ export default function Dashboard() {
               {macroData ? `US ${macroData.mbs.toFixed(1)}` : macroLoading ? "US…" : "🌐 US"}
             </span>
           )}
-          {/* HK MBS badge */}
           {config.macro?.enabled && hasHKStocks && (
             <span className={`text-[0.6rem] font-mono px-2 py-0.5 rounded border transition-colors ${
               hkMacroData
@@ -269,28 +253,28 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* ── CONFIG PANEL ── */}
+      {/* CONFIG PANEL */}
       {showConfig && (
         <div className="border-b border-[#1e2d4a] bg-[#0a0e1a]">
           <ConfigPanel config={config} onChange={setConfig} />
         </div>
       )}
 
-      {/* ── US MACRO PANEL ── */}
+      {/* US MACRO PANEL */}
       {config.macro?.enabled && (macroData !== null || macroLoading) && (
         <div className="border-b border-[#1e2d4a]">
           <MacroPanel data={macroData} loading={macroLoading} onRefresh={refreshUSMacro} />
         </div>
       )}
 
-      {/* ── HK MACRO PANEL ── */}
+      {/* HK MACRO PANEL */}
       {config.macro?.enabled && hasHKStocks && (hkMacroData !== null || hkMacroLoading) && (
         <div className="border-b border-[#1e2d4a]">
           <MacroPanelHK data={hkMacroData} loading={hkMacroLoading} onRefresh={refreshHKMacro} />
         </div>
       )}
 
-      {/* ── PORTFOLIO SUMMARY TABLE ── */}
+      {/* PORTFOLIO SUMMARY TABLE */}
       {results.length > 0 && (
         <div className="border-b border-[#1e2d4a]">
           <PortfolioSummaryBar
@@ -301,21 +285,19 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── OPEN ST POSITIONS PANEL ── */}
+      {/* OPEN POSITIONS PANEL */}
       {results.length > 0 && (
-        <div className="border-b border-[#1e2d4a]">
-          <OpenPositionsPanel results={results} onRowClick={scrollToCard} />
-        </div>
+        <OpenPositionsPanel results={results} onSymbolClick={scrollToCard} />
       )}
 
-      {/* ── ALERTS PANEL ── */}
+      {/* ALERTS PANEL */}
       {results.length > 0 && (
-        <div className="px-4">
+        <div className="mx-4">
           <AlertsPanel results={results} />
         </div>
       )}
 
-      {/* ── STOCK CARDS ── */}
+      {/* STOCK CARDS */}
       <main className="p-4">
         {loading && results.length === 0 && (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -387,7 +369,7 @@ export default function Dashboard() {
         )}
       </main>
 
-      {/* ── SCROLL TO TOP ── */}
+      {/* SCROLL TO TOP */}
       <button onClick={scrollToTop} aria-label="Scroll to top"
         style={{
           position: "fixed", bottom: 30, right: 30, width: 44, height: 44,
