@@ -1,345 +1,371 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
 import { StockAnalysisResult } from "@/types";
+import { supertrend, sma } from "@/lib/indicators";
 
-interface EarningsDate {
-  symbol: string;
-  reportDate: string | null;
-  daysUntil: number | null;
-  fiscalQuarter: string;
-  estimate: number | null;
-  source: string;
+interface Props {
+  results: StockAnalysisResult[];
+  onRowClick: (symbol: string) => void;
 }
 
 interface OpenPosition {
   symbol: string;
   name: string;
   exchange: string;
+  entryDate: string;
   entryPrice: number;
   currentPrice: number;
-  pnlPct: number;
   stopPrice: number;
-  stopDistPct: number;
+  pnlPct: number;
   daysHeld: number;
   rMultiple: number;
-  riskAmount: number;        // % of entry risked to stop
-  stOptLabel: string;
-  entryDate: string;
+  distToStop: number;
+  entryType: "FLIP" | "SMA50_CROSS"; // how entry was triggered
+  optLabel: string;
 }
 
-interface Props {
-  results: StockAnalysisResult[];
+// ── Replicate pipeline.ts open position detection ─────────────
+// Entry rules (matching pipeline.ts exactly):
+//   1. FLIP entry: optStSigArr[i] === "BUY" && close > sma50
+//      → stEntrySignal = "BUY" on bar i+1 → entry at bar[i+1].open
+//   2. RE-ENTRY: optStDirArr[i] === 1 && close > sma50 && prev.close <= prev.sma50
+//      → stEntrySignal = "BUY" on bar i+1 → entry at bar[i+1].open
+//   Stop: prev bar's ST line value at entry, trailed upward each bar
+//   Exit: low <= trailing stop OR prev ST signal === "SELL"
+function detectOpenPosition(result: StockAnalysisResult): OpenPosition | null {
+  const bars = result.chart_bars;
+  if (!bars || bars.length < 52) return null;
+
+  const optAtr = result.st_opt_params?.atrPeriod ?? 10;
+  const optMul = result.st_opt_params?.multiplier ?? 3.0;
+
+  const highs  = bars.map(b => b.high  ?? b.close ?? 0);
+  const lows   = bars.map(b => b.low   ?? b.close ?? 0);
+  const closes = bars.map(b => b.close ?? 0);
+
+  const [stLine, stDir, stSig] = supertrend(highs, lows, closes, optAtr, optMul);
+  const sma50arr = sma(closes, 50);
+
+  const slippage   = 0.0005;
+  const commission = 0.001;
+
+  // Build stEntrySignal array — same logic as pipeline.ts
+  const stEntry: ("BUY" | "SELL" | "HOLD")[] = new Array(bars.length).fill("HOLD");
+  const entryType: ("FLIP" | "SMA50_CROSS" | null)[] = new Array(bars.length).fill(null);
+
+  for (let i = 1; i < bars.length; i++) {
+    if (i + 1 >= bars.length) continue;
+    const cur  = closes[i];
+    const prev = closes[i - 1];
+    const curSMA50  = sma50arr[i]  ?? 0;
+    const prevSMA50 = sma50arr[i - 1] ?? 0;
+
+    if (stSig[i] === "SELL") {
+      stEntry[i + 1] = "SELL";
+      continue;
+    }
+
+    // Flip entry: ST just flipped bullish AND price above SMA50
+    if (stSig[i] === "BUY") {
+      if (cur > curSMA50) {
+        stEntry[i + 1] = "BUY";
+        entryType[i + 1] = "FLIP";
+      }
+      continue;
+    }
+
+    // Re-entry: ST already bullish + SMA50 upward crossover
+    if (stDir[i] === 1) {
+      const smaUpCross = cur > curSMA50 && prev <= prevSMA50;
+      if (smaUpCross) {
+        stEntry[i + 1] = "BUY";
+        entryType[i + 1] = "SMA50_CROSS";
+      }
+    }
+  }
+
+  // Simulate position tracking — find the open position if any
+  let pos: {
+    entryIdx: number;
+    entryDate: string;
+    entryPrice: number;
+    entryCost: number;
+    stop: number;
+    originalStop: number;
+    type: "FLIP" | "SMA50_CROSS";
+  } | null = null;
+
+  for (let i = 1; i < bars.length; i++) {
+    const bar  = bars[i];
+    const prevST = stLine[i - 1] ?? 0;
+
+    if (pos === null) {
+      if (stEntry[i] === "BUY") {
+        const ep   = (bar.open ?? bar.close ?? 0) * (1 + slippage);
+        const stop = (!isNaN(prevST) && prevST > 0) ? prevST : ep * 0.95;
+        pos = {
+          entryIdx:   i,
+          entryDate:  bar.date ?? "",
+          entryPrice: ep,
+          entryCost:  ep * (1 + commission),
+          stop,
+          originalStop: stop,
+          type: entryType[i] ?? "FLIP",
+        };
+      }
+    } else {
+      // Trail stop upward only
+      const curST = stLine[i] ?? NaN;
+      if (!isNaN(curST) && curST > pos.stop) {
+        pos.stop = curST;
+      }
+
+      // Exit conditions
+      const stopHit  = (bar.low ?? bar.close ?? 0) <= pos.stop;
+      const sellSig  = stSig[i - 1] === "SELL";
+
+      if (stopHit || sellSig) {
+        pos = null; // position closed
+      }
+    }
+  }
+
+  // If pos is still open, we have an open position
+  if (!pos) return null;
+
+  const currentPrice = result.current_price;
+  if (!currentPrice || currentPrice <= 0) return null;
+
+  const pnlPct    = (currentPrice - pos.entryPrice) / pos.entryPrice * 100;
+  const riskPct   = pos.originalStop > 0
+    ? (pos.entryPrice - pos.originalStop) / pos.entryPrice
+    : 0.02;
+  const rMultiple = riskPct > 0 ? (pnlPct / 100) / riskPct : 0;
+  const distToStop = pos.stop > 0
+    ? (currentPrice - pos.stop) / currentPrice * 100
+    : 0;
+
+  // Days held from entry date to today
+  const entryMs  = new Date(pos.entryDate).getTime();
+  const nowMs    = Date.now();
+  const daysHeld = Math.max(0, Math.floor((nowMs - entryMs) / (1000 * 60 * 60 * 24)));
+
+  return {
+    symbol:       result.symbol,
+    name:         result.name,
+    exchange:     result.exchange,
+    entryDate:    pos.entryDate,
+    entryPrice:   pos.entryPrice,
+    currentPrice,
+    stopPrice:    pos.stop,
+    pnlPct,
+    daysHeld,
+    rMultiple,
+    distToStop,
+    entryType:    pos.type,
+    optLabel:     result.st_opt_params
+      ? `ATR${result.st_opt_params.atrPeriod}×${result.st_opt_params.multiplier}`
+      : "ATR10×3.0",
+  };
 }
 
-function riskColor(rMultiple: number): string {
-  if (rMultiple >= 2)  return "text-[#00ff88]";
-  if (rMultiple >= 1)  return "text-[#00d4ff]";
-  if (rMultiple >= 0)  return "text-[#ffa502]";
-  return "text-[#ff4757]";
+function fmtDate(iso: string): string {
+  const parts = iso.split("T")[0].split("-");
+  if (parts.length < 3) return iso;
+  const [y, m, d] = parts;
+  return `${m}/${d}/${y.slice(2)}`;
 }
 
 function pnlColor(pct: number): string {
-  if (pct >= 5)  return "text-[#00ff88] font-bold";
-  if (pct >= 0)  return "text-[#00ff88]";
+  if (pct >= 10) return "text-[#00ff88] font-bold";
+  if (pct >= 5)  return "text-[#00ff88]";
+  if (pct >= 0)  return "text-[#4dff99]";
   if (pct >= -3) return "text-[#ffa502]";
-  return "text-[#ff4757] font-bold";
+  return "text-[#ff4757]";
 }
 
-function earningsBadge(days: number | null): { text: string; color: string; urgent: boolean } | null {
-  if (days == null) return null;
-  if (days < 0)     return null; // already reported
-  if (days === 0)   return { text: "📅 TODAY",    color: "text-[#ff4757] font-bold", urgent: true };
-  if (days <= 3)    return { text: `📅 ${days}d`,  color: "text-[#ff4757] font-bold", urgent: true };
-  if (days <= 7)    return { text: `📅 ${days}d`,  color: "text-[#ffa502]",           urgent: true };
-  if (days <= 14)   return { text: `📅 ${days}d`,  color: "text-[#6b85a0]",           urgent: false };
-  return null; // too far out — don't clutter
+function rMultipleColor(r: number): string {
+  if (r >= 2)   return "text-[#00ff88] font-bold";
+  if (r >= 1)   return "text-[#00ff88]";
+  if (r >= 0)   return "text-[#ffa502]";
+  return "text-[#ff4757]";
 }
 
-function buildOpenPositions(results: StockAnalysisResult[]): OpenPosition[] {
-  const positions: OpenPosition[] = [];
-
-  for (const r of results) {
-    // Only show confirmed open ST positions
-    if (r.st_direction !== 1) continue;
-    if (r.st_open_return_pct === null || r.st_open_return_pct === undefined) continue;
-
-    const bt = r.backtest;
-    const trades = r.comparison?.supertrend?.trades ?? [];
-
-    // Find the last ST trade (open position = no exit yet after last entry)
-    // The most recent trade in the list is the open one when st_open_return_pct exists
-    const lastTrade = trades.length > 0 ? trades[trades.length - 1] : null;
-
-    const entryPrice  = lastTrade?.entry_price ?? (r.current_price / (1 + r.st_open_return_pct / 100));
-    const entryDate   = lastTrade?.entry_date ?? "—";
-    const currentPrice = r.current_price;
-    const stopPrice   = r.st_value > 0 ? r.st_value : 0;
-    const stopDistPct = r.st_stop_distance_pct ?? 0;
-    const pnlPct      = r.st_open_return_pct;
-
-    // Days held: from entry_date to today
-    let daysHeld = lastTrade?.bars_held ?? 0;
-    if (lastTrade?.entry_date) {
-      const entryMs = new Date(lastTrade.entry_date).getTime();
-      daysHeld = Math.round((Date.now() - entryMs) / 86400000);
-    }
-
-    // R-multiple: pnl / initial risk
-    const riskAmount = entryPrice > 0 && stopPrice > 0
-      ? ((entryPrice - stopPrice) / entryPrice) * 100
-      : 2.0; // fallback 2% risk assumption
-    const rMultiple = riskAmount > 0 ? pnlPct / riskAmount : 0;
-
-    const optLabel = r.st_opt_params
-      ? `ATR${r.st_opt_params.atrPeriod}×${r.st_opt_params.multiplier}`
-      : "—";
-
-    positions.push({
-      symbol:       r.symbol,
-      name:         r.name,
-      exchange:     r.exchange,
-      entryPrice,
-      currentPrice,
-      pnlPct,
-      stopPrice,
-      stopDistPct,
-      daysHeld,
-      rMultiple,
-      riskAmount,
-      stOptLabel:   optLabel,
-      entryDate,
-    });
-  }
-
-  // Sort by P&L descending
-  return positions.sort((a, b) => b.pnlPct - a.pnlPct);
+function stopDistColor(pct: number): string {
+  if (pct < 2)  return "text-[#ff4757] font-bold"; // danger
+  if (pct < 5)  return "text-[#ffa502]";            // caution
+  return "text-[#c8d8f0]";
 }
 
-export default function OpenPositionsPanel({ results }: Props) {
-  const [collapsed, setCollapsed]       = useState(false);
-  const [earnings, setEarnings]         = useState<Record<string, EarningsDate>>({});
-  const [earningsLoading, setEarningsLoading] = useState(false);
-  const [earningsFetched, setEarningsFetched] = useState(false);
-
-  const positions = buildOpenPositions(results);
-
-  // Fetch earnings for open positions
-  const fetchEarnings = useCallback(async () => {
-    if (positions.length === 0 || earningsFetched) return;
-    setEarningsLoading(true);
-    try {
-      const symbols = positions.map(p => p.symbol);
-      const res = await fetch("/api/earnings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setEarnings(data);
-        setEarningsFetched(true);
-      }
-    } catch {
-      // silently fail — earnings is enhancement not critical
-    } finally {
-      setEarningsLoading(false);
-    }
-  }, [positions, earningsFetched]);
-
-  // Auto-fetch on mount when positions exist
-  useEffect(() => {
-    if (positions.length > 0 && !earningsFetched) {
-      fetchEarnings();
-    }
-  }, [positions.length, earningsFetched, fetchEarnings]);
+export default function OpenPositionsPanel({ results, onRowClick }: Props) {
+  // Detect open positions across all results
+  const positions: OpenPosition[] = results
+    .map(r => detectOpenPosition(r))
+    .filter((p): p is OpenPosition => p !== null)
+    .sort((a, b) => b.pnlPct - a.pnlPct); // best P&L first
 
   if (positions.length === 0) return null;
 
-  // Aggregate stats
-  const avgPnl      = positions.reduce((a, p) => a + p.pnlPct, 0) / positions.length;
-  const totalWinners = positions.filter(p => p.pnlPct > 0).length;
-  const atRisk      = positions.filter(p => p.stopDistPct < 3).length;
-  const earningsRisk = positions.filter(p => {
-    const e = earnings[p.symbol];
-    return e?.daysUntil != null && e.daysUntil >= 0 && e.daysUntil <= 7;
-  }).length;
+  // Portfolio-level stats
+  const avgPnl     = positions.reduce((s, p) => s + p.pnlPct, 0) / positions.length;
+  const avgR       = positions.reduce((s, p) => s + p.rMultiple, 0) / positions.length;
+  const winners    = positions.filter(p => p.pnlPct >= 0).length;
+  const atRisk     = positions.filter(p => p.distToStop < 3).length;
 
   return (
-    <div className="mx-4 my-3 border border-[#00ff88]/30 rounded bg-[#080d1a]">
-
+    <div className="mx-4 my-3">
       {/* Header */}
-      <div
-        className="flex items-center justify-between px-3 py-2 cursor-pointer select-none"
-        onClick={() => setCollapsed(v => !v)}
-      >
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-[#00ff88] text-xs font-bold tracking-widest">
-            📊 OPEN ST POSITIONS
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <div className="flex items-center gap-3">
+          <span className="text-[#00ff88] font-bold text-xs tracking-widest">
+            📈 OPEN ST POSITIONS
           </span>
-          <span className="text-[#00ff88] text-xs font-mono border border-[#00ff88]/30 rounded px-1.5 py-0.5">
-            {positions.length} active
+          <span className="text-[#4a6080] text-xs">
+            {positions.length} position{positions.length !== 1 ? "s" : ""}
           </span>
-          <span className={`text-xs font-mono ${avgPnl >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-            Avg P&L: {avgPnl >= 0 ? "+" : ""}{avgPnl.toFixed(1)}%
+          <span className="text-[#1e2d4a]">|</span>
+          <span className="text-[#4a6080] text-xs">
+            Avg P&L:{" "}
+            <span className={avgPnl >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>
+              {avgPnl >= 0 ? "+" : ""}{avgPnl.toFixed(1)}%
+            </span>
           </span>
-          <span className="text-xs text-[#4a6080]">
-            {totalWinners}W {positions.length - totalWinners}L
+          <span className="text-[#4a6080] text-xs">
+            Avg R:{" "}
+            <span className={avgR >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>
+              {avgR >= 0 ? "+" : ""}{avgR.toFixed(2)}R
+            </span>
+          </span>
+          <span className="text-[#4a6080] text-xs">
+            Win: <span className="text-[#00ff88]">{winners}/{positions.length}</span>
           </span>
           {atRisk > 0 && (
-            <span className="text-[#ffa502] text-xs font-bold blink">
-              ⚠ {atRisk} near stop
-            </span>
-          )}
-          {earningsRisk > 0 && (
-            <span className="text-[#ff4757] text-xs font-bold">
-              📅 {earningsRisk} earnings &lt;7d
+            <span className="text-[#ff4757] text-xs font-bold blink">
+              ⚠️ {atRisk} near stop
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={e => { e.stopPropagation(); fetchEarnings(); }}
-            disabled={earningsLoading}
-            className="text-[0.6rem] px-2 py-0.5 border border-[#1e2d4a] text-[#4a6080] hover:text-[#00d4ff] hover:border-[#00d4ff]/40 rounded transition-all disabled:opacity-40"
-          >
-            {earningsLoading ? "⏳" : "📅 Earnings"}
-          </button>
-          <span className="text-[#4a6080] text-xs">{collapsed ? "▼" : "▲"}</span>
-        </div>
+        <span className="text-[#4a6080] text-[0.6rem] font-mono">
+          SMA50 filter applied · click row to jump
+        </span>
       </div>
 
       {/* Table */}
-      {!collapsed && (
-        <div className="border-t border-[#1e2d4a]/50 overflow-x-auto">
-          <table className="w-full text-xs min-w-[800px]">
-            <thead>
-              <tr className="bg-[#0f1629] border-b border-[#1e2d4a] text-[#4a6080] uppercase tracking-wider">
-                <th className="text-left px-3 py-2">Symbol</th>
-                <th className="text-right px-2 py-2">Entry</th>
-                <th className="text-right px-2 py-2">Current</th>
-                <th className="text-right px-2 py-2">P&L %</th>
-                <th className="text-right px-2 py-2">Stop</th>
-                <th className="text-right px-2 py-2">Dist%</th>
-                <th className="text-right px-2 py-2">Days</th>
-                <th className="text-right px-2 py-2">R-Mult</th>
-                <th className="text-left px-2 py-2">Earnings</th>
-                <th className="text-left px-2 py-2">Params</th>
+      <div className="overflow-x-auto rounded border border-[#00ff88]/20">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-[#0a1a0a] border-b border-[#00ff88]/20 text-[#4a6080] uppercase tracking-wider">
+              <th className="text-left px-3 py-2 font-mono font-normal">Symbol</th>
+              <th className="text-left px-3 py-2 font-mono font-normal">Entry Date</th>
+              <th className="text-right px-3 py-2 font-mono font-normal">Entry $</th>
+              <th className="text-right px-3 py-2 font-mono font-normal">Current $</th>
+              <th className="text-right px-3 py-2 font-mono font-normal">P&amp;L%</th>
+              <th className="text-right px-3 py-2 font-mono font-normal">Stop $</th>
+              <th className="text-right px-3 py-2 font-mono font-normal">→ Stop</th>
+              <th className="text-right px-3 py-2 font-mono font-normal">Days</th>
+              <th className="text-right px-3 py-2 font-mono font-normal">R-Mult</th>
+              <th className="text-left  px-3 py-2 font-mono font-normal">Entry Type</th>
+              <th className="text-left  px-3 py-2 font-mono font-normal">Params</th>
+            </tr>
+          </thead>
+          <tbody>
+            {positions.map((pos, idx) => (
+              <tr
+                key={pos.symbol}
+                onClick={() => onRowClick(pos.symbol)}
+                className={`border-b border-[#1e2d4a]/40 cursor-pointer transition-all
+                  hover:bg-[#00ff88]/5 active:bg-[#00ff88]/10
+                  ${idx % 2 === 0 ? "bg-[#0a0e1a]" : "bg-[#0d1220]"}
+                  ${pos.distToStop < 2 ? "border-l-2 border-l-[#ff4757]" : ""}
+                  ${pos.distToStop >= 2 && pos.distToStop < 5 ? "border-l-2 border-l-[#ffa502]" : ""}
+                `}
+              >
+                {/* Symbol */}
+                <td className="px-3 py-2">
+                  <div className="text-[#00d4ff] font-bold">{pos.symbol}</div>
+                  <div className="text-[#4a6080] text-[0.6rem] truncate max-w-[70px]">{pos.name}</div>
+                </td>
+
+                {/* Entry Date */}
+                <td className="px-3 py-2 font-mono text-[#6b85a0]">
+                  {fmtDate(pos.entryDate)}
+                </td>
+
+                {/* Entry Price */}
+                <td className="px-3 py-2 text-right font-mono text-[#c8d8f0]">
+                  {pos.exchange === "HK"
+                    ? `HK$${pos.entryPrice.toFixed(2)}`
+                    : `$${pos.entryPrice.toFixed(2)}`}
+                </td>
+
+                {/* Current Price */}
+                <td className="px-3 py-2 text-right font-mono text-[#00d4ff] font-bold">
+                  {pos.exchange === "HK"
+                    ? `HK$${pos.currentPrice.toFixed(2)}`
+                    : `$${pos.currentPrice.toFixed(2)}`}
+                </td>
+
+                {/* P&L% */}
+                <td className={`px-3 py-2 text-right font-mono ${pnlColor(pos.pnlPct)}`}>
+                  {pos.pnlPct >= 0 ? "▲+" : "▼"}{Math.abs(pos.pnlPct).toFixed(2)}%
+                </td>
+
+                {/* Stop Price */}
+                <td className="px-3 py-2 text-right font-mono text-[#ff4757]">
+                  {pos.exchange === "HK"
+                    ? `HK$${pos.stopPrice.toFixed(2)}`
+                    : `$${pos.stopPrice.toFixed(2)}`}
+                </td>
+
+                {/* Distance to Stop */}
+                <td className={`px-3 py-2 text-right font-mono ${stopDistColor(pos.distToStop)}`}
+                  title="Distance from current price to stop">
+                  {pos.distToStop.toFixed(1)}%
+                  {pos.distToStop < 2 && <span className="ml-1 text-[#ff4757]">⚠️</span>}
+                </td>
+
+                {/* Days Held */}
+                <td className="px-3 py-2 text-right font-mono text-[#6b85a0]">
+                  {pos.daysHeld}d
+                </td>
+
+                {/* R-Multiple */}
+                <td className={`px-3 py-2 text-right font-mono ${rMultipleColor(pos.rMultiple)}`}>
+                  {pos.rMultiple >= 0 ? "+" : ""}{pos.rMultiple.toFixed(2)}R
+                </td>
+
+                {/* Entry Type */}
+                <td className="px-3 py-2">
+                  {pos.entryType === "FLIP" ? (
+                    <span className="text-[0.6rem] font-mono px-1.5 py-0.5 rounded border border-[#00ff88]/30 text-[#00ff88] bg-[#00ff88]/5">
+                      ST FLIP
+                    </span>
+                  ) : (
+                    <span className="text-[0.6rem] font-mono px-1.5 py-0.5 rounded border border-[#a78bfa]/30 text-[#a78bfa] bg-[#a78bfa]/5">
+                      SMA50 ✕
+                    </span>
+                  )}
+                </td>
+
+                {/* Params */}
+                <td className="px-3 py-2">
+                  <span className="text-[0.6rem] font-mono text-[#ffa502]/70">
+                    {pos.optLabel}
+                  </span>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {positions.map((p, idx) => {
-                const earningInfo  = earnings[p.symbol];
-                const eBadge       = earningsBadge(earningInfo?.daysUntil ?? null);
-                const stopWarning  = p.stopDistPct < 3;
-                const stopAmber    = p.stopDistPct < 5;
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-                return (
-                  <tr
-                    key={p.symbol}
-                    className={`border-b border-[#1e2d4a]/40 transition-colors
-                      ${eBadge?.urgent ? "bg-[#ff4757]/3" : idx % 2 === 0 ? "bg-[#0a0e1a]" : "bg-[#0f1629]"}
-                      hover:bg-[#00ff88]/5`}
-                  >
-                    {/* Symbol */}
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[#00ff88] font-bold">🟢 {p.symbol}</span>
-                        <span className={`text-[0.58rem] px-1 rounded ${p.exchange === "HK" ? "bg-[#ffa502]/10 text-[#ffa502]" : "bg-[#00d4ff]/10 text-[#00d4ff]"}`}>
-                          {p.exchange}
-                        </span>
-                      </div>
-                      <div className="text-[#4a6080] text-[0.58rem] truncate max-w-[100px]">{p.name}</div>
-                    </td>
-
-                    {/* Entry */}
-                    <td className="px-2 py-2 text-right font-mono">
-                      <div className="text-[#c8d8f0]">{p.entryPrice.toFixed(2)}</div>
-                      {p.entryDate !== "—" && (
-                        <div className="text-[#4a6080] text-[0.58rem]">
-                          {p.entryDate.slice(5).replace("-", "/")}
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Current */}
-                    <td className="px-2 py-2 text-right font-mono text-[#c8d8f0]">
-                      {p.currentPrice.toFixed(2)}
-                    </td>
-
-                    {/* P&L */}
-                    <td className={`px-2 py-2 text-right font-mono text-sm ${pnlColor(p.pnlPct)}`}>
-                      {p.pnlPct >= 0 ? "+" : ""}{p.pnlPct.toFixed(2)}%
-                    </td>
-
-                    {/* Stop */}
-                    <td className={`px-2 py-2 text-right font-mono ${stopWarning ? "text-[#ff4757]" : stopAmber ? "text-[#ffa502]" : "text-[#6b85a0]"}`}>
-                      {p.stopPrice > 0 ? p.stopPrice.toFixed(2) : "—"}
-                    </td>
-
-                    {/* Dist% */}
-                    <td className={`px-2 py-2 text-right font-mono ${stopWarning ? "text-[#ff4757] font-bold" : stopAmber ? "text-[#ffa502]" : "text-[#6b85a0]"}`}>
-                      {stopWarning && "⚠ "}{p.stopDistPct.toFixed(1)}%
-                    </td>
-
-                    {/* Days */}
-                    <td className="px-2 py-2 text-right font-mono text-[#6b85a0]">
-                      {p.daysHeld}d
-                    </td>
-
-                    {/* R-Multiple */}
-                    <td className={`px-2 py-2 text-right font-mono font-bold ${riskColor(p.rMultiple)}`}>
-                      {p.rMultiple >= 0 ? "+" : ""}{p.rMultiple.toFixed(2)}R
-                    </td>
-
-                    {/* Earnings */}
-                    <td className="px-2 py-2">
-                      {earningsLoading ? (
-                        <span className="text-[#4a6080] text-[0.6rem]">…</span>
-                      ) : eBadge ? (
-                        <div>
-                          <span className={`text-[0.65rem] font-mono font-bold ${eBadge.color}`}>
-                            {eBadge.text}
-                          </span>
-                          {earningInfo?.fiscalQuarter && earningInfo.fiscalQuarter !== "—" && (
-                            <div className="text-[#4a6080] text-[0.55rem]">{earningInfo.fiscalQuarter}</div>
-                          )}
-                          {earningInfo?.estimate != null && (
-                            <div className="text-[#4a6080] text-[0.55rem]">EPS est: {earningInfo.estimate.toFixed(2)}</div>
-                          )}
-                        </div>
-                      ) : earningInfo?.reportDate ? (
-                        <span className="text-[#2a3d5a] text-[0.6rem] font-mono">
-                          {earningInfo.reportDate.slice(5)}
-                        </span>
-                      ) : (
-                        <span className="text-[#2a3d5a] text-[0.6rem]">—</span>
-                      )}
-                    </td>
-
-                    {/* Params */}
-                    <td className="px-2 py-2">
-                      <span className="text-[#ffa502]/70 text-[0.58rem] font-mono border border-[#ffa502]/20 rounded px-1">
-                        {p.stOptLabel}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          {/* Footer summary */}
-          <div className="px-3 py-2 border-t border-[#1e2d4a]/30 flex items-center gap-4 text-[0.6rem] text-[#4a6080] font-mono flex-wrap">
-            <span>P&L range: <span className={positions[positions.length-1]?.pnlPct < 0 ? "text-[#ff4757]" : "text-[#ffa502]"}>{positions[positions.length-1]?.pnlPct.toFixed(1)}%</span> → <span className="text-[#00ff88]">{positions[0]?.pnlPct.toFixed(1)}%</span></span>
-            <span>Avg dist to stop: <span className="text-[#c8d8f0]">{(positions.reduce((a,p) => a + p.stopDistPct, 0) / positions.length).toFixed(1)}%</span></span>
-            <span>Avg R: <span className={riskColor(positions.reduce((a,p) => a + p.rMultiple, 0) / positions.length)}>{(positions.reduce((a,p) => a + p.rMultiple, 0) / positions.length).toFixed(2)}R</span></span>
-            {!process.env.ALPHA_VANTAGE_KEY && earningsFetched && (
-              <span className="text-[#4a6080]">💡 Add ALPHA_VANTAGE_KEY to Vercel env for earnings dates</span>
-            )}
-            <span className="ml-auto text-[#2a3d5a]">Sorted by P&L · Stop dist &lt;3% flagged ⚠</span>
-          </div>
-        </div>
-      )}
+      {/* Legend */}
+      <div className="flex gap-4 mt-1.5 text-[0.58rem] text-[#4a6080] font-mono flex-wrap">
+        <span><span className="inline-block w-2 h-2 border-l-2 border-l-[#ff4757] mr-1" />Danger: &lt;2% to stop</span>
+        <span><span className="inline-block w-2 h-2 border-l-2 border-l-[#ffa502] mr-1" />Caution: &lt;5% to stop</span>
+        <span>ST FLIP = bullish flip + price above SMA50</span>
+        <span>SMA50 ✕ = delayed re-entry when price crossed SMA50</span>
+        <span>R-Mult = return ÷ initial risk</span>
+      </div>
     </div>
   );
 }
