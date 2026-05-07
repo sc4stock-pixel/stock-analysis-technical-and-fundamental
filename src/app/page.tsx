@@ -10,6 +10,7 @@ import dynamic from "next/dynamic";
 import AlertsPanel from "@/components/AlertsPanel";
 import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import type { TimesfmForecasts } from "@/types";
+import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 
 const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
 const MacroPanelHK = dynamic(() => import("@/components/MacroPanelHK"), { ssr: false });
@@ -300,6 +301,7 @@ export default function Dashboard() {
 
       {/* ── ALERTS PANEL ── */}
       {results.length > 0 && <AlertsPanel results={results} />}
+      {results.length > 0 && <OpenPositionsPanel results={results} />}
 
       {/* ── STOCK CARDS ── */}
       <main className="p-4">
