@@ -1,7 +1,7 @@
 {
   "_metadata": {
-    "generated_at_utc": "2026-05-09T06:32:38.130937+00:00",
-    "generated_at_hk": "2026-05-09 14:32:38 HKT",
+    "generated_at_utc": "2026-05-09T09:51:50.534352+00:00",
+    "generated_at_hk": "2026-05-09 17:51:50 HKT",
     "model": "TimesFM 2.5 200M PyTorch",
     "data_source": "yfinance",
     "horizon_days": 20,
@@ -628,7 +628,7 @@
         759.46,
         761.32,
         764.23,
-        764.72,
+        764.71,
         768.53,
         769.4
       ]
