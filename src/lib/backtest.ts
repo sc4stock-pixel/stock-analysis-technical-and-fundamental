@@ -255,7 +255,7 @@ export function runBacktest(
 
       const entryPrice  = cur.open * (1 + slippage);
       const entryAtr    = cur.atr;
-      const entryRegime = prev.regime ?? "NEUTRAL";
+      const entryRegime = cur.regime ?? "NEUTRAL";
 
       // Alpha mode parameter lookups
       const entryAtrMult       = getAtrMultiplier(entryRegime);
