@@ -53,6 +53,9 @@ export default function Dashboard() {
   const [timesfmData, setTimesfmData] = useState<TimesfmForecasts | null>(null);
   const [timesfmLoading, setTimesfmLoading] = useState(false);
 
+  const [stOptimizing, setStOptimizing] = useState(false);
+  const [stOptMsg, setStOptMsg]         = useState<string | null>(null);
+
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -140,6 +143,22 @@ export default function Dashboard() {
       fetchTimesfm();
     }
   }, [results, timesfmData, fetchTimesfm]);
+
+  async function triggerSTOptimization() {
+    setStOptimizing(true);
+    setStOptMsg(null);
+    try {
+      const res = await fetch("/api/st-params", { method: "POST" });
+      const data = await res.json();
+      setStOptMsg(data.success
+        ? "Triggered — params will update in ~2 min after the workflow commits."
+        : `Error: ${data.error}`);
+    } catch (e) {
+      setStOptMsg(`Error: ${String(e)}`);
+    } finally {
+      setStOptimizing(false);
+    }
+  }
 
   const runAnalysis = useCallback(async () => {
     setLoading(true);
@@ -246,12 +265,22 @@ export default function Dashboard() {
             className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#6b85a0] hover:border-[#00d4ff] hover:text-[#00d4ff] rounded transition-all">
             {showConfig ? "▲ HIDE CONFIG" : "▼ CONFIG"}
           </button>
+          <button onClick={triggerSTOptimization} disabled={stOptimizing}
+            title={stOptMsg ?? "Re-optimize SuperTrend params via GitHub Action"}
+            className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#6b85a0] hover:border-[#f59e0b] hover:text-[#f59e0b] disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
+            {stOptimizing ? "TRIGGERING…" : "⚡ OPTIMIZE ST"}
+          </button>
           <button onClick={runAnalysis} disabled={loading}
             className="px-4 py-1.5 text-xs font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
             {loading ? `SCANNING… ${progress}%` : "▶ RUN ANALYSIS"}
           </button>
         </div>
       </header>
+      {stOptMsg && (
+        <div className={`px-4 py-1.5 text-xs border-b ${stOptMsg.startsWith("Error") ? "border-red-900/40 text-red-400 bg-red-900/10" : "border-[#1e2d4a] text-[#f59e0b] bg-[#0a0e1a]"}`}>
+          {stOptMsg}
+        </div>
+      )}
 
       {/* CONFIG PANEL */}
       {showConfig && (
