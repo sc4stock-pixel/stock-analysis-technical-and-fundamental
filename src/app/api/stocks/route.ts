@@ -9,6 +9,33 @@ export const maxDuration = 30;
 // This ensures config changes always trigger a full recompute
 export const dynamic = "force-dynamic";
 
+// ─── SuperTrend params cache (fetched from GitHub, module-level TTL) ──
+interface STCachedEntry { atr_period: number; multiplier: number }
+interface STParamsData {
+  last_optimized: string | null;
+  next_optimization: string | null;
+  stocks: Record<string, STCachedEntry>;
+}
+let _stParamsCache: { data: STParamsData; at: number } | null = null;
+
+async function loadSTParams(): Promise<STParamsData> {
+  const empty: STParamsData = { last_optimized: null, next_optimization: null, stocks: {} };
+  const now = Date.now();
+  if (_stParamsCache && now - _stParamsCache.at < 5 * 60 * 1000) return _stParamsCache.data;
+  try {
+    const res = await fetch(
+      "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/st_params.json",
+      { cache: "no-store" }
+    );
+    if (!res.ok) return empty;
+    const data: STParamsData = await res.json();
+    _stParamsCache = { data, at: now };
+    return data;
+  } catch {
+    return empty;
+  }
+}
+
 // ─── Fundamentals via Yahoo v7/finance/quote ──────────────────
 // v7/quote works from Vercel server-side (v10/quoteSummary is often blocked)
 interface Fundamentals {
@@ -189,7 +216,8 @@ async function fetchYahooOHLCV(
 // ─── Single stock analysis ─────────────────────────────────────
 async function analyzeStock(
   stock: { symbol: string; name: string; exchange: string },
-  config: AppConfig
+  config: AppConfig,
+  stParams: STParamsData
 ) {
   try {
     // Fetch OHLCV and fundamentals in parallel
@@ -217,7 +245,9 @@ async function analyzeStock(
       };
     }
 
-    const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct);
+    const cached = stParams.stocks[stock.symbol];
+    const cachedSTParams = cached ? { atrPeriod: cached.atr_period, multiplier: cached.multiplier } : null;
+    const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct, cachedSTParams);
     // Spread result (which includes chart_bars) + add fundamentals
     return { ...result, fundamentals };
   } catch (e) {
@@ -248,18 +278,19 @@ export async function POST(req: NextRequest) {
   try {
     const body   = await req.json().catch(() => ({}));
     const config: AppConfig = body.config ?? DEFAULT_CONFIG;
+    const stParams = await loadSTParams();
 
     if (body.symbol) {
       const stock = config.stocks.PORTFOLIO.find((s) => s.symbol === body.symbol)
         ?? { symbol: body.symbol, name: body.symbol, exchange: "US" };
-      const result = await analyzeStock(stock, config);
+      const result = await analyzeStock(stock, config, stParams);
       return NextResponse.json(result);
     }
 
     const portfolio = config.stocks.PORTFOLIO;
     const results = [];
     for (const stock of portfolio) {
-      results.push(await analyzeStock(stock, config));
+      results.push(await analyzeStock(stock, config, stParams));
     }
     return NextResponse.json({ results, timestamp: new Date().toISOString(), config });
   } catch (e) {
@@ -271,8 +302,9 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const symbol = req.nextUrl.searchParams.get("symbol");
   if (!symbol) return NextResponse.json({ error: "symbol required" }, { status: 400 });
+  const stParams = await loadSTParams();
   const stock = DEFAULT_CONFIG.stocks.PORTFOLIO.find((s) => s.symbol === symbol)
     ?? { symbol, name: symbol, exchange: "US" };
-  const result = await analyzeStock(stock, DEFAULT_CONFIG);
+  const result = await analyzeStock(stock, DEFAULT_CONFIG, stParams);
   return NextResponse.json(result);
 }
