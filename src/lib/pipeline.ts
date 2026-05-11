@@ -17,7 +17,7 @@ import { calculateScores, detectRsiDivergence } from "./scoring";
 import { generateSignals } from "./signals";
 import { runBacktest, runSupertrendBacktest } from "./backtest";
 import { runMonteCarlo } from "./montecarlo";
-import { optimizeSupertrend } from "./supertrend_optimizer";
+import { optimizeSupertrend, STOptResult } from "./supertrend_optimizer";
 
 export interface RawOHLCV {
   date: string; open: number; high: number; low: number; close: number; volume: number;
@@ -36,7 +36,8 @@ export function runPipeline(
   stockConfig: { symbol: string; name: string; exchange: string },
   config: AppConfig,
   currentPrice: number,
-  changePct: number
+  changePct: number,
+  cachedSTParams?: { atrPeriod: number; multiplier: number } | null
 ): StockAnalysisResult {
   const sym = stockConfig.symbol;
   console.log(`\nAnalyzing ${sym} (${stockConfig.name})...`);
@@ -136,14 +137,15 @@ export function runPipeline(
   }));
 
   // ── SuperTrend Parameter Optimization ────────────────────────
-  console.log(`  🔍 Optimizing SuperTrend for ${sym}...`);
-  const optResult = optimizeSupertrend(
-    bars,
-    config.backtest.initialCapital,
-    config.backtest.commissionRate,
-    config.backtest.slippageRate
-  );
-  console.log(`    ✅ Best: ATR=${optResult.atrPeriod}, Mult=${optResult.multiplier} => Return=${optResult.totalReturn.toFixed(1)}%, Sharpe=${optResult.sharpe.toFixed(2)}, Trades=${optResult.numTrades}`);
+  let optResult: STOptResult;
+  if (cachedSTParams) {
+    console.log(`  ✅ ${sym}: using cached ST params (ATR=${cachedSTParams.atrPeriod}, Mult=${cachedSTParams.multiplier})`);
+    optResult = { atrPeriod: cachedSTParams.atrPeriod, multiplier: cachedSTParams.multiplier, sharpe: 0, totalReturn: 0, numTrades: 0 };
+  } else {
+    console.log(`  🔍 Optimizing SuperTrend for ${sym}...`);
+    optResult = optimizeSupertrend(bars, config.backtest.initialCapital, config.backtest.commissionRate, config.backtest.slippageRate);
+    console.log(`    ✅ Best: ATR=${optResult.atrPeriod}, Mult=${optResult.multiplier} => Return=${optResult.totalReturn.toFixed(1)}%, Sharpe=${optResult.sharpe.toFixed(2)}, Trades=${optResult.numTrades}`);
+  }
 
   // Recompute ST with optimal params
   const [optStArr, optStDirArr, optStSigArr] = supertrend(
