@@ -1,6 +1,112 @@
 {
-  "last_optimized": null,
-  "next_optimization": null,
-  "optimization_count": 0,
-  "stocks": {}
+  "last_optimized": "2026-05-11",
+  "next_optimization": "2026-06-07",
+  "optimization_count": 1,
+  "stocks": {
+    "9988.HK": {
+      "atr_period": 14,
+      "multiplier": 2.75,
+      "total_return": 141.19,
+      "sharpe": 1.47,
+      "num_trades": 5
+    },
+    "0700.HK": {
+      "atr_period": 12,
+      "multiplier": 3,
+      "total_return": 48.19,
+      "sharpe": 1.05,
+      "num_trades": 4
+    },
+    "1211.HK": {
+      "atr_period": 14,
+      "multiplier": 2.5,
+      "total_return": 6.96,
+      "sharpe": 0.27,
+      "num_trades": 10
+    },
+    "1810.HK": {
+      "atr_period": 14,
+      "multiplier": 3.25,
+      "total_return": 158.32,
+      "sharpe": 1.75,
+      "num_trades": 4
+    },
+    "0175.HK": {
+      "atr_period": 14,
+      "multiplier": 3.5,
+      "total_return": 57.79,
+      "sharpe": 0.86,
+      "num_trades": 5
+    },
+    "3033.HK": {
+      "atr_period": 14,
+      "multiplier": 3.25,
+      "total_return": 65.02,
+      "sharpe": 1.31,
+      "num_trades": 5
+    },
+    "AAPL": {
+      "atr_period": 14,
+      "multiplier": 3.5,
+      "total_return": 14.74,
+      "sharpe": 0.8,
+      "num_trades": 6
+    },
+    "MSFT": {
+      "atr_period": 12,
+      "multiplier": 3.25,
+      "total_return": 5.67,
+      "sharpe": 0.43,
+      "num_trades": 6
+    },
+    "GOOGL": {
+      "atr_period": 14,
+      "multiplier": 3.5,
+      "total_return": 100.28,
+      "sharpe": 2.26,
+      "num_trades": 3
+    },
+    "META": {
+      "atr_period": 14,
+      "multiplier": 3.5,
+      "total_return": 24.18,
+      "sharpe": 0.62,
+      "num_trades": 7
+    },
+    "AMD": {
+      "atr_period": 14,
+      "multiplier": 2.5,
+      "total_return": 76.31,
+      "sharpe": 1.91,
+      "num_trades": 8
+    },
+    "NVDA": {
+      "atr_period": 10,
+      "multiplier": 3,
+      "total_return": 10.19,
+      "sharpe": 0.68,
+      "num_trades": 8
+    },
+    "TSM": {
+      "atr_period": 14,
+      "multiplier": 2.75,
+      "total_return": 41.28,
+      "sharpe": 1.16,
+      "num_trades": 6
+    },
+    "SPY": {
+      "atr_period": 14,
+      "multiplier": 2.5,
+      "total_return": 13.62,
+      "sharpe": 1.58,
+      "num_trades": 8
+    },
+    "QQQ": {
+      "atr_period": 12,
+      "multiplier": 3.5,
+      "total_return": 19.78,
+      "sharpe": 1.64,
+      "num_trades": 5
+    }
+  }
 }
