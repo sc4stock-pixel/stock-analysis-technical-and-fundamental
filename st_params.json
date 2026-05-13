@@ -1,13 +1,13 @@
 {
-  "last_optimized": "2026-05-11",
+  "last_optimized": "2026-05-13",
   "next_optimization": "2026-06-07",
-  "optimization_count": 1,
+  "optimization_count": 2,
   "stocks": {
     "9988.HK": {
       "atr_period": 14,
       "multiplier": 2.75,
       "total_return": 141.19,
-      "sharpe": 1.47,
+      "sharpe": 1.45,
       "num_trades": 5
     },
     "0700.HK": {
@@ -20,7 +20,7 @@
     "1211.HK": {
       "atr_period": 14,
       "multiplier": 2.5,
-      "total_return": 6.96,
+      "total_return": 6.97,
       "sharpe": 0.27,
       "num_trades": 10
     },
@@ -41,29 +41,29 @@
     "3033.HK": {
       "atr_period": 14,
       "multiplier": 3.25,
-      "total_return": 65.02,
-      "sharpe": 1.31,
+      "total_return": 66.41,
+      "sharpe": 1.33,
       "num_trades": 5
     },
     "AAPL": {
       "atr_period": 14,
       "multiplier": 3.5,
       "total_return": 14.74,
-      "sharpe": 0.8,
+      "sharpe": 0.81,
       "num_trades": 6
     },
     "MSFT": {
-      "atr_period": 12,
-      "multiplier": 3.25,
-      "total_return": 5.67,
-      "sharpe": 0.43,
-      "num_trades": 6
+      "atr_period": 14,
+      "multiplier": 2.5,
+      "total_return": 9.29,
+      "sharpe": 0.39,
+      "num_trades": 8
     },
     "GOOGL": {
       "atr_period": 14,
       "multiplier": 3.5,
       "total_return": 100.28,
-      "sharpe": 2.26,
+      "sharpe": 2.17,
       "num_trades": 3
     },
     "META": {
@@ -77,21 +77,21 @@
       "atr_period": 14,
       "multiplier": 2.5,
       "total_return": 76.31,
-      "sharpe": 1.91,
+      "sharpe": 1.89,
       "num_trades": 8
     },
     "NVDA": {
       "atr_period": 10,
       "multiplier": 3,
       "total_return": 10.19,
-      "sharpe": 0.68,
+      "sharpe": 0.74,
       "num_trades": 8
     },
     "TSM": {
       "atr_period": 14,
       "multiplier": 2.75,
-      "total_return": 41.28,
-      "sharpe": 1.16,
+      "total_return": 41.27,
+      "sharpe": 1.08,
       "num_trades": 6
     },
     "SPY": {
@@ -105,7 +105,7 @@
       "atr_period": 12,
       "multiplier": 3.5,
       "total_return": 19.78,
-      "sharpe": 1.64,
+      "sharpe": 1.61,
       "num_trades": 5
     }
   }
