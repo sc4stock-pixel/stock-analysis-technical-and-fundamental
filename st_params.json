@@ -1,7 +1,7 @@
 {
   "last_optimized": "2026-05-13",
   "next_optimization": "2026-06-07",
-  "optimization_count": 3,
+  "optimization_count": 4,
   "stocks": {
     "9988.HK": {
       "atr_period": 14,
@@ -31,18 +31,18 @@
       "sharpe": 1.21,
       "num_trades": 6
     },
-    "3033.HK": {
-      "atr_period": 14,
-      "multiplier": 3.25,
-      "total_return": 65.86,
-      "sharpe": 0.91,
-      "num_trades": 5
-    },
     "0175.HK": {
       "atr_period": 14,
       "multiplier": 3.5,
       "total_return": 61.89,
       "sharpe": 0.92,
+      "num_trades": 5
+    },
+    "3033.HK": {
+      "atr_period": 14,
+      "multiplier": 3.25,
+      "total_return": 65.86,
+      "sharpe": 0.91,
       "num_trades": 5
     },
     "SPY": {
@@ -66,19 +66,19 @@
       "sharpe": 0.53,
       "num_trades": 6
     },
-    "MSFT": {
-      "atr_period": 14,
-      "multiplier": 2.5,
-      "total_return": 12.18,
-      "sharpe": 0.34,
-      "num_trades": 8
-    },
     "NVDA": {
       "atr_period": 12,
       "multiplier": 2.75,
       "total_return": 22.95,
       "sharpe": 0.43,
       "num_trades": 9
+    },
+    "MSFT": {
+      "atr_period": 14,
+      "multiplier": 2.5,
+      "total_return": 12.18,
+      "sharpe": 0.34,
+      "num_trades": 8
     },
     "GOOGL": {
       "atr_period": 10,
@@ -94,19 +94,19 @@
       "sharpe": 0.66,
       "num_trades": 7
     },
-    "AMD": {
-      "atr_period": 10,
-      "multiplier": 3.0,
-      "total_return": 72.8,
-      "sharpe": 0.77,
-      "num_trades": 5
-    },
     "TSM": {
       "atr_period": 14,
       "multiplier": 3.5,
       "total_return": 63.5,
       "sharpe": 1.14,
       "num_trades": 6
+    },
+    "AMD": {
+      "atr_period": 10,
+      "multiplier": 3.0,
+      "total_return": 72.8,
+      "sharpe": 0.77,
+      "num_trades": 5
     }
   }
 }
