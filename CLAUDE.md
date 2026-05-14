@@ -89,6 +89,34 @@ All analysis parameters live in `AppConfig` (`src/types/index.ts`). Defaults are
 
 Deployed on Vercel. `vercel.json` sets `maxDuration: 30s` for all API routes. The heavy computation (`runPipeline`) runs server-side in the API route.
 
+## Standing Conventions
+
+### Editing this repo
+
+The local directory `stock-analysis-technical-and-fundamental-timesFM V16.1/` is **not** linked to GitHub. Always make changes by cloning the repo to `/tmp`, editing, committing, and pushing:
+
+```bash
+git clone https://github.com/sc4stock-pixel/stock-analysis-technical-and-fundamental.git /tmp/stock-analysis-repo
+# edit files
+cd /tmp/stock-analysis-repo && git add <files> && git commit -m "..." && git pull --rebase origin main && git push origin main
+```
+
+### backtest.ts — entryRegime must use current bar
+
+`entryRegime` at line 258 reads `cur.regime` (not `prev.regime`). This matches Python's `backtest.py` which uses the current bar's regime for all entry parameter lookups (ATR mult, trailing mult, max hold days, profit target, trail trigger, Alpha Mode). Do not revert this.
+
+### Scoring divergence from Python is intentional
+
+The web app scores each bar with its own detected regime's weights (per-bar). Python applies one global regime (detected at analysis time) to all bars. This is a known, accepted divergence — the web app approach is more methodologically sound. Do not "fix" it to match Python without explicit instruction.
+
+### ST optimizer is Python-only — do not re-introduce JS
+
+`scripts/optimize_supertrend.py` is the single source of truth for `st_params.json`. The old `scripts/optimize-supertrend.mjs` was deleted. The GH Actions workflow runs the Python script monthly. Do not create a JS/TS replacement.
+
+### GITHUB_TOKEN scope for workflow_dispatch
+
+The Vercel env var `GITHUB_TOKEN` must be a classic PAT with **both** `repo` and `workflow` scopes. `repo` alone returns 403 when triggering `workflow_dispatch` via the GitHub API.
+
 ### GitHub Actions workflows
 
 | Workflow | Schedule | Purpose |
