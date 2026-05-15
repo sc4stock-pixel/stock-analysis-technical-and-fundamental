@@ -74,6 +74,11 @@
       "symbol": "QQQ",
       "name": "QQQ",
       "exchange": "US"
+    },
+    {
+      "symbol": "2513.HK",
+      "name": "Zai",
+      "exchange": "HK"
     }
   ]
 }
