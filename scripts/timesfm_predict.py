@@ -36,11 +36,30 @@ model.compile(ForecastConfig(
 ))
 print("Model ready.")
 
-# ── Stock universe ──────────────────────────────────────────────
-stocks = [
+# ── Stock universe — loaded from portfolio.json; hardcoded list is fallback ──
+_STOCKS_FALLBACK = [
     "9988.HK", "0700.HK", "1211.HK", "1810.HK", "0175.HK", "3033.HK",
     "SPY", "QQQ", "AAPL", "MSFT", "NVDA", "GOOGL", "META", "TSM", "AMD",
 ]
+
+def _load_stocks() -> list[str]:
+    """Read portfolio.json from repo root (one level up from scripts/).
+    Falls back to hardcoded list if the file is missing or malformed."""
+    import json as _json
+    from pathlib import Path as _Path
+    portfolio_path = _Path(__file__).parent.parent / "portfolio.json"
+    try:
+        data = _json.loads(portfolio_path.read_text())
+        entries = data.get("portfolio", [])
+        if entries:
+            loaded = [e["symbol"] for e in entries]
+            print(f"  📋 Loaded {len(loaded)} stocks from portfolio.json")
+            return loaded
+    except Exception as e:
+        print(f"  ⚠  portfolio.json not found or invalid ({e}) — using fallback list")
+    return _STOCKS_FALLBACK
+
+stocks = _load_stocks()
 
 # ── Initialize output with metadata at root level (backward compatible) ──
 # Structure: { "_metadata": {...}, "9988.HK": {...}, "0700.HK": {...}, ... }

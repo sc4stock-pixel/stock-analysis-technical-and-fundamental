@@ -25,8 +25,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-# ─── Portfolio — matches Python config.py and web app DEFAULT_CONFIG ──────────
-PORTFOLIO = [
+# ─── Portfolio — loaded from portfolio.json; hardcoded list is the fallback ───
+_PORTFOLIO_FALLBACK = [
     {"symbol": "9988.HK", "name": "Alibaba"},
     {"symbol": "0700.HK", "name": "Tencent"},
     {"symbol": "1211.HK", "name": "BYD"},
@@ -43,6 +43,23 @@ PORTFOLIO = [
     {"symbol": "TSM",     "name": "TSMC"},
     {"symbol": "AMD",     "name": "AMD"},
 ]
+
+def _load_portfolio() -> list[dict]:
+    """Read portfolio.json from repo root (one level up from scripts/).
+    Falls back to hardcoded list if the file is missing or malformed."""
+    portfolio_path = Path(__file__).parent.parent / "portfolio.json"
+    try:
+        data = json.loads(portfolio_path.read_text())
+        entries = data.get("portfolio", [])
+        if entries:
+            loaded = [{"symbol": e["symbol"], "name": e.get("name", e["symbol"])} for e in entries]
+            print(f"  📋 Loaded {len(loaded)} stocks from portfolio.json")
+            return loaded
+    except Exception as e:
+        print(f"  ⚠  portfolio.json not found or invalid ({e}) — using fallback list")
+    return _PORTFOLIO_FALLBACK
+
+PORTFOLIO = _load_portfolio()
 
 ATR_PERIODS   = [10, 12, 14]
 MULTIPLIERS   = [2.5, 2.75, 3.0, 3.25, 3.5]
