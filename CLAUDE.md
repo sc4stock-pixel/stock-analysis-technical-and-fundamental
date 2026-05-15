@@ -117,6 +117,19 @@ The web app scores each bar with its own detected regime's weights (per-bar). Py
 
 The Vercel env var `GITHUB_TOKEN` must be a classic PAT with **both** `repo` and `workflow` scopes. `repo` alone returns 403 when triggering `workflow_dispatch` via the GitHub API.
 
+### Alert automation hook pattern
+
+Flip and reentry alerts in `AlertsPanel.tsx` carry structured `data-*` attributes
+on their DOM nodes for external tooling and future automation:
+
+- `data-alert-type` — `"flip"` | `"reentry"` | `"score_buy"` | `"rsi_div"` | `"candlestick"` | `"correlation"`
+- `data-symbol` — ticker symbol (e.g. `"0700.HK"`)
+- `data-flip-type` — `"BULLISH"` | `"BEARISH"` (flip and reentry alerts only)
+- `data-bars-since` — integer, bars since the flip/reentry (0 = today)
+
+Any future automation features (webhooks, bots, browser extensions) should query
+these attributes rather than parsing the alert text. Do not remove or rename them.
+
 ### GitHub Actions workflows
 
 | Workflow | Schedule | Purpose |
