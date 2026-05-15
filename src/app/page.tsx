@@ -56,7 +56,27 @@ export default function Dashboard() {
   const [stOptimizing, setStOptimizing] = useState(false);
   const [stOptMsg, setStOptMsg]         = useState<string | null>(null);
 
+  const [savePortfolioLoading, setSavePortfolioLoading] = useState(false);
+  const [savePortfolioMsg, setSavePortfolioMsg]         = useState<string | null>(null);
+  const [backtestLoading, setBacktestLoading]           = useState(false);
+
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load portfolio.json from GitHub on mount — restores any previously saved portfolio
+  useEffect(() => {
+    fetch(
+      "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/portfolio.json",
+      { cache: "no-store" }
+    )
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { portfolio: AppConfig["stocks"]["PORTFOLIO"] } | null) => {
+        if (data?.portfolio?.length) {
+          setConfig(prev => ({ ...prev, stocks: { PORTFOLIO: data.portfolio } }));
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const onScroll = () => setShowScrollTop(window.scrollY > 300);
@@ -143,6 +163,57 @@ export default function Dashboard() {
       fetchTimesfm();
     }
   }, [results, timesfmData, fetchTimesfm]);
+
+  async function savePortfolio() {
+    setSavePortfolioLoading(true);
+    setSavePortfolioMsg(null);
+    try {
+      const res = await fetch("/api/save-portfolio", {
+        method:  "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ portfolio: config.stocks.PORTFOLIO }),
+      });
+      const data = await res.json();
+      setSavePortfolioMsg(data.success
+        ? `Saved ${data.count} stocks to repo ✓`
+        : `Error: ${data.error}`);
+    } catch (e) {
+      setSavePortfolioMsg(`Error: ${String(e)}`);
+    } finally {
+      setSavePortfolioLoading(false);
+    }
+  }
+
+  const syncWithParams = useCallback(async () => {
+    setBacktestLoading(true);
+    setResults([]);
+    setHighlightedSymbol(null);
+    const overrideSTParams = {
+      atrPeriod:  config.supertrend.atrPeriod,
+      multiplier: config.supertrend.multiplier,
+    };
+    const portfolio    = config.stocks.PORTFOLIO;
+    const allResults: StockAnalysisResult[] = [];
+    for (let i = 0; i < portfolio.length; i++) {
+      const stock = portfolio[i];
+      try {
+        const res = await fetch("/api/stocks", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ symbol: stock.symbol, config, overrideSTParams }),
+        });
+        if (res.ok) {
+          const data = await res.json() as StockAnalysisResult;
+          allResults.push(data);
+          setResults([...allResults]);
+        }
+      } catch (e) {
+        console.error(`Error syncing ${stock.symbol}:`, e);
+      }
+    }
+    setLastUpdated(new Date().toLocaleTimeString());
+    setBacktestLoading(false);
+  }, [config]);
 
   async function triggerSTOptimization() {
     setStOptimizing(true);
@@ -285,7 +356,15 @@ export default function Dashboard() {
       {/* CONFIG PANEL */}
       {showConfig && (
         <div className="border-b border-[#1e2d4a] bg-[#0a0e1a]">
-          <ConfigPanel config={config} onChange={setConfig} />
+          <ConfigPanel
+            config={config}
+            onChange={setConfig}
+            onSavePortfolio={savePortfolio}
+            savePortfolioLoading={savePortfolioLoading}
+            savePortfolioMsg={savePortfolioMsg}
+            onBacktestWithParams={syncWithParams}
+            backtestLoading={backtestLoading}
+          />
         </div>
       )}
 
@@ -303,6 +382,13 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* ALERTS PANEL — above portfolio summary for immediate visibility */}
+      {results.length > 0 && (
+        <div className="mx-4">
+          <AlertsPanel results={results} />
+        </div>
+      )}
+
       {/* PORTFOLIO SUMMARY TABLE */}
       {results.length > 0 && (
         <div className="border-b border-[#1e2d4a]">
@@ -317,13 +403,6 @@ export default function Dashboard() {
       {/* OPEN POSITIONS PANEL */}
       {results.length > 0 && (
         <OpenPositionsPanel results={results} onSymbolClick={scrollToCard} />
-      )}
-
-      {/* ALERTS PANEL */}
-      {results.length > 0 && (
-        <div className="mx-4">
-          <AlertsPanel results={results} />
-        </div>
       )}
 
       {/* STOCK CARDS */}

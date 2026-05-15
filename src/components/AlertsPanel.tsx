@@ -11,6 +11,11 @@ interface Alert {
   icon: string;
   text: string;
   priority: number; // lower = higher priority
+  // Automation metadata — exposed as data-* attributes for external tooling
+  alertType: "reentry" | "flip" | "score_buy" | "rsi_div" | "candlestick" | "correlation";
+  symbol?: string;
+  flipType?: "BULLISH" | "BEARISH";
+  barsSince?: number;
 }
 
 const FLIP_ALERT_DAYS = 3;
@@ -41,9 +46,6 @@ function computeOptimizedFlip(
   return { flipType: null, barsSince: 999 };
 }
 
-// ── NEW: Detect SMA50 crossover re-entry ─────────────────────
-// Fires when ST is bullish but the flip was blocked by SMA50,
-// and price has now crossed above SMA50 (within last 2 bars).
 function computeSMA50Reentry(
   result: StockAnalysisResult
 ): { reentry: boolean; barsSince: number } {
@@ -59,14 +61,11 @@ function computeSMA50Reentry(
 
   const [, dir] = supertrend(highs, lows, closes, optAtr, optMul);
 
-  // ST must currently be bullish
   const currentDir = dir[dir.length - 1] ?? -1;
   if (currentDir !== 1) return { reentry: false, barsSince: 999 };
 
-  // Compute SMA50 from closes
   const sma50arr = sma(closes, 50);
 
-  // Check last 2 bars for SMA50 upward crossover
   const n = closes.length;
   for (let lookback = 1; lookback <= 2; lookback++) {
     const i = n - 1 - (lookback - 1);
@@ -101,6 +100,8 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
         icon: "⚠️",
         text: `<strong>${r.symbol}</strong>: RSI ${bt.rsi_divergence_type} Divergence`,
         priority: 5,
+        alertType: "rsi_div",
+        symbol: r.symbol,
       });
     }
 
@@ -110,14 +111,16 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
         icon: "🔗",
         text: `<strong>${r.symbol}</strong>: Correlated with ${r.kelly.correlated_with}`,
         priority: 8,
+        alertType: "correlation",
+        symbol: r.symbol,
       });
     }
 
-    const stReturn500  = comparison?.supertrend?.total_return ?? 0;
-    const stReturn250  = comparison?.supertrend?.total_return_250d ?? 0;
+    const stReturn500    = comparison?.supertrend?.total_return ?? 0;
+    const stReturn250    = comparison?.supertrend?.total_return_250d ?? 0;
     const scoreReturn500 = comparison?.score?.total_return ?? bt?.total_return ?? 0;
     const scoreReturn250 = comparison?.score?.total_return_250d ?? 0;
-    const scoreSignal  = r.signal;
+    const scoreSignal    = r.signal;
 
     // 3. SMA50 crossover re-entry (HIGHEST PRIORITY — actionable BUY signal)
     const { reentry, barsSince: reentryBars } = computeSMA50Reentry(r);
@@ -133,12 +136,20 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
           icon: "🚀",
           text: `<strong>${r.symbol}</strong>: ST RE-ENTRY ✅ Price crossed above SMA50 (${daysText}) — ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% vs Sc: ${scRet >= 0 ? "+" : ""}${scRet.toFixed(1)}%`,
           priority: 1,
+          alertType: "reentry",
+          symbol: r.symbol,
+          flipType: "BULLISH",
+          barsSince: reentryBars,
         });
       } else {
         alerts.push({
           icon: "🚀",
           text: `<strong>${r.symbol}</strong>: ST RE-ENTRY ✅ Price crossed above SMA50 (${daysText}) — ST bullish re-entry triggered`,
           priority: 1,
+          alertType: "reentry",
+          symbol: r.symbol,
+          flipType: "BULLISH",
+          barsSince: reentryBars,
         });
       }
     }
@@ -151,7 +162,6 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
       const stOut500 = stReturn500 > scoreReturn500;
       const stOut250 = stReturn250 > scoreReturn250;
 
-      // Only show flip alert if no re-entry alert already shown
       if (!reentry) {
         if (stOut500 || stOut250) {
           const period = stOut500 ? "500d" : "250d";
@@ -161,12 +171,20 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
             icon: "🟢",
             text: `<strong>${r.symbol}</strong>: ST FLIPPED BULLISH 📈 (${daysText}) - ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% vs Sc: ${scRet >= 0 ? "+" : ""}${scRet.toFixed(1)}%`,
             priority: 2,
+            alertType: "flip",
+            symbol: r.symbol,
+            flipType: "BULLISH",
+            barsSince,
           });
         } else if (scoreSignal !== "BUY") {
           alerts.push({
             icon: "🟢",
             text: `<strong>${r.symbol}</strong>: SuperTrend FLIPPED BULLISH 📈 (${daysText})`,
             priority: 2,
+            alertType: "flip",
+            symbol: r.symbol,
+            flipType: "BULLISH",
+            barsSince,
           });
         }
       }
@@ -182,12 +200,20 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
           icon: "🔴",
           text: `<strong>${r.symbol}</strong>: ST FLIPPED BEARISH 📉 (${daysText}) - ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% outperforms`,
           priority: 2,
+          alertType: "flip",
+          symbol: r.symbol,
+          flipType: "BEARISH",
+          barsSince,
         });
       } else {
         alerts.push({
           icon: "🔴",
           text: `<strong>${r.symbol}</strong>: SuperTrend FLIPPED BEARISH 📉 (${daysText})`,
           priority: 2,
+          alertType: "flip",
+          symbol: r.symbol,
+          flipType: "BEARISH",
+          barsSince,
         });
       }
     }
@@ -206,6 +232,8 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
           icon: "✅",
           text: `<strong>${r.symbol}</strong>: Score BUY Signal (Sc ${period}: ${scRet >= 0 ? "+" : ""}${scRet.toFixed(1)}% vs ST: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}%)`,
           priority: 3,
+          alertType: "score_buy",
+          symbol: r.symbol,
         });
       }
     }
@@ -237,25 +265,54 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
           icon: "✅",
           text: `<strong>${r.symbol}</strong>: ${p.pattern} (${label}) - Confirms ${signal}`,
           priority: 4,
+          alertType: "candlestick",
+          symbol: r.symbol,
         });
       } else if (curCaution.includes(p.pattern)) {
         alerts.push({
           icon: "⚠️",
           text: `<strong>${r.symbol}</strong>: ${p.pattern} (${label}) - Caution on ${signal}`,
           priority: 5,
+          alertType: "candlestick",
+          symbol: r.symbol,
         });
       }
     }
   }
 
-  // Sort by priority
   alerts.sort((a, b) => a.priority - b.priority);
   return alerts;
+}
+
+// Flip and reentry alerts get visually distinct rows; all others use the standard row.
+function alertRowStyle(alert: Alert): string {
+  if (alert.alertType === "reentry") {
+    return "flex items-start gap-2 text-[0.7rem] rounded px-2 py-1.5 mb-1 border border-[#00ff88]/30 bg-[#00ff88]/5";
+  }
+  if (alert.alertType === "flip" && alert.flipType === "BULLISH") {
+    return "flex items-start gap-2 text-[0.7rem] rounded px-2 py-1.5 mb-1 border border-[#00d4ff]/25 bg-[#00d4ff]/5";
+  }
+  if (alert.alertType === "flip" && alert.flipType === "BEARISH") {
+    return "flex items-start gap-2 text-[0.7rem] rounded px-2 py-1.5 mb-1 border border-[#ff4757]/25 bg-[#ff4757]/5";
+  }
+  return "flex items-start gap-2 text-[0.7rem] border-b border-[#1e2d4a]/30 pb-1 last:border-0";
+}
+
+function renderText(text: string) {
+  return text.split(/(<strong>.*?<\/strong>)/g).map((part, i) =>
+    part.startsWith("<strong>") ? (
+      <strong key={i}>{part.replace(/<\/?strong>/g, "")}</strong>
+    ) : part
+  );
 }
 
 export default function AlertsPanel({ results }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const alerts = useMemo(() => generateAlerts(results), [results]);
+
+  // Split into action alerts (flip/reentry) and informational
+  const actionAlerts = alerts.filter(a => a.alertType === "flip" || a.alertType === "reentry");
+  const infoAlerts   = alerts.filter(a => a.alertType !== "flip" && a.alertType !== "reentry");
 
   if (alerts.length === 0) return null;
 
@@ -268,31 +325,67 @@ export default function AlertsPanel({ results }: Props) {
         <div className="flex items-center gap-2">
           <span className="text-[#f59e0b] text-sm font-bold">⚡ ALERTS</span>
           <span className="text-[#4a6080] text-xs">({alerts.length})</span>
+          {actionAlerts.length > 0 && (
+            <span className="text-[0.6rem] font-mono font-bold px-1.5 py-0.5 rounded bg-[#f59e0b]/15 border border-[#f59e0b]/30 text-[#f59e0b]">
+              {actionAlerts.length} SIGNAL{actionAlerts.length > 1 ? "S" : ""}
+            </span>
+          )}
         </div>
         <span className="text-[#4a6080] text-xs">{collapsed ? "▼" : "▲"}</span>
       </div>
+
       {!collapsed && (
-        <div className="mt-2 space-y-1.5">
-          {alerts.map((alert, idx) => {
-            const parts = alert.text.split(/(<strong>.*?<\/strong>)/g);
-            return (
-              <div
-                key={idx}
-                className="flex items-start gap-2 text-[0.7rem] border-b border-[#1e2d4a]/30 pb-1 last:border-0"
-              >
-                <span className="shrink-0 mt-0.5">{alert.icon}</span>
-                <span>
-                  {parts.map((part, i) =>
-                    part.startsWith("<strong>") ? (
-                      <strong key={i}>{part.replace(/<\/?strong>/g, "")}</strong>
-                    ) : (
-                      part
-                    )
-                  )}
-                </span>
+        <div className="mt-2">
+          {/* ── Action alerts: flip + reentry — prominent section ── */}
+          {actionAlerts.length > 0 && (
+            <div className="mb-3">
+              <div className="text-[0.6rem] font-mono text-[#4a6080] tracking-widest mb-1.5">
+                SIGNAL ALERTS
               </div>
-            );
-          })}
+              {actionAlerts.map((alert, idx) => (
+                <div
+                  key={`action-${idx}`}
+                  className={alertRowStyle(alert)}
+                  data-alert-type={alert.alertType}
+                  data-symbol={alert.symbol ?? ""}
+                  data-flip-type={alert.flipType ?? ""}
+                  data-bars-since={alert.barsSince ?? ""}
+                >
+                  <span className="shrink-0 mt-0.5">{alert.icon}</span>
+                  <span className="flex-1">{renderText(alert.text)}</span>
+                  {alert.barsSince === 0 && (
+                    <span className="shrink-0 text-[0.55rem] font-mono font-bold px-1 py-0.5 rounded bg-[#f59e0b]/20 border border-[#f59e0b]/40 text-[#f59e0b] self-center">
+                      TODAY
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Informational alerts ── */}
+          {infoAlerts.length > 0 && (
+            <div>
+              {actionAlerts.length > 0 && (
+                <div className="text-[0.6rem] font-mono text-[#4a6080] tracking-widest mb-1.5">
+                  OTHER ALERTS
+                </div>
+              )}
+              <div className="space-y-1.5">
+                {infoAlerts.map((alert, idx) => (
+                  <div
+                    key={`info-${idx}`}
+                    className={alertRowStyle(alert)}
+                    data-alert-type={alert.alertType}
+                    data-symbol={alert.symbol ?? ""}
+                  >
+                    <span className="shrink-0 mt-0.5">{alert.icon}</span>
+                    <span>{renderText(alert.text)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -5,11 +5,20 @@ import { AppConfig } from "@/types";
 interface Props {
   config: AppConfig;
   onChange: (config: AppConfig) => void;
+  onSavePortfolio?: () => void;
+  savePortfolioLoading?: boolean;
+  savePortfolioMsg?: string | null;
+  onBacktestWithParams?: () => void;
+  backtestLoading?: boolean;
 }
 
 type TabId = "portfolio" | "signal" | "backtest" | "risk" | "supertrend" | "macro";
 
-export default function ConfigPanel({ config, onChange }: Props) {
+export default function ConfigPanel({
+  config, onChange,
+  onSavePortfolio, savePortfolioLoading, savePortfolioMsg,
+  onBacktestWithParams, backtestLoading,
+}: Props) {
   const [activeTab, setActiveTab] = useState<TabId>("signal");
   const [newSymbol, setNewSymbol] = useState("");
   const [newName, setNewName] = useState("");
@@ -96,14 +105,20 @@ export default function ConfigPanel({ config, onChange }: Props) {
               ))}
             </div>
             <div className={sectionTitle}>ADD STOCK</div>
+            {/* Ticker format guide */}
+            <div className="mb-2 px-2 py-1.5 bg-[#080d1a] border border-[#1e2d4a]/60 rounded text-[0.6rem] font-mono text-[#4a6080] leading-relaxed">
+              <span className="text-[#ffa502]">Ticker format: </span>
+              US → <span className="text-[#c8d8f0]">AAPL MSFT NVDA</span>
+              {"  "}HK → <span className="text-[#c8d8f0]">0700.HK 9988.HK</span> (4-digit + .HK)
+            </div>
             <div className="grid grid-cols-3 gap-2 mb-2">
               <div>
                 <div className={labelCls}>Symbol</div>
-                <input className={inputCls} value={newSymbol} onChange={e => setNewSymbol(e.target.value.toUpperCase())} placeholder="AAPL" />
+                <input className={inputCls} value={newSymbol} onChange={e => setNewSymbol(e.target.value.toUpperCase())} placeholder="0005.HK" />
               </div>
               <div>
                 <div className={labelCls}>Name</div>
-                <input className={inputCls} value={newName} onChange={e => setNewName(e.target.value)} placeholder="Apple" />
+                <input className={inputCls} value={newName} onChange={e => setNewName(e.target.value)} placeholder="HSBC" />
               </div>
               <div>
                 <div className={labelCls}>Exchange</div>
@@ -113,9 +128,32 @@ export default function ConfigPanel({ config, onChange }: Props) {
                 </select>
               </div>
             </div>
-            <button onClick={addStock} className="w-full bg-[#00d4ff]/10 border border-[#00d4ff]/30 text-[#00d4ff] text-xs font-mono py-1.5 rounded hover:bg-[#00d4ff]/20 transition-colors">
+            <button onClick={addStock} className="w-full bg-[#00d4ff]/10 border border-[#00d4ff]/30 text-[#00d4ff] text-xs font-mono py-1.5 rounded hover:bg-[#00d4ff]/20 transition-colors mb-3">
               + ADD STOCK
             </button>
+
+            {/* Save portfolio to GitHub */}
+            {onSavePortfolio && (
+              <div>
+                <div className="border-t border-[#1e2d4a] pt-3">
+                  <button
+                    onClick={onSavePortfolio}
+                    disabled={savePortfolioLoading}
+                    className="w-full bg-[#f59e0b]/10 border border-[#f59e0b]/30 text-[#f59e0b] text-xs font-mono py-1.5 rounded hover:bg-[#f59e0b]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {savePortfolioLoading ? "SAVING…" : "💾 SAVE TO REPO"}
+                  </button>
+                  {savePortfolioMsg && (
+                    <div className={`mt-1.5 text-[0.6rem] font-mono px-2 ${savePortfolioMsg.startsWith("Error") ? "text-[#ff4757]" : "text-[#00ff88]"}`}>
+                      {savePortfolioMsg}
+                    </div>
+                  )}
+                  <div className="mt-1 text-[0.6rem] font-mono text-[#4a6080]">
+                    Commits portfolio.json to GitHub — persists across browser sessions
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -263,7 +301,23 @@ export default function ConfigPanel({ config, onChange }: Props) {
                 <option value="full">Full Filter</option>
               </select>
             </div>
-            <div className="mt-4 p-3 bg-[#080d1a] border border-[#1e2d4a] rounded text-[0.65rem] font-mono text-[#4a6080]">
+            {/* One-off backtest with user-specified params */}
+            {onBacktestWithParams && (
+              <div className="mt-4 border-t border-[#1e2d4a] pt-3">
+                <button
+                  onClick={onBacktestWithParams}
+                  disabled={backtestLoading}
+                  className="w-full bg-[#00d4ff]/10 border border-[#00d4ff]/30 text-[#00d4ff] text-xs font-mono py-1.5 rounded hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {backtestLoading ? "RUNNING…" : "▶ BACKTEST WITH THESE PARAMS"}
+                </button>
+                <div className="mt-1 text-[0.6rem] font-mono text-[#4a6080]">
+                  Runs a one-off analysis using ATR={config.supertrend.atrPeriod}, Mult={config.supertrend.multiplier} — overrides st_params.json for this run only
+                </div>
+              </div>
+            )}
+
+            <div className="mt-3 p-3 bg-[#080d1a] border border-[#1e2d4a] rounded text-[0.65rem] font-mono text-[#4a6080]">
               <div className="text-[#ffa502] mb-1">ℹ SuperTrend — macro unaffected</div>
               SuperTrend is a pure trend-following system. The MBS macro adjustment is intentionally not applied to ST entries or scoring. Configure MBS impact on the 🌐 Macro tab.
             </div>

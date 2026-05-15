@@ -214,13 +214,14 @@ async function fetchYahooOHLCV(
 }
 
 // ─── Single stock analysis ─────────────────────────────────────
+// resolvedSTParams: explicit ST params to use. When null, pipeline falls back
+// to its in-browser grid optimizer for stocks not in st_params.json.
 async function analyzeStock(
   stock: { symbol: string; name: string; exchange: string },
   config: AppConfig,
-  stParams: STParamsData
+  resolvedSTParams: { atrPeriod: number; multiplier: number } | null
 ) {
   try {
-    // Fetch OHLCV and fundamentals in parallel
     const [data, fundamentals] = await Promise.all([
       fetchYahooOHLCV(stock.symbol, config.backtest.lookbackDays),
       fetchFundamentals(stock.symbol),
@@ -245,10 +246,7 @@ async function analyzeStock(
       };
     }
 
-    const cached = stParams.stocks[stock.symbol];
-    const cachedSTParams = cached ? { atrPeriod: cached.atr_period, multiplier: cached.multiplier } : null;
-    const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct, cachedSTParams);
-    // Spread result (which includes chart_bars) + add fundamentals
+    const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct, resolvedSTParams);
     return { ...result, fundamentals };
   } catch (e) {
     return {
@@ -273,24 +271,43 @@ async function analyzeStock(
   }
 }
 
+// Resolve which ST params to use for a given symbol.
+// overrideSTParams (from POST body) wins; falls back to st_params.json cache;
+// falls back to null (pipeline runs its own in-browser grid search).
+function resolveSTParams(
+  symbol: string,
+  stParams: STParamsData,
+  overrideSTParams: { atrPeriod: number; multiplier: number } | null
+): { atrPeriod: number; multiplier: number } | null {
+  if (overrideSTParams) return overrideSTParams;
+  const cached = stParams.stocks[symbol];
+  return cached ? { atrPeriod: cached.atr_period, multiplier: cached.multiplier } : null;
+}
+
 // ─── POST handler ──────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
     const body   = await req.json().catch(() => ({}));
     const config: AppConfig = body.config ?? DEFAULT_CONFIG;
+
+    // overrideSTParams: bypasses st_params.json for this call.
+    // Sent by "Backtest with These Params" with the user's config ST values.
+    const overrideSTParams: { atrPeriod: number; multiplier: number } | null =
+      body.overrideSTParams ?? null;
+
     const stParams = await loadSTParams();
 
     if (body.symbol) {
       const stock = config.stocks.PORTFOLIO.find((s) => s.symbol === body.symbol)
         ?? { symbol: body.symbol, name: body.symbol, exchange: "US" };
-      const result = await analyzeStock(stock, config, stParams);
+      const result = await analyzeStock(stock, config, resolveSTParams(stock.symbol, stParams, overrideSTParams));
       return NextResponse.json(result);
     }
 
     const portfolio = config.stocks.PORTFOLIO;
     const results = [];
     for (const stock of portfolio) {
-      results.push(await analyzeStock(stock, config, stParams));
+      results.push(await analyzeStock(stock, config, resolveSTParams(stock.symbol, stParams, overrideSTParams)));
     }
     return NextResponse.json({ results, timestamp: new Date().toISOString(), config });
   } catch (e) {
@@ -305,6 +322,6 @@ export async function GET(req: NextRequest) {
   const stParams = await loadSTParams();
   const stock = DEFAULT_CONFIG.stocks.PORTFOLIO.find((s) => s.symbol === symbol)
     ?? { symbol, name: symbol, exchange: "US" };
-  const result = await analyzeStock(stock, DEFAULT_CONFIG, stParams);
+  const result = await analyzeStock(stock, DEFAULT_CONFIG, resolveSTParams(symbol, stParams, null));
   return NextResponse.json(result);
 }
