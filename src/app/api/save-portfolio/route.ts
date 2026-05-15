@@ -33,7 +33,7 @@ export async function PUT(req: NextRequest) {
   // Fetch current file SHA (needed to update an existing file; omit for new file)
   let sha: string | undefined;
   try {
-    const getRes = await fetch(`${API}?ref=${BRANCH}`, { headers });
+    const getRes = await fetch(`${API}?ref=${BRANCH}`, { headers, cache: "no-store" });
     if (getRes.ok) {
       const data = await getRes.json();
       sha = data.sha;
