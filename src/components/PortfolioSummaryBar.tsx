@@ -1,10 +1,11 @@
 "use client";
 import { useState, useCallback } from "react";
-import { StockAnalysisResult } from "@/types";
+import { StockAnalysisResult, TimesfmForecasts } from "@/types";
 
 interface Props {
   results: StockAnalysisResult[];
   onRowClick: (symbol: string) => void;
+  timesfmData?: TimesfmForecasts | null;
 }
 
 function grade(score: number): { label: string; color: string } {
@@ -41,11 +42,11 @@ function regimeCell(regime: string): { icon: string; short: string; color: strin
   if (r === "RANGING")                      return { icon: "↔",   short: "Ranging",       color: C };
   if (r === "OVERBOUGHT")                   return { icon: "🔴",  short: "Overbought",    color: A };
   if (r === "OVERSOLD")                     return { icon: "🟢",  short: "Oversold",      color: G };
-  if (r === "NEUTRAL")                      return { icon: "—",   short: "Neutral",       color: D };
+  if (r === "NEUTRAL")                      return { icon: "--",   short: "Neutral",       color: D };
   if (r.startsWith("HIGH_VOL_") && r.includes("UPTREND")) return { icon: "🚀⚡", short: "HV UP", color: G };
   if (r.startsWith("HIGH_VOL_"))            return { icon: "⚡",  short: "High Vol", color: A };
   if (r.startsWith("EXTREME_VOL"))          return { icon: "⚡⚡", short: "Extr Vol", color: R };
-  return { icon: "—", short: r.replace(/_/g, " ").slice(0, 12), color: D };
+  return { icon: "--", short: r.replace(/_/g, " ").slice(0, 12), color: D };
 }
 
 function signalBadge(s: string) {
@@ -55,55 +56,60 @@ function signalBadge(s: string) {
 }
 
 const n  = (v: number | null | undefined, d = 1, sfx = "") =>
-  v == null || isNaN(Number(v)) ? "—" : `${Number(v).toFixed(d)}${sfx}`;
+  v == null || isNaN(Number(v)) ? "--" : `${Number(v).toFixed(d)}${sfx}`;
 const sn = (v: number | null | undefined, d = 1, sfx = "") =>
-  v == null || isNaN(Number(v)) ? "—" : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${sfx}`;
+  v == null || isNaN(Number(v)) ? "--" : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(d)}${sfx}`;
 const numColor = (v: number | null | undefined, good = 0) =>
   v == null || isNaN(Number(v)) ? "text-[#4a6080]" : Number(v) >= good ? "text-[#00ff88]" : "text-[#ff4757]";
 
-// ── Column definitions ────────────────────────────────────────
-// SC columns: blue (#00d4ff)   ST columns: orange (#ffa502)
 type ColKey =
   | "symbol" | "price" | "change_pct" | "regime" | "grade" | "score"
-  | "signal" | "st_status" | "sepa" | "rsi" | "macd_hist"
+  | "signal" | "st_status" | "sepa" | "tfm_10d" | "rsi" | "macd_hist"
   | "sc_500d" | "st_500d" | "sc_250d" | "st_250d"
   | "sc_sharpe" | "sc_alpha" | "st_sharpe" | "st_alpha";
 
 interface ColDef {
   key: ColKey;
   label: string;
-  labelColor?: string;   // header color override
+  labelColor?: string;
   align: "left" | "right" | "center";
-  sortVal: (r: StockAnalysisResult) => number;
+  sortVal: (r: StockAnalysisResult, tfm?: TimesfmForecasts | null) => number;
 }
 
-// SC = blue, ST = orange
-const SC_HDR = "text-[#00d4ff]";
-const ST_HDR = "text-[#ffa502]";
+const SC_HDR  = "text-[#00d4ff]";
+const ST_HDR  = "text-[#ffa502]";
+const TFM_HDR = "text-[#a78bfa]";
 
 const COLS: ColDef[] = [
   { key: "symbol",     label: "Ticker",     align: "left",   sortVal: r => r.symbol.charCodeAt(0) },
   { key: "price",      label: "Price",      align: "right",  sortVal: r => r.current_price },
-  { key: "change_pct", label: "Chg%",      align: "right",  sortVal: r => r.change_pct ?? 0 },
+  { key: "change_pct", label: "Chg%",       align: "right",  sortVal: r => r.change_pct ?? 0 },
   { key: "regime",     label: "Regime",     align: "left",   sortVal: r => r.regime?.charCodeAt(0) ?? 0 },
   { key: "grade",      label: "Grd",        align: "center", sortVal: r => r.score ?? 0 },
   { key: "score",      label: "Score",      align: "right",  sortVal: r => r.score ?? 0 },
   { key: "signal",     label: "Signal",     align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
   { key: "st_status",  label: "ST",         align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
   { key: "sepa",       label: "SEPA",       align: "center", sortVal: r => r.sepa_metadata?.sepa_score ?? -1 },
+  { key: "tfm_10d",    label: "TFM 10d",    labelColor: TFM_HDR, align: "right",
+    sortVal: (r, tfm) => {
+      const t2 = tfm?.[r.symbol]?.t2;
+      if (!t2 || !r.current_price) return -999;
+      return (t2 - r.current_price) / r.current_price * 100;
+    }
+  },
   { key: "rsi",        label: "RSI",        align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
   { key: "macd_hist",  label: "MACD H",     align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
-  { key: "sc_500d",    label: "SC 500d%",   labelColor: SC_HDR, align: "right",  sortVal: r => r.backtest?.total_return_500d ?? 0 },
-  { key: "st_500d",    label: "ST 500d%",   labelColor: ST_HDR, align: "right",  sortVal: r => r.comparison?.supertrend.total_return_500d ?? 0 },
-  { key: "sc_250d",    label: "SC 250d%",   labelColor: SC_HDR, align: "right",  sortVal: r => r.backtest?.total_return_250d ?? 0 },
-  { key: "st_250d",    label: "ST 250d%",   labelColor: ST_HDR, align: "right",  sortVal: r => r.comparison?.supertrend.total_return_250d ?? 0 },
-  { key: "sc_sharpe",  label: "SC Sharpe",  labelColor: SC_HDR, align: "right",  sortVal: r => r.backtest?.sharpe ?? 0 },
-  { key: "sc_alpha",   label: "SC Alpha",   labelColor: SC_HDR, align: "right",  sortVal: r => r.backtest?.alpha ?? 0 },
-  { key: "st_sharpe",  label: "ST Sharpe",  labelColor: ST_HDR, align: "right",  sortVal: r => r.comparison?.supertrend.sharpe ?? 0 },
-  { key: "st_alpha",   label: "ST Alpha",   labelColor: ST_HDR, align: "right",  sortVal: r => r.comparison?.supertrend.alpha ?? 0 },
+  { key: "sc_500d",    label: "SC 2Y%",     labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.total_return_500d ?? 0 },
+  { key: "st_500d",    label: "ST 2Y%",     labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.total_return_500d ?? 0 },
+  { key: "sc_250d",    label: "SC 1Y%",     labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.total_return_250d ?? 0 },
+  { key: "st_250d",    label: "ST 1Y%",     labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.total_return_250d ?? 0 },
+  { key: "sc_sharpe",  label: "SC Sharpe",  labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.sharpe ?? 0 },
+  { key: "sc_alpha",   label: "SC Alpha",   labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.alpha ?? 0 },
+  { key: "st_sharpe",  label: "ST Sharpe",  labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.sharpe ?? 0 },
+  { key: "st_alpha",   label: "ST Alpha",   labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.alpha ?? 0 },
 ];
 
-export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
+export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }: Props) {
   const [sortKey, setSortKey] = useState<ColKey>("signal");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
   const [flashSymbol, setFlashSymbol] = useState<string | null>(null);
@@ -122,9 +128,8 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
   if (results.length === 0) return null;
 
   const col    = COLS.find(c => c.key === sortKey)!;
-  const sorted = [...results].sort((a, b) => sortDir * (col.sortVal(b) - col.sortVal(a)));
+  const sorted = [...results].sort((a, b) => sortDir * (col.sortVal(b, timesfmData) - col.sortVal(a, timesfmData)));
 
-  // SC aggregates
   const buy      = results.filter(r => r.signal === "BUY").length;
   const sell     = results.filter(r => r.signal === "SELL").length;
   const hold     = results.filter(r => r.signal === "HOLD").length;
@@ -135,20 +140,20 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
   const avgSc500d  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.total_return_500d ?? 0), 0) / withBt.length : 0;
   const avgSc250d  = withBt.length ? withBt.reduce((a, r) => a + (r.backtest?.total_return_250d ?? 0), 0) / withBt.length : 0;
 
-  // ST aggregates
-  const stBull     = results.filter(r => (r.st_direction ?? -1) === 1).length;
-  const stBear     = results.filter(r => (r.st_direction ?? -1) === -1).length;
-  const withST     = results.filter(r => (r.comparison?.supertrend.num_trades ?? 0) > 0);
-  const avgST500d  = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.total_return_500d ?? 0), 0) / withST.length : 0;
-  const avgST250d  = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.total_return_250d ?? 0), 0) / withST.length : 0;
+  const stBull      = results.filter(r => (r.st_direction ?? -1) === 1).length;
+  const stBear      = results.filter(r => (r.st_direction ?? -1) === -1).length;
+  const withST      = results.filter(r => (r.comparison?.supertrend.num_trades ?? 0) > 0);
+  const avgST500d   = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.total_return_500d ?? 0), 0) / withST.length : 0;
+  const avgST250d   = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.total_return_250d ?? 0), 0) / withST.length : 0;
   const avgSTSharpe = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.sharpe ?? 0), 0) / withST.length : 0;
   const avgSTAlpha  = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.alpha ?? 0), 0) / withST.length : 0;
   const avgSTWin    = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.win_rate ?? 0), 0) / withST.length : 0;
 
+  const tfmCount = results.filter(r => timesfmData?.[r.symbol]?.t2 != null).length;
+
   const SortTh = ({ col: c }: { col: ColDef }) => {
     const active = sortKey === c.key;
-    // Use labelColor if set, else default dim color; active overrides to bright version
-    const baseColor = c.labelColor ?? "text-[#4a6080]";
+    const baseColor   = c.labelColor ?? "text-[#4a6080]";
     const activeColor = c.labelColor ?? "text-[#00d4ff]";
     return (
       <th
@@ -196,13 +201,18 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
           <span className="text-[#4a6080]">ST Sharpe <span className={numColor(avgSTSharpe, 0.5)}>{avgSTSharpe.toFixed(2)}</span></span>
           <span className="text-[#4a6080]">Win% <span className={numColor(avgSTWin, 50)}>{avgSTWin.toFixed(0)}%</span></span>
           <span className="text-[#4a6080]">ST α <span className={numColor(avgSTAlpha, 0)}>{sn(avgSTAlpha, 1, "%")}</span></span>
+          {tfmCount > 0 && (
+            <span className="text-[#a78bfa] font-mono text-[0.6rem] border border-[#a78bfa]/30 rounded px-1.5 py-0.5">
+              🔮 TFM {tfmCount}/{results.length}
+            </span>
+          )}
           <span className="text-[#4a6080] text-[0.65rem] ml-auto">↕ Click header to sort &nbsp;·&nbsp; ↵ Click row to jump</span>
         </div>
       </div>
 
       {/* Table */}
       <div className="overflow-x-auto rounded border border-[#1e2d4a]">
-        <table className="w-full text-xs min-w-[900px]">
+        <table className="w-full text-xs min-w-[980px]">
           <thead>
             <tr className="bg-[#0f1629] border-b border-[#1e2d4a] uppercase tracking-wider">
               {COLS.map(c => <SortTh key={c.key} col={c} />)}
@@ -218,6 +228,12 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
               const rsiC = rsi < 30 ? "text-[#00ff88]" : rsi > 70 ? "text-[#ff4757]" : "text-[#c8d8f0]";
               const chg  = r.change_pct ?? 0;
               const isFlashing = flashSymbol === r.symbol;
+
+              const tfm = timesfmData?.[r.symbol];
+              const tfmT2 = tfm?.t2;
+              const tfmPct = (tfmT2 != null && r.current_price > 0)
+                ? (tfmT2 - r.current_price) / r.current_price * 100
+                : null;
 
               return (
                 <tr
@@ -236,7 +252,7 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
                   </td>
                   {/* Price */}
                   <td className="px-2 py-1.5 text-right font-mono text-[#c8d8f0] whitespace-nowrap">
-                    {r.current_price > 0 ? r.current_price.toFixed(2) : "—"}
+                    {r.current_price > 0 ? r.current_price.toFixed(2) : "--"}
                   </td>
                   {/* Chg% */}
                   <td className={`px-2 py-1.5 text-right font-mono whitespace-nowrap ${numColor(chg, 0)}`}>
@@ -250,7 +266,7 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
                   <td className={`px-2 py-1.5 text-center text-sm ${g.color}`}>{g.label}</td>
                   {/* Score */}
                   <td className={`px-2 py-1.5 text-right font-mono font-bold ${(r.score ?? 0) >= 6.5 ? "text-[#00ff88]" : (r.score ?? 0) >= 5.5 ? "text-[#ffa502]" : "text-[#ff4757]"}`}>
-                    {r.score?.toFixed(1) ?? "—"}
+                    {r.score?.toFixed(1) ?? "--"}
                   </td>
                   {/* Signal */}
                   <td className="px-2 py-1.5 text-center">{signalBadge(r.signal)}</td>
@@ -284,7 +300,7 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
                   <td className="px-2 py-1.5 text-center">
                     {(() => {
                       const s = r.sepa_metadata;
-                      if (!s) return <span className="text-[#2a3d5a] text-[0.6rem]">—</span>;
+                      if (!s) return <span className="text-[#2a3d5a] text-[0.6rem]">--</span>;
                       const pip = (active: boolean | null, label: string) => {
                         if (active === null) return (
                           <span key={label} title={`${label}: N/A`}
@@ -311,27 +327,38 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
                       );
                     })()}
                   </td>
+                  {/* TFM 10d */}
+                  <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap"
+                    title={tfmT2 != null ? `TimesFM T2 target: ${tfmT2.toFixed(2)}` : "No forecast"}>
+                    {tfmPct == null ? (
+                      <span className="text-[#4a6080]">--</span>
+                    ) : (
+                      <span className={tfmPct >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>
+                        {tfmPct >= 0 ? "▲+" : "▼"}{Math.abs(tfmPct).toFixed(1)}%
+                      </span>
+                    )}
+                  </td>
                   {/* RSI */}
                   <td className={`px-2 py-1.5 text-right font-mono ${rsiC}`}>{n(rsi, 0)}</td>
                   {/* MACD Hist */}
                   <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.macd_hist, 0)}`}>{n(bt?.macd_hist, 3)}</td>
-                  {/* SC 500d% */}
+                  {/* SC 2Y% */}
                   <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return_500d, 0)}`}>
-                    {bt?.total_return_500d != null ? sn(bt.total_return_500d, 1, "%") : "—"}
+                    {bt?.total_return_500d != null ? sn(bt.total_return_500d, 1, "%") : "--"}
                   </td>
-                  {/* ST 500d% */}
+                  {/* ST 2Y% */}
                   {(() => {
                     const v = cmp?.supertrend.total_return_500d;
-                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "—"}</td>;
+                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "--"}</td>;
                   })()}
-                  {/* SC 250d% */}
+                  {/* SC 1Y% */}
                   <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.total_return_250d, 0)}`}>
-                    {bt?.total_return_250d != null ? sn(bt.total_return_250d, 1, "%") : "—"}
+                    {bt?.total_return_250d != null ? sn(bt.total_return_250d, 1, "%") : "--"}
                   </td>
-                  {/* ST 250d% */}
+                  {/* ST 1Y% */}
                   {(() => {
                     const v = cmp?.supertrend.total_return_250d;
-                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "—"}</td>;
+                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "--"}</td>;
                   })()}
                   {/* SC Sharpe */}
                   <td className={`px-2 py-1.5 text-right font-mono ${numColor(bt?.sharpe, 0.5)}`}>{n(bt?.sharpe, 2)}</td>
@@ -340,12 +367,12 @@ export default function PortfolioSummaryBar({ results, onRowClick }: Props) {
                   {/* ST Sharpe */}
                   {(() => {
                     const v = cmp?.supertrend.sharpe;
-                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0.5)}`}>{v != null ? n(v, 2) : "—"}</td>;
+                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0.5)}`}>{v != null ? n(v, 2) : "--"}</td>;
                   })()}
                   {/* ST Alpha */}
                   {(() => {
                     const v = cmp?.supertrend.alpha;
-                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "—"}</td>;
+                    return <td className={`px-2 py-1.5 text-right font-mono ${v == null ? "text-[#4a6080]" : numColor(v, 0)}`}>{v != null ? sn(v, 1, "%") : "--"}</td>;
                   })()}
                 </tr>
               );
