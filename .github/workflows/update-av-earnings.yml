@@ -18,6 +18,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install dependencies
+        run: pip install akshare pandas requests --quiet
+
       - name: Fetch quarterly earnings from Alpha Vantage
         env:
           AV_KEY: ${{ secrets.AV_KEY }}
