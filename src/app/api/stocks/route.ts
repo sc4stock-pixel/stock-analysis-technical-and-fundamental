@@ -99,13 +99,15 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
 interface AvQuarter  { fiscalDateEnding: string; reportedEPS: string; }
 interface SymbolData { frequency: "Q" | "H"; quarters: AvQuarter[]; }
 
-let avCache: Record<string, SymbolData> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let avCache: Record<string, any> | null = null;
 let avCacheFetchedAt = 0;
 const AV_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 h
 const AV_CACHE_URL =
   "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/av_earnings_cache.json";
 
-async function getAvCache(): Promise<Record<string, SymbolData> | null> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getAvCache(): Promise<Record<string, any> | null> {
   const now = Date.now();
   if (avCache && now - avCacheFetchedAt < AV_CACHE_TTL_MS) return avCache;
   try {
@@ -121,15 +123,27 @@ async function getAvCache(): Promise<Record<string, SymbolData> | null> {
 }
 
 // ─── Code 33: EPS acceleration check ─────────────────────────
-// US + HK quarterly: 3 × YoY comparisons, step=4 (same quarter 1 year ago)
-// HK semi-annual (e.g. Geely): 3 × YoY comparisons, step=2 (same half 1 year ago)
-// ETFs / cache missing / insufficient data: returns null → badge shows "—"
+// Handles both cache formats for backward compatibility:
+//   Old format (US only):  symbol → AvQuarter[]          (array, frequency assumed 'Q')
+//   New format (US + HK):  symbol → {frequency, quarters} (object, 'Q' or 'H')
+// HK semi-annual step=2, quarterly step=4.
+// ETFs / cache missing / insufficient data → null → badge shows "—"
 async function fetchCode33(symbol: string, _exchange: string): Promise<boolean | null> {
   const cache = await getAvCache();
-  const entry = cache?.[symbol];
-  if (!entry) return null;
+  const raw = cache?.[symbol];
+  if (!raw) return null;
 
-  const { frequency, quarters } = entry;
+  // Normalise both cache formats into {frequency, quarters}
+  let frequency: "Q" | "H" = "Q";
+  let quarters: AvQuarter[];
+  if (Array.isArray(raw)) {
+    quarters = raw as AvQuarter[];            // old format — US quarterly array
+  } else {
+    const entry = raw as SymbolData;
+    frequency = entry.frequency ?? "Q";
+    quarters  = entry.quarters  ?? [];
+  }
+
   // step=4 for quarterly (compare same quarter YoY), step=2 for semi-annual
   const step   = frequency === "H" ? 2 : 4;
   const needed = step + 3; // 7 for Q, 5 for H
