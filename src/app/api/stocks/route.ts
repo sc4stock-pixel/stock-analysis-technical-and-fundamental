@@ -9,8 +9,10 @@ export const maxDuration = 30;
 // This ensures config changes always trigger a full recompute
 export const dynamic = "force-dynamic";
 
-// ─── Fundamentals via Yahoo v7/finance/quote ──────────────────
-// v7/quote works from Vercel server-side (v10/quoteSummary is often blocked)
+// ─── Fundamentals via FMP /stable/ endpoints ──────────────────
+// FMP migrated from /api/v3/ (legacy, blocked Aug 2025) to /stable/.
+// Free tier provides: ratios-ttm, price-target-consensus.
+// Quarterly income-statement requires paid tier (402).
 interface Fundamentals {
   pe_ratio: number | null;
   forward_pe: number | null;
@@ -28,55 +30,34 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
     analyst_target: null, analyst_rating: null,
   };
 
-  // FMP requires an API key — set FMP_KEY in Vercel environment variables.
-  // Free tier: financialmodelingprep.com → 250 req/day, no credit card.
   const apiKey = process.env.FMP_KEY;
-  if (!apiKey) return empty;  // no key → return empty (columns show dashes)
+  if (!apiKey) return empty;
 
-  const base = "https://financialmodelingprep.com/api/v3";
+  const base    = "https://financialmodelingprep.com/stable";
   const headers = { "Accept": "application/json" };
 
   try {
-    // All 3 endpoints in parallel — 3 req per stock
-    const [profileRes, ratiosRes, targetRes] = await Promise.all([
-      fetch(`${base}/profile/${encodeURIComponent(symbol)}?apikey=${apiKey}`,                  { headers }),
-      fetch(`${base}/ratios-ttm/${encodeURIComponent(symbol)}?apikey=${apiKey}`,               { headers }),
-      fetch(`${base}/price-target-consensus/${encodeURIComponent(symbol)}?apikey=${apiKey}`,   { headers }),
+    const [ratiosRes, targetRes] = await Promise.all([
+      fetch(`${base}/ratios-ttm?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`,              { headers }),
+      fetch(`${base}/price-target-consensus?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`,  { headers }),
     ]);
 
-    // ── Profile: pe, eps ─────────────────────────────────────
+    // ── Ratios TTM: PE + EPS trailing ────────────────────────
     let pe: number | null          = null;
     let epsTrailing: number | null = null;
-
-    if (profileRes.ok) {
-      const pd = await profileRes.json();
-      const p  = Array.isArray(pd) ? pd[0] : pd;
-      if (p && typeof p === "object") {
-        pe          = typeof p.pe  === "number" && p.pe  > 0 ? Math.round(p.pe  * 10) / 10 : null;
-        epsTrailing = typeof p.eps === "number"              ? Math.round(p.eps * 100) / 100 : null;
-      }
-    }
-
-    // ── Ratios TTM: peRatioTTM (more accurate), epsGrowthTTM ─
-    let peTTM: number | null      = null;
-    let epsGrowth: number | null  = null;
 
     if (ratiosRes.ok) {
       const rd = await ratiosRes.json();
       const r  = Array.isArray(rd) ? rd[0] : rd;
       if (r && typeof r === "object") {
-        // peRatioTTM is more accurate than profile.pe
-        const rawPE = r.peRatioTTM ?? r.priceEarningsRatioTTM ?? null;
+        const rawPE = r.priceToEarningsRatioTTM ?? null;
         if (typeof rawPE === "number" && rawPE > 0 && rawPE < 5000) {
-          peTTM = Math.round(rawPE * 10) / 10;
+          pe = Math.round(rawPE * 10) / 10;
         }
-        // EPS growth: try multiple fields (decimal, e.g. 0.21 = 21%)
-        const rawGrowth = r.epsGrowthTTM ?? r.netIncomePerShareGrowthTTM ?? r.revenueGrowthTTM ?? null;
-        if (typeof rawGrowth === "number" && isFinite(rawGrowth)) {
-          // FMP returns as decimal (0.21 = 21%) — convert to %
-          epsGrowth = Math.round(rawGrowth * 1000) / 10;
-          // Sanity-check: cap at ±999%
-          if (Math.abs(epsGrowth) > 999) epsGrowth = null;
+        // netIncomePerShareTTM ≈ EPS TTM
+        const rawEPS = r.netIncomePerShareTTM ?? null;
+        if (typeof rawEPS === "number" && isFinite(rawEPS)) {
+          epsTrailing = Math.round(rawEPS * 100) / 100;
         }
       }
     }
@@ -96,13 +77,13 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
     }
 
     return {
-      pe_ratio:       peTTM ?? pe,   // prefer TTM over profile.pe
-      forward_pe:     null,           // FMP v3 free tier doesn't give forward PE reliably
+      pe_ratio:       pe,
+      forward_pe:     null,
       eps_trailing:   epsTrailing,
       eps_forward:    null,
-      eps_growth:     epsGrowth,
+      eps_growth:     null,   // not available on FMP free tier
       analyst_target: analystTarget,
-      analyst_rating: null,           // FMP consensus string needs paid tier
+      analyst_rating: null,
     };
   } catch {
     return empty;
@@ -122,7 +103,8 @@ async function fetchCode33(symbol: string, exchange: string): Promise<boolean | 
 
   try {
     const res = await fetch(
-      `https://financialmodelingprep.com/api/v3/income-statement/${encodeURIComponent(symbol)}?period=quarter&limit=8&apikey=${apiKey}`,
+      // /stable/ income-statement requires FMP paid tier (returns 402 on free) — null returned gracefully
+      `https://financialmodelingprep.com/stable/income-statement?symbol=${encodeURIComponent(symbol)}&period=quarter&limit=8&apikey=${apiKey}`,
       { headers: { Accept: 'application/json' } }
     );
     if (!res.ok) return null;
