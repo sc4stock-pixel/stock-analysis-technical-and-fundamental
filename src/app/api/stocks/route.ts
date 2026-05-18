@@ -91,19 +91,21 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
 }
 
 
-// ─── Alpha Vantage earnings cache ─────────────────────────────
-// Loaded once from GitHub raw URL; refreshed every 6 h via module-level TTL.
-// The cache file (av_earnings_cache.json) is updated weekly by GitHub Actions
-// so Alpha Vantage is never called from the API route itself.
-interface AvQuarter { fiscalDateEnding: string; reportedEPS: string; }
+// ─── Earnings cache (Alpha Vantage + Akshare) ─────────────────
+// Populated weekly by GitHub Actions (scripts/fetch_av_earnings.py).
+// Tier 1 — US:  Alpha Vantage EARNINGS endpoint, frequency='Q'
+// Tier 2 — HK:  Akshare/Eastmoney, frequency='Q' or 'H' (semi-annual)
+// AV is never called directly from this route — only the cache file is read.
+interface AvQuarter  { fiscalDateEnding: string; reportedEPS: string; }
+interface SymbolData { frequency: "Q" | "H"; quarters: AvQuarter[]; }
 
-let avCache: Record<string, AvQuarter[]> | null = null;
+let avCache: Record<string, SymbolData> | null = null;
 let avCacheFetchedAt = 0;
 const AV_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 h
 const AV_CACHE_URL =
   "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/av_earnings_cache.json";
 
-async function getAvCache(): Promise<Record<string, AvQuarter[]> | null> {
+async function getAvCache(): Promise<Record<string, SymbolData> | null> {
   const now = Date.now();
   if (avCache && now - avCacheFetchedAt < AV_CACHE_TTL_MS) return avCache;
   try {
@@ -118,30 +120,33 @@ async function getAvCache(): Promise<Record<string, AvQuarter[]> | null> {
   }
 }
 
-// ─── Code 33: 3-quarter EPS acceleration (US only) ────────────
-// Returns true  = YoY EPS growth accelerating across last 3 quarters.
-// Returns false = data present but condition not met.
-// Returns null  = HK stock, cache empty/missing, or insufficient data.
-async function fetchCode33(symbol: string, exchange: string): Promise<boolean | null> {
-  if (exchange === "HK") return null;
-
+// ─── Code 33: EPS acceleration check ─────────────────────────
+// US + HK quarterly: 3 × YoY comparisons, step=4 (same quarter 1 year ago)
+// HK semi-annual (e.g. Geely): 3 × YoY comparisons, step=2 (same half 1 year ago)
+// ETFs / cache missing / insufficient data: returns null → badge shows "—"
+async function fetchCode33(symbol: string, _exchange: string): Promise<boolean | null> {
   const cache = await getAvCache();
-  const quarters = cache?.[symbol];
-  // Need ≥7 entries to compute 3 YoY comparisons (index i vs i+4)
-  if (!quarters || quarters.length < 7) return null;
+  const entry = cache?.[symbol];
+  if (!entry) return null;
 
-  // quarters sorted newest-first (matches AV response order)
-  // YoY growth for quarter i = (eps[i] - eps[i+4]) / |eps[i+4]|
+  const { frequency, quarters } = entry;
+  // step=4 for quarterly (compare same quarter YoY), step=2 for semi-annual
+  const step   = frequency === "H" ? 2 : 4;
+  const needed = step + 3; // 7 for Q, 5 for H
+
+  if (quarters.length < needed) return null;
+
+  // quarters sorted newest-first
   const growthRates: number[] = [];
   for (let i = 0; i < 3; i++) {
     const recent  = parseFloat(quarters[i].reportedEPS);
-    const yearAgo = parseFloat(quarters[i + 4].reportedEPS);
+    const yearAgo = parseFloat(quarters[i + step].reportedEPS);
     if (isNaN(recent) || isNaN(yearAgo) || Math.abs(yearAgo) < 0.001) return null;
     growthRates.push((recent - yearAgo) / Math.abs(yearAgo));
   }
 
-  // growthRates[0] = most recent, [1] = prior, [2] = oldest
-  // Acceleration: each quarter's YoY rate must be higher than the previous
+  // growthRates[0]=most recent, [1]=prior, [2]=oldest
+  // Acceleration: each period's YoY rate must be higher than the one before it
   return growthRates[0] > growthRates[1] && growthRates[1] > growthRates[2];
 }
 
