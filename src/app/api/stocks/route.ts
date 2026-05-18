@@ -9,33 +9,6 @@ export const maxDuration = 30;
 // This ensures config changes always trigger a full recompute
 export const dynamic = "force-dynamic";
 
-// ─── SuperTrend params cache (fetched from GitHub, module-level TTL) ──
-interface STCachedEntry { atr_period: number; multiplier: number }
-interface STParamsData {
-  last_optimized: string | null;
-  next_optimization: string | null;
-  stocks: Record<string, STCachedEntry>;
-}
-let _stParamsCache: { data: STParamsData; at: number } | null = null;
-
-async function loadSTParams(): Promise<STParamsData> {
-  const empty: STParamsData = { last_optimized: null, next_optimization: null, stocks: {} };
-  const now = Date.now();
-  if (_stParamsCache && now - _stParamsCache.at < 5 * 60 * 1000) return _stParamsCache.data;
-  try {
-    const res = await fetch(
-      "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/st_params.json",
-      { cache: "no-store" }
-    );
-    if (!res.ok) return empty;
-    const data: STParamsData = await res.json();
-    _stParamsCache = { data, at: now };
-    return data;
-  } catch {
-    return empty;
-  }
-}
-
 // ─── Fundamentals via Yahoo v7/finance/quote ──────────────────
 // v7/quote works from Vercel server-side (v10/quoteSummary is often blocked)
 interface Fundamentals {
@@ -137,6 +110,49 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
 }
 
 
+// ─── Code 33: 3-quarter EPS acceleration (US only) ────────────
+// Returns true  = accelerating YoY EPS across the last 3 quarters.
+// Returns false = data present but condition not met.
+// Returns null  = HK stock, or FMP_KEY absent, or insufficient data.
+async function fetchCode33(symbol: string, exchange: string): Promise<boolean | null> {
+  if (exchange === 'HK') return null;
+
+  const apiKey = process.env.FMP_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch(
+      `https://financialmodelingprep.com/api/v3/income-statement/${encodeURIComponent(symbol)}?period=quarter&limit=8&apikey=${apiKey}`,
+      { headers: { Accept: 'application/json' } }
+    );
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    // Need at least 7 quarters to compute 3 YoY comparisons
+    // (Q0 vs Q4, Q1 vs Q5, Q2 vs Q6 — indices 0–6)
+    if (!Array.isArray(data) || data.length < 7) return null;
+
+    // Quarters are sorted newest-first by FMP.
+    // YoY growth rate for quarter i = (eps[i] - eps[i+4]) / |eps[i+4]|
+    const growthRates: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const recent  = data[i]?.eps;
+      const yearAgo = data[i + 4]?.eps;
+      // Skip if data missing or denominator is zero / near-zero (avoids div-by-zero on turnarounds)
+      if (typeof recent !== 'number' || typeof yearAgo !== 'number' || Math.abs(yearAgo) < 0.001) {
+        return null;
+      }
+      growthRates.push((recent - yearAgo) / Math.abs(yearAgo));
+    }
+
+    // growthRates[0] = most recent quarter, [1] = prior, [2] = oldest
+    // Acceleration means each quarter's YoY rate is higher than the previous one
+    return growthRates[0] > growthRates[1] && growthRates[1] > growthRates[2];
+  } catch {
+    return null;
+  }
+}
+
 // ─── OHLCV + current price ─────────────────────────────────────
 async function fetchYahooOHLCV(
   symbol: string,
@@ -214,17 +230,16 @@ async function fetchYahooOHLCV(
 }
 
 // ─── Single stock analysis ─────────────────────────────────────
-// resolvedSTParams: explicit ST params to use. When null, pipeline falls back
-// to its in-browser grid optimizer for stocks not in st_params.json.
 async function analyzeStock(
   stock: { symbol: string; name: string; exchange: string },
-  config: AppConfig,
-  resolvedSTParams: { atrPeriod: number; multiplier: number } | null
+  config: AppConfig
 ) {
   try {
-    const [data, fundamentals] = await Promise.all([
+    // Fetch OHLCV, fundamentals, and Code 33 in parallel
+    const [data, fundamentals, code33] = await Promise.all([
       fetchYahooOHLCV(stock.symbol, config.backtest.lookbackDays),
       fetchFundamentals(stock.symbol),
+      fetchCode33(stock.symbol, stock.exchange),
     ]);
 
     if (!data) {
@@ -246,7 +261,20 @@ async function analyzeStock(
       };
     }
 
-    const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct, resolvedSTParams);
+    const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct);
+
+    // Patch code_33 into sepa_metadata.
+    // code33 is true/false for US stocks (3-quarter YoY EPS acceleration via FMP),
+    // or null for HK stocks / missing data (displayed as "—" in the UI, not counted in score).
+    if (result.sepa_metadata) {
+      result.sepa_metadata.code_33 = code33;
+      result.sepa_metadata.sepa_score = [
+        result.sepa_metadata.trend_template,
+        code33 === true,   // null (HK / no data) does not add to score
+        result.sepa_metadata.vcp_detected,
+      ].filter(Boolean).length;
+    }
+
     return { ...result, fundamentals };
   } catch (e) {
     return {
@@ -271,43 +299,23 @@ async function analyzeStock(
   }
 }
 
-// Resolve which ST params to use for a given symbol.
-// overrideSTParams (from POST body) wins; falls back to st_params.json cache;
-// falls back to null (pipeline runs its own in-browser grid search).
-function resolveSTParams(
-  symbol: string,
-  stParams: STParamsData,
-  overrideSTParams: { atrPeriod: number; multiplier: number } | null
-): { atrPeriod: number; multiplier: number } | null {
-  if (overrideSTParams) return overrideSTParams;
-  const cached = stParams.stocks[symbol];
-  return cached ? { atrPeriod: cached.atr_period, multiplier: cached.multiplier } : null;
-}
-
 // ─── POST handler ──────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
     const body   = await req.json().catch(() => ({}));
     const config: AppConfig = body.config ?? DEFAULT_CONFIG;
 
-    // overrideSTParams: bypasses st_params.json for this call.
-    // Sent by "Backtest with These Params" with the user's config ST values.
-    const overrideSTParams: { atrPeriod: number; multiplier: number } | null =
-      body.overrideSTParams ?? null;
-
-    const stParams = await loadSTParams();
-
     if (body.symbol) {
       const stock = config.stocks.PORTFOLIO.find((s) => s.symbol === body.symbol)
         ?? { symbol: body.symbol, name: body.symbol, exchange: "US" };
-      const result = await analyzeStock(stock, config, resolveSTParams(stock.symbol, stParams, overrideSTParams));
+      const result = await analyzeStock(stock, config);
       return NextResponse.json(result);
     }
 
     const portfolio = config.stocks.PORTFOLIO;
     const results = [];
     for (const stock of portfolio) {
-      results.push(await analyzeStock(stock, config, resolveSTParams(stock.symbol, stParams, overrideSTParams)));
+      results.push(await analyzeStock(stock, config));
     }
     return NextResponse.json({ results, timestamp: new Date().toISOString(), config });
   } catch (e) {
@@ -319,9 +327,8 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const symbol = req.nextUrl.searchParams.get("symbol");
   if (!symbol) return NextResponse.json({ error: "symbol required" }, { status: 400 });
-  const stParams = await loadSTParams();
   const stock = DEFAULT_CONFIG.stocks.PORTFOLIO.find((s) => s.symbol === symbol)
     ?? { symbol, name: symbol, exchange: "US" };
-  const result = await analyzeStock(stock, DEFAULT_CONFIG, resolveSTParams(symbol, stParams, null));
+  const result = await analyzeStock(stock, DEFAULT_CONFIG);
   return NextResponse.json(result);
 }

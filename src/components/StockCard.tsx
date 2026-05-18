@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, TimesfmPriceTargets, TimesfmStPersistence } from "@/types";
+import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, TimesfmPriceTargets } from "@/types";
 import { regimeColor } from "@/lib/regime";
 import OverviewTab    from "./tabs/OverviewTab";
 import BacktestTab   from "./tabs/BacktestTab";
@@ -39,6 +39,7 @@ function patternBadge(p: CandlestickPattern) {
 }
 
 function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
+  // ... (unchanged – same as original)
   const cmp = result.comparison;
   if (!cmp) return result;
 
@@ -155,20 +156,31 @@ export default function StockCard({ result, config, timesfm }: Props) {
             }`}>
               {stDir === 1 ? "🟢 ST" : "🔴 ST"}
             </span>
-            {/* TimesFM ST Persistence */}
-            {timesfm?.st_persistence && (
-              <span className={`text-xs px-1 py-0.5 rounded border font-mono ${
-                timesfm.st_persistence.flip_risk === "low"
-                  ? "border-[#00ff88]/30 text-[#00ff88] bg-[#00ff88]/5"
-                  : timesfm.st_persistence.flip_risk === "medium"
-                  ? "border-[#ffa502]/30 text-[#ffa502] bg-[#ffa502]/5"
-                  : timesfm.st_persistence.flip_risk === "high"
-                  ? "border-[#ff4757]/30 text-[#ff4757] bg-[#ff4757]/5"
-                  : "border-[#4a6080]/30 text-[#4a6080] bg-[#4a6080]/5"
-              }`}>
-                🔮 {timesfm.st_persistence.persistence_prob.toFixed(0)}% persist
-              </span>
-            )}
+            {result.sepa_metadata && (() => {
+              const s = result.sepa_metadata;
+              const pip = (active: boolean | null, label: string) => {
+                if (active === null) return (
+                  <span key={label} className="text-[0.6rem] px-1 py-0.5 rounded border text-[#2a3d5a] border-[#2a3d5a]/20 opacity-30">—</span>
+                );
+                return (
+                  <span key={label}
+                    className={`text-[0.6rem] font-bold px-1 py-0.5 rounded border
+                      ${active
+                        ? "text-[#00ff88] border-[#00ff88]/40 bg-[#00ff88]/8"
+                        : "text-[#2a3d5a] border-[#2a3d5a]/30 opacity-40"}`}>
+                    {label}
+                  </span>
+                );
+              };
+              return (
+                <span className="flex items-center gap-0.5 border border-[#1e2d4a] rounded px-1 py-0.5"
+                  title={`SEPA ${s.sepa_score}/3 · TT:${s.trend_template} · 33:${s.code_33} · VCP:${s.vcp_detected}${s.vcp_detected ? ` (${s.current_contraction_pct.toFixed(1)}%)` : ""}`}>
+                  {pip(s.trend_template, "T")}
+                  {pip(s.code_33, "33")}
+                  {pip(s.vcp_detected, "VCP")}
+                </span>
+              );
+            })()}
           </div>
           <div className="flex items-center gap-3 mt-1 flex-wrap">
             <span className="text-[#c8d8f0] text-sm font-bold">{priceFmt(result.current_price)}</span>
@@ -292,7 +304,7 @@ export default function StockCard({ result, config, timesfm }: Props) {
       </div>
 
       {/* ── TIMESFM AI PRICE TARGETS ── */}
-      {timesfm && timesfm.t1 !== undefined && (
+      {timesfm && (
         <div className="mx-3 mb-3 border border-[#a78bfa]/40 rounded p-3 text-xs">
           <div className="text-[#a78bfa] font-bold mb-2">🔮 TIMESFM PREDICTIONS</div>
           <div className="grid grid-cols-3 gap-2 mb-2">
@@ -320,6 +332,7 @@ export default function StockCard({ result, config, timesfm }: Props) {
           </div>
         </div>
       )}
+
     </div>
   );
 }

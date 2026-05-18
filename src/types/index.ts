@@ -254,6 +254,15 @@ export interface StrategyComparison {
   winner_margin: number;
 }
 
+export interface SepaMetadata {
+  sepa_score: number;              // 0–3: how many SEPA conditions are true
+  trend_template: boolean;         // Close > SMA50 > SMA200, Close > SMA200
+  code_33: boolean | null;         // true/false = US evaluated; null = HK (not applicable)
+  vcp_detected: boolean;           // ZigZag double-filter: ATR_5/ATR_50 < 0.75 + 3-wave contraction
+  current_contraction_pct: number; // Depth of current (tightest) ZigZag wave as % of peak
+  wave_sequence: string;           // e.g. "12% → 7% → 4%" — empty if no VCP
+}
+
 export interface StockAnalysisResult {
   symbol: string;
   name: string;
@@ -278,10 +287,6 @@ export interface StockAnalysisResult {
   st_value: number;
   st_stop_distance_pct: number;
   st_open_return_pct: number | null;
-  st_open_entry_date?:  string | null;
-  st_open_entry_price?: number | null;
-  st_open_days_held?:   number | null;
-  st_open_r_multiple?:  number | null;
   st_opt_params?: {
     atrPeriod:  number;
     multiplier: number;
@@ -291,6 +296,8 @@ export interface StockAnalysisResult {
   comparison: StrategyComparison | null;
   // V15.1 MacroEngine
   macro_adjustment?: number;   // MBS adjustment applied to score (0 if disabled)
+  // SEPA passive metadata layer
+  sepa_metadata?: SepaMetadata;
 }
 
 export interface Fundamentals {
@@ -326,6 +333,7 @@ export interface OHLCVBar {
   minusDI: number;
   sma20: number;
   sma50: number;
+  sma200: number;
   ema20: number;
   ema20Slope: number;
   bbUpper: number;
@@ -379,6 +387,7 @@ export interface ChartBar {
   volume: number;
   sma20: number;
   sma50: number;
+  sma200: number;
   ema20: number;
   ema50: number;
   bbUpper: number;
@@ -409,14 +418,6 @@ export interface TimesfmPriceTargets {
   p10: number[];
   p50: number[];
   p90: number[];
-  st_persistence?: TimesfmStPersistence;
-}
-
-export interface TimesfmStPersistence {
-  current_dir: number;
-  persistence_prob: number;
-  flip_risk: string;
-  p50_distances: number[];
 }
 
 export interface TimesfmForecasts {

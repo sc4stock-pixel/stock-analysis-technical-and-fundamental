@@ -1,5 +1,5 @@
 // ============================================================
-// ANALYSIS PIPELINE — V14 + SuperTrend Parameter Optimization
+// ANALYSIS PIPELINE — V17 + SuperTrend Parameter Optimization + SEPA Metadata
 //
 // Debug logging enabled — matches Python script output format:
 //   🔍 Optimizing SuperTrend for {symbol}...
@@ -17,7 +17,7 @@ import { calculateScores, detectRsiDivergence } from "./scoring";
 import { generateSignals } from "./signals";
 import { runBacktest, runSupertrendBacktest } from "./backtest";
 import { runMonteCarlo } from "./montecarlo";
-import { optimizeSupertrend, STOptResult } from "./supertrend_optimizer";
+import { optimizeSupertrend } from "./supertrend_optimizer";
 
 export interface RawOHLCV {
   date: string; open: number; high: number; low: number; close: number; volume: number;
@@ -31,13 +31,113 @@ function info(symbol: string, msg: string) {
   console.log(`  📊 [${symbol}] ${msg}`);
 }
 
+// ── VCP helpers ───────────────────────────────────────────────
+type SwingPoint = { value: number; type: 'high' | 'low' };
+
+/**
+ * Percentage-threshold ZigZag — records alternating swing highs and lows.
+ * A new point is added only when price reverses by at least thresholdPct.
+ */
+function getZigZagSwings(closes: number[], thresholdPct: number): SwingPoint[] {
+  const points: SwingPoint[] = [];
+  if (closes.length < 3) return points;
+
+  let lastHigh = closes[0];
+  let lastLow  = closes[0];
+  let direction: 'up' | 'down' | null = null;
+
+  for (let i = 1; i < closes.length; i++) {
+    const c = closes[i];
+
+    if (direction === null) {
+      if (c >= lastLow * (1 + thresholdPct)) {
+        direction = 'up';
+        points.push({ value: lastLow, type: 'low' });
+        lastHigh = c;
+      } else if (c <= lastHigh * (1 - thresholdPct)) {
+        direction = 'down';
+        points.push({ value: lastHigh, type: 'high' });
+        lastLow = c;
+      } else {
+        if (c > lastHigh) lastHigh = c;
+        if (c < lastLow)  lastLow  = c;
+      }
+    } else if (direction === 'up') {
+      if (c > lastHigh) {
+        lastHigh = c;
+      } else if (c <= lastHigh * (1 - thresholdPct)) {
+        points.push({ value: lastHigh, type: 'high' });
+        direction = 'down';
+        lastLow = c;
+      }
+    } else {
+      if (c < lastLow) {
+        lastLow = c;
+      } else if (c >= lastLow * (1 + thresholdPct)) {
+        points.push({ value: lastLow, type: 'low' });
+        direction = 'up';
+        lastHigh = c;
+      }
+    }
+  }
+  // Include the current in-progress swing extreme
+  if      (direction === 'up')   points.push({ value: lastHigh, type: 'high' });
+  else if (direction === 'down') points.push({ value: lastLow,  type: 'low'  });
+  return points;
+}
+
+/**
+ * VCP double-filter:
+ *   Layer A — ATR_5 / ATR_50 < 0.75 (volatility compressed ≥25% vs history).
+ *   Layer B — Last 3 ZigZag peak→trough contractions are monotonically decreasing
+ *             (with a 1.5% noise buffer) and the current wave is <8%.
+ */
+function computeVcp(
+  closes: number[],
+  highs:  number[],
+  lows:   number[],
+): { vcp_detected: boolean; current_contraction_pct: number; wave_sequence: string } {
+  const noVcp = { vcp_detected: false, current_contraction_pct: 0, wave_sequence: '' };
+  const lastIdx = closes.length - 1;
+
+  // Layer A: ATR compression gate
+  const atr5Arr  = atr(highs, lows, closes, 5);
+  const atr50Arr = atr(highs, lows, closes, 50);
+  const atr5Last  = atr5Arr[lastIdx];
+  const atr50Last = atr50Arr[lastIdx];
+  if (!atr50Last || isNaN(atr50Last) || atr50Last === 0) return noVcp;
+  if (atr5Last / atr50Last >= 0.75) return noVcp;
+
+  // Layer B: ZigZag on last 100 bars
+  const slice  = closes.slice(Math.max(0, lastIdx - 99));
+  const swings = getZigZagSwings(slice, 0.04);
+
+  // Extract only confirmed peak→trough depths (ignore in-progress swings)
+  const depths: number[] = [];
+  for (let i = 0; i < swings.length - 1; i++) {
+    if (swings[i].type === 'high' && swings[i + 1].type === 'low' && swings[i].value > 0) {
+      depths.push((swings[i].value - swings[i + 1].value) / swings[i].value);
+    }
+  }
+  if (depths.length < 3) return noVcp;
+
+  const [t1, t2, t3] = depths.slice(-3);
+  const BUFFER = 0.015;
+  if (!(t1 + BUFFER > t2 && t2 + BUFFER > t3 && t3 < 0.08)) return noVcp;
+
+  return {
+    vcp_detected: true,
+    current_contraction_pct: Math.round(t3 * 10000) / 100,
+    wave_sequence: `${Math.round(t1 * 100)}% → ${Math.round(t2 * 100)}% → ${Math.round(t3 * 100)}%`,
+  };
+}
+
 export function runPipeline(
   rawBars: RawOHLCV[],
   stockConfig: { symbol: string; name: string; exchange: string },
   config: AppConfig,
   currentPrice: number,
-  changePct: number,
-  cachedSTParams?: { atrPeriod: number; multiplier: number } | null
+  changePct: number
 ): StockAnalysisResult {
   const sym = stockConfig.symbol;
   console.log(`\nAnalyzing ${sym} (${stockConfig.name})...`);
@@ -54,10 +154,11 @@ export function runPipeline(
   const [macdLine, macdSignal, macdHist] = macd(closes, config.analysis.macdFast, config.analysis.macdSlow, config.analysis.macdSignal);
   const [adxArr, plusDIArr, minusDIArr]  = adx(highs, lows, closes, config.analysis.adxPeriod);
   const atrArr   = atr(highs, lows, closes, config.analysis.atrPeriod);
-  const sma20Arr = sma(closes, config.analysis.smaShort);
-  const sma50Arr = sma(closes, config.analysis.smaLong);
-  const ema20Arr = ema(closes, 20);
-  const ema50Arr = ema(closes, 50);
+  const sma20Arr  = sma(closes, config.analysis.smaShort);
+  const sma50Arr  = sma(closes, config.analysis.smaLong);
+  const sma200Arr = sma(closes, 200);
+  const ema20Arr  = ema(closes, 20);
+  const ema50Arr  = ema(closes, 50);
 
   const ema20SlopeArr = ema20Arr.map((v, i) =>
     (i < 3 || isNaN(v) || isNaN(ema20Arr[i - 3])) ? 0 : v - ema20Arr[i - 3]
@@ -121,7 +222,7 @@ export function runPipeline(
     atr: atrArr[i] ?? 0, rsi: rsiArr[i] ?? 50,
     macd: macdLine[i] ?? 0, macdSignal: macdSignal[i] ?? 0, macdHist: macdHist[i] ?? 0,
     adx: adxArr[i] ?? 0, plusDI: plusDIArr[i] ?? 0, minusDI: minusDIArr[i] ?? 0,
-    sma20: sma20Arr[i] ?? 0, sma50: sma50Arr[i] ?? 0,
+    sma20: sma20Arr[i] ?? 0, sma50: sma50Arr[i] ?? 0, sma200: sma200Arr[i] ?? 0,
     ema20: ema20Arr[i] ?? 0, ema20Slope: ema20SlopeArr[i] ?? 0,
     bbUpper: bbUpper[i] ?? 0, bbMid: bbMid[i] ?? 0, bbLower: bbLower[i] ?? 0,
     bbPosition: bbPosition[i] ?? 0.5, adxSlope: adxSlope3[i] ?? 0,
@@ -137,15 +238,14 @@ export function runPipeline(
   }));
 
   // ── SuperTrend Parameter Optimization ────────────────────────
-  let optResult: STOptResult;
-  if (cachedSTParams) {
-    console.log(`  ✅ ${sym}: using cached ST params (ATR=${cachedSTParams.atrPeriod}, Mult=${cachedSTParams.multiplier})`);
-    optResult = { atrPeriod: cachedSTParams.atrPeriod, multiplier: cachedSTParams.multiplier, sharpe: 0, totalReturn: 0, numTrades: 0 };
-  } else {
-    console.log(`  🔍 Optimizing SuperTrend for ${sym}...`);
-    optResult = optimizeSupertrend(bars, config.backtest.initialCapital, config.backtest.commissionRate, config.backtest.slippageRate);
-    console.log(`    ✅ Best: ATR=${optResult.atrPeriod}, Mult=${optResult.multiplier} => Return=${optResult.totalReturn.toFixed(1)}%, Sharpe=${optResult.sharpe.toFixed(2)}, Trades=${optResult.numTrades}`);
-  }
+  console.log(`  🔍 Optimizing SuperTrend for ${sym}...`);
+  const optResult = optimizeSupertrend(
+    bars,
+    config.backtest.initialCapital,
+    config.backtest.commissionRate,
+    config.backtest.slippageRate
+  );
+  console.log(`    ✅ Best: ATR=${optResult.atrPeriod}, Mult=${optResult.multiplier} => Return=${optResult.totalReturn.toFixed(1)}%, Sharpe=${optResult.sharpe.toFixed(2)}, Trades=${optResult.numTrades}`);
 
   // Recompute ST with optimal params
   const [optStArr, optStDirArr, optStSigArr] = supertrend(
@@ -322,13 +422,34 @@ export function runPipeline(
   const signal  = lastBar.signalConfirmed ?? "HOLD";
   info(sym, `Final: Signal=${signal}, Score=${lastBar.score.toFixed(1)}, Regime=${regimeInfo.regime}, ST=${trendStr}, StopDist=${stStopDistPct.toFixed(1)}%`);
 
+  // ── SEPA metadata (price-based; code_33 patched in route.ts) ─────
+  const lastSMA200 = sma200Arr[lastIdx] ?? 0;
+  const trendTemplate =
+    lastSMA200 > 0 &&
+    lastClose > lastSMA50 &&
+    lastClose > lastSMA200 &&
+    lastSMA50 > lastSMA200;
+
+  const vcpResult = computeVcp(closes, highs, lows);
+
+  // code_33 null placeholder — route.ts patches true/false for US, keeps null for HK
+  const sepaMetadata = {
+    sepa_score: [trendTemplate, vcpResult.vcp_detected].filter(Boolean).length, // +1 for code_33 added in route.ts
+    trend_template: trendTemplate,
+    code_33: null as boolean | null,
+    vcp_detected: vcpResult.vcp_detected,
+    current_contraction_pct: vcpResult.current_contraction_pct,
+    wave_sequence: vcpResult.wave_sequence,
+  };
+  info(sym, `SEPA: TT=${trendTemplate}, VCP=${vcpResult.vcp_detected}${vcpResult.vcp_detected ? ` (${vcpResult.wave_sequence})` : ''}, Score=${sepaMetadata.sepa_score}/3 (code_33 TBD)`);
+
   // ── chartBars: use OPTIMIZED ST params ─────────────────────────
   const chartBars: ChartBar[] = bars.slice(-500).map((b, i) => {
     const offset = bars.length - Math.min(500, bars.length);
     const absIdx = offset + i;
     return {
       date: b.date, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
-      sma20: b.sma20, sma50: b.sma50, ema20: b.ema20, ema50: b.ema50,
+      sma20: b.sma20, sma50: b.sma50, sma200: b.sma200, ema20: b.ema20, ema50: b.ema50,
       bbUpper: b.bbUpper, bbLower: b.bbLower, signal: b.signalConfirmed, score: b.score,
       rsi: b.rsi, macd: b.macd, macdSig: b.macdSignal, macdHist: b.macdHist,
       adx: b.adx, pdi: b.plusDI, mdi: b.minusDI,
@@ -367,6 +488,7 @@ export function runPipeline(
     st_direction: stDirection, st_value: stValue,
     st_stop_distance_pct: stStopDistPct, st_open_return_pct: stOpenReturnPct,
     st_opt_params: { atrPeriod: optResult.atrPeriod, multiplier: optResult.multiplier, sharpe: optResult.sharpe, numTrades: optResult.numTrades },
+    sepa_metadata: sepaMetadata,
     comparison: {
       score: toMetrics(backtestResult), supertrend: toMetrics(stBacktestResult),
       winner, winner_margin: Math.abs(scoreAlpha - stAlpha),

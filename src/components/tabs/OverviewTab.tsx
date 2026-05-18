@@ -214,6 +214,54 @@ export default function OverviewTab({ result }: Props) {
         })()}
       </div>
 
+      {/* SEPA status strip */}
+      {result.sepa_metadata && (() => {
+        const s = result.sepa_metadata;
+        const pip = (active: boolean | null, label: string) => {
+          if (active === null) return (
+            <span key={label} title={`${label}: not evaluated (HK)`}
+              className="px-1.5 py-0.5 rounded border text-[0.6rem] text-[#2a3d5a] border-[#2a3d5a]/20 opacity-30">
+              —
+            </span>
+          );
+          return (
+            <span key={label}
+              className={`px-1.5 py-0.5 rounded border text-[0.6rem] font-bold
+                ${active
+                  ? "text-[#00ff88] border-[#00ff88]/40 bg-[#00ff88]/8"
+                  : "text-[#2a3d5a] border-[#2a3d5a]/40 opacity-50"}`}>
+              {label}
+            </span>
+          );
+        };
+        return (
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded border border-[#1e2d4a] bg-[#0a0e1a] text-[0.6rem] font-mono">
+            <span className="text-[#4a6080] font-bold tracking-wider">SEPA</span>
+            <span className="flex gap-1">
+              {pip(s.trend_template, "T")}
+              {pip(s.code_33, "33")}
+              {pip(s.vcp_detected, "VCP")}
+            </span>
+            <span className="text-[#4a6080] mx-1">·</span>
+            {s.vcp_detected ? (
+              <span className="text-[#00ff88]">
+                VCP Coiled ({s.current_contraction_pct.toFixed(1)}% Contraction)
+                {s.wave_sequence && (
+                  <span className="text-[#00ff88]/60 ml-1">· {s.wave_sequence}</span>
+                )}
+              </span>
+            ) : (
+              <span className="text-[#2a3d5a]">No active consolidation setup</span>
+            )}
+            <span className="ml-auto text-[#4a6080]">
+              Score <span className={s.sepa_score >= 2 ? "text-[#00ff88]" : s.sepa_score === 1 ? "text-[#ffa502]" : "text-[#2a3d5a]"}>
+                {s.sepa_score}/3
+              </span>
+            </span>
+          </div>
+        );
+      })()}
+
       {/* Indicator grid */}
       <div className="grid grid-cols-2 gap-x-4">
         <div>

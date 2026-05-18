@@ -301,7 +301,7 @@ export default function Dashboard() {
       <header className="border-b border-[#1e2d4a] bg-[#0f1629] px-4 py-2.5 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <span className="text-[#00d4ff] font-bold text-sm tracking-widest">▶ TA DASHBOARD</span>
-          <span className="text-[#4a6080] text-xs">V15.3</span>
+          <span className="text-[#4a6080] text-xs">V17</span>
           {lastUpdated && <span className="text-[#4a6080] text-xs">· Updated {lastUpdated}</span>}
           {loading && (
             <span className="text-[#ffa502] text-xs blink">
