@@ -151,37 +151,55 @@ if hk_syms:
 
                 else:
                     # ── Quarterly reporter ────────────────────────────
-                    # First, detect whether Eastmoney is serving cumulative YTD values
-                    # (common for mainland-incorporated HK stocks) vs true individual quarters.
-                    # Heuristic: if Dec EPS / Mar EPS > 2.5x consistently, data is cumulative.
-                    by_year: dict = {}
+                    # Detect cumulative YTD EPS using fiscal-year-aware logic.
+                    #
+                    # The old Dec/Mar calendar-year ratio failed for non-calendar FY
+                    # stocks (e.g. Alibaba, FY Apr-Mar): Dec from FY_N was compared
+                    # against Mar from FY_N-1 (the prior annual total), giving <2.5x.
+                    #
+                    # New approach: find fiscal year boundaries via consecutive drops
+                    # >40% (the annual reset), then check if values rise monotonically
+                    # within each detected fiscal year.
+
+                    # Build flat sorted (date, value) list
+                    all_periods = []
                     for _, r in eps_df.iterrows():
                         dt  = str(r["REPORT_DATE"])[:10]
-                        yr  = dt[:4]
-                        mo  = int(dt[5:7])
                         val = r["AMOUNT"]
                         if val is None or str(val) in ("None", "", "nan"):
                             continue
-                        by_year.setdefault(yr, {})[mo] = (dt, float(val))
+                        all_periods.append((dt, float(val)))
+                    all_periods.sort(key=lambda x: x[0])
 
-                    dec_mar_ratios = [
-                        by_year[yr][12][1] / by_year[yr][3][1]
-                        for yr in sorted(by_year.keys(), reverse=True)[:3]
-                        if 3 in by_year[yr] and 12 in by_year[yr] and by_year[yr][3][1] != 0
-                    ]
-                    is_cumulative = bool(
-                        dec_mar_ratios and
-                        sum(dec_mar_ratios) / len(dec_mar_ratios) > 2.5
+                    # Split into fiscal years at points where value drops >40%
+                    fiscal_groups: list = [[all_periods[0]]] if all_periods else []
+                    for i in range(1, len(all_periods)):
+                        prev_val = all_periods[i - 1][1]
+                        curr_val = all_periods[i][1]
+                        if prev_val > 0 and curr_val / prev_val < 0.6:
+                            fiscal_groups.append([])
+                        fiscal_groups[-1].append(all_periods[i])
+
+                    # Within each FY with ≥2 periods, check monotonic non-decrease
+                    # (5% tolerance absorbs rounding noise like BYD Q2 2024)
+                    cumul_fy = sum(
+                        1 for fy in fiscal_groups if len(fy) >= 2
+                        and all(
+                            fy[j + 1][1] >= fy[j][1] - abs(fy[j][1]) * 0.05
+                            for j in range(len(fy) - 1)
+                        )
                     )
+                    total_fy = sum(1 for fy in fiscal_groups if len(fy) >= 2)
+                    is_cumulative = total_fy > 0 and cumul_fy / total_fy > 0.5
 
                     if is_cumulative:
-                        # Convert cumulative YTD → individual quarterly by differencing.
-                        # Within each year, reset prev=0 so Q1 = Q1_ytd unchanged.
+                        # Convert: within each fiscal year subtract previous period.
+                        # prev resets to 0.0 at each FY boundary so Q1 = Q1_ytd.
                         quarters = []
-                        for yr in sorted(by_year.keys(), reverse=True):
+                        for fy in reversed(fiscal_groups):   # newest FY first
                             prev = 0.0
-                            for mo, (dt, eps_val) in sorted(by_year[yr].items()):
-                                incremental = max(eps_val - prev, 0.0)  # clamp rounding noise
+                            for dt, eps_val in fy:           # ascending within FY
+                                incremental = max(eps_val - prev, 0.0)
                                 quarters.append({
                                     "fiscalDateEnding": dt,
                                     "reportedEPS": str(round(incremental, 4)),
@@ -191,13 +209,10 @@ if hk_syms:
                         cumulative_tag = " (YTD→individual converted)"
                     else:
                         # Already individual quarterly values — use as-is
-                        quarters = []
-                        for _, r in eps_df.iterrows():
-                            dt  = str(r["REPORT_DATE"])[:10]
-                            val = r["AMOUNT"]
-                            if val is None or str(val) in ("None", "", "nan"):
-                                continue
-                            quarters.append({"fiscalDateEnding": dt, "reportedEPS": str(round(float(val), 4))})
+                        quarters = [
+                            {"fiscalDateEnding": dt, "reportedEPS": str(round(val, 4))}
+                            for dt, val in reversed(all_periods)
+                        ]
                         cumulative_tag = ""
 
                     if len(quarters) >= 7:
