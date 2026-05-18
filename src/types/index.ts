@@ -254,13 +254,20 @@ export interface StrategyComparison {
   winner_margin: number;
 }
 
+export interface EpsQuarter {
+  period:  string;        // "Mar '26", "Jun '25", "Dec '25" — month abbrev + 2-digit year
+  eps:     number;        // individual quarterly (or half-year) EPS after YTD conversion
+  yoy:     number | null; // YoY growth as decimal (0.22 = +22%); null if year-ago unavailable
+}
+
 export interface SepaMetadata {
   sepa_score: number;              // 0–3: how many SEPA conditions are true
   trend_template: boolean;         // Close > SMA50 > SMA200, Close > SMA200
-  code_33: boolean | null;         // true/false = US evaluated; null = HK (not applicable)
+  code_33: boolean | null;         // true/false = evaluated; null = ETF / cache miss
   vcp_detected: boolean;           // ZigZag double-filter: ATR_5/ATR_50 < 0.75 + 3-wave contraction
   current_contraction_pct: number; // Depth of current (tightest) ZigZag wave as % of peak
   wave_sequence: string;           // e.g. "12% → 7% → 4%" — empty if no VCP
+  eps_quarters: EpsQuarter[];      // Last 4 individual EPS periods, newest first
 }
 
 export interface StockAnalysisResult {

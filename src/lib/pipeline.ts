@@ -432,14 +432,15 @@ export function runPipeline(
 
   const vcpResult = computeVcp(closes, highs, lows);
 
-  // code_33 null placeholder — route.ts patches true/false for US, keeps null for HK
+  // code_33 + eps_quarters are patched in route.ts after pipeline returns
   const sepaMetadata = {
-    sepa_score: [trendTemplate, vcpResult.vcp_detected].filter(Boolean).length, // +1 for code_33 added in route.ts
+    sepa_score: [trendTemplate, vcpResult.vcp_detected].filter(Boolean).length,
     trend_template: trendTemplate,
     code_33: null as boolean | null,
     vcp_detected: vcpResult.vcp_detected,
     current_contraction_pct: vcpResult.current_contraction_pct,
     wave_sequence: vcpResult.wave_sequence,
+    eps_quarters: [] as import("@/types").EpsQuarter[],
   };
   info(sym, `SEPA: TT=${trendTemplate}, VCP=${vcpResult.vcp_detected}${vcpResult.vcp_detected ? ` (${vcpResult.wave_sequence})` : ''}, Score=${sepaMetadata.sepa_score}/3 (code_33 TBD)`);
 

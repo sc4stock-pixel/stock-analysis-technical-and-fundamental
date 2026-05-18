@@ -262,6 +262,66 @@ export default function OverviewTab({ result }: Props) {
         );
       })()}
 
+      {/* Earnings trend — 4 individual quarterly bars, oldest→newest */}
+      {result.sepa_metadata?.eps_quarters && result.sepa_metadata.eps_quarters.length > 0 && (() => {
+        const quarters = [...result.sepa_metadata.eps_quarters].reverse(); // display oldest left
+        const maxEps   = Math.max(...quarters.map(q => q.eps), 0.001);
+
+        const barColor = (yoy: number | null): string => {
+          if (yoy === null)    return "#2a3d5a";
+          if (yoy >=  0.20)   return "#00ff88";
+          if (yoy >=  0.05)   return "#00d4ff";
+          if (yoy >=  0)      return "#ffa502";
+          return "#ff4757";
+        };
+        const barOpacity = (yoy: number | null): number => {
+          if (yoy === null) return 0.35;
+          return Math.min(1, 0.55 + Math.abs(yoy) * 1.5);
+        };
+
+        return (
+          <div className="px-2 py-1.5 rounded border border-[#1e2d4a] bg-[#0a0e1a]">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[#4a6080] text-[0.6rem] font-mono font-bold tracking-wider">
+                EARNINGS TREND
+              </span>
+              <span className="text-[#2a3d5a] text-[0.55rem] font-mono">
+                individual qtr · YoY vs same period last yr
+              </span>
+            </div>
+            <div className="flex gap-2 items-end" style={{ height: 60 }}>
+              {quarters.map((q, i) => {
+                const barH   = Math.max(6, (q.eps / maxEps) * 42);
+                const color  = barColor(q.yoy);
+                const opac   = barOpacity(q.yoy);
+                const yoyStr = q.yoy !== null
+                  ? `${q.yoy >= 0 ? "+" : ""}${(q.yoy * 100).toFixed(1)}%`
+                  : "--";
+                const tipText = `${q.period}: EPS ${q.eps.toFixed(2)}  YoY ${yoyStr}`;
+                return (
+                  <div key={i}
+                    title={tipText}
+                    className="flex flex-col items-center justify-end flex-1 gap-0.5 h-full cursor-default">
+                    {/* YoY % above bar */}
+                    <span className="text-[0.55rem] font-mono font-bold"
+                      style={{ color, opacity: q.yoy !== null ? 1 : 0.4 }}>
+                      {yoyStr}
+                    </span>
+                    {/* Bar */}
+                    <div className="w-full rounded-sm transition-all"
+                      style={{ height: `${barH}px`, backgroundColor: color, opacity: opac }} />
+                    {/* Period label */}
+                    <span className="text-[#4a6080] text-[0.55rem] font-mono whitespace-nowrap">
+                      {q.period}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Indicator grid */}
       <div className="grid grid-cols-2 gap-x-4">
         <div>

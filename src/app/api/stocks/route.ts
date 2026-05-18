@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import { runPipeline, RawOHLCV } from "@/lib/pipeline";
-import { AppConfig } from "@/types";
+import { AppConfig, EpsQuarter } from "@/types";
 
 export const maxDuration = 30;
 // Force dynamic rendering — never cache the API response
@@ -164,6 +164,45 @@ async function fetchCode33(symbol: string, _exchange: string): Promise<boolean |
   return growthRates[0] > growthRates[1] && growthRates[1] > growthRates[2];
 }
 
+// ─── EPS quarters for OverviewTab chart ───────────────────────
+// Reads the same in-memory AV cache (no extra network call).
+// Returns last 4 individual EPS periods, newest first, with YoY and label.
+const MONTH_ABBR = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+async function buildEpsQuarters(symbol: string): Promise<EpsQuarter[]> {
+  const cache = await getAvCache();
+  const raw   = cache?.[symbol];
+  if (!raw) return [];
+
+  let frequency: "Q" | "H" = "Q";
+  let quarters: AvQuarter[];
+  if (Array.isArray(raw)) {
+    quarters = raw as AvQuarter[];
+  } else {
+    const entry = raw as SymbolData;
+    frequency = entry.frequency ?? "Q";
+    quarters  = entry.quarters  ?? [];
+  }
+
+  const step  = frequency === "H" ? 2 : 4;
+  const count = Math.min(4, quarters.length);
+
+  return quarters.slice(0, count).map((q, i) => {
+    const eps     = parseFloat(q.reportedEPS);
+    const yaIdx   = i + step;
+    const yaRaw   = yaIdx < quarters.length ? parseFloat(quarters[yaIdx].reportedEPS) : null;
+    const yoy     = yaRaw !== null && Math.abs(yaRaw) >= 0.001
+      ? (eps - yaRaw) / Math.abs(yaRaw)
+      : null;
+
+    const mo      = parseInt(q.fiscalDateEnding.slice(5, 7));
+    const yr2     = q.fiscalDateEnding.slice(2, 4);
+    const period  = `${MONTH_ABBR[mo] ?? "?"} '${yr2}`;
+
+    return { period, eps: isNaN(eps) ? 0 : eps, yoy };
+  });
+}
+
 // ─── OHLCV + current price ─────────────────────────────────────
 async function fetchYahooOHLCV(
   symbol: string,
@@ -274,16 +313,16 @@ async function analyzeStock(
 
     const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct);
 
-    // Patch code_33 into sepa_metadata.
-    // code33 is true/false for US stocks (3-quarter YoY EPS acceleration via FMP),
-    // or null for HK stocks / missing data (displayed as "—" in the UI, not counted in score).
+    // Patch code_33 + eps_quarters into sepa_metadata.
+    // buildEpsQuarters reads the same in-memory AV cache — no extra network call.
     if (result.sepa_metadata) {
       result.sepa_metadata.code_33 = code33;
       result.sepa_metadata.sepa_score = [
         result.sepa_metadata.trend_template,
-        code33 === true,   // null (HK / no data) does not add to score
+        code33 === true,
         result.sepa_metadata.vcp_detected,
       ].filter(Boolean).length;
+      result.sepa_metadata.eps_quarters = await buildEpsQuarters(stock.symbol);
     }
 
     return { ...result, fundamentals };
