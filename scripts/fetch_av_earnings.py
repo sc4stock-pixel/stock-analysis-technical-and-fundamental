@@ -151,18 +151,58 @@ if hk_syms:
 
                 else:
                     # ── Quarterly reporter ────────────────────────────
-                    frequency = "Q"
-                    quarters = []
+                    # First, detect whether Eastmoney is serving cumulative YTD values
+                    # (common for mainland-incorporated HK stocks) vs true individual quarters.
+                    # Heuristic: if Dec EPS / Mar EPS > 2.5x consistently, data is cumulative.
+                    by_year: dict = {}
                     for _, r in eps_df.iterrows():
                         dt  = str(r["REPORT_DATE"])[:10]
+                        yr  = dt[:4]
+                        mo  = int(dt[5:7])
                         val = r["AMOUNT"]
                         if val is None or str(val) in ("None", "", "nan"):
                             continue
-                        quarters.append({"fiscalDateEnding": dt, "reportedEPS": str(round(float(val), 4))})
+                        by_year.setdefault(yr, {})[mo] = (dt, float(val))
+
+                    dec_mar_ratios = [
+                        by_year[yr][12][1] / by_year[yr][3][1]
+                        for yr in sorted(by_year.keys(), reverse=True)[:3]
+                        if 3 in by_year[yr] and 12 in by_year[yr] and by_year[yr][3][1] != 0
+                    ]
+                    is_cumulative = bool(
+                        dec_mar_ratios and
+                        sum(dec_mar_ratios) / len(dec_mar_ratios) > 2.5
+                    )
+
+                    if is_cumulative:
+                        # Convert cumulative YTD → individual quarterly by differencing.
+                        # Within each year, reset prev=0 so Q1 = Q1_ytd unchanged.
+                        quarters = []
+                        for yr in sorted(by_year.keys(), reverse=True):
+                            prev = 0.0
+                            for mo, (dt, eps_val) in sorted(by_year[yr].items()):
+                                incremental = max(eps_val - prev, 0.0)  # clamp rounding noise
+                                quarters.append({
+                                    "fiscalDateEnding": dt,
+                                    "reportedEPS": str(round(incremental, 4)),
+                                })
+                                prev = eps_val
+                        quarters.sort(key=lambda x: x["fiscalDateEnding"], reverse=True)
+                        cumulative_tag = " (YTD→individual converted)"
+                    else:
+                        # Already individual quarterly values — use as-is
+                        quarters = []
+                        for _, r in eps_df.iterrows():
+                            dt  = str(r["REPORT_DATE"])[:10]
+                            val = r["AMOUNT"]
+                            if val is None or str(val) in ("None", "", "nan"):
+                                continue
+                            quarters.append({"fiscalDateEnding": dt, "reportedEPS": str(round(float(val), 4))})
+                        cumulative_tag = ""
 
                     if len(quarters) >= 7:
-                        data[symbol] = {"frequency": frequency, "quarters": quarters}
-                        print(f"{len(quarters)} quarters  latest: {quarters[0]['fiscalDateEnding']} EPS={quarters[0]['reportedEPS']}")
+                        data[symbol] = {"frequency": "Q", "quarters": quarters}
+                        print(f"{len(quarters)} quarters{cumulative_tag}  latest: {quarters[0]['fiscalDateEnding']} EPS={quarters[0]['reportedEPS']}")
                     else:
                         print(f"only {len(quarters)} quarters — insufficient")
 
