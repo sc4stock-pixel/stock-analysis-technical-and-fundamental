@@ -91,48 +91,58 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
 }
 
 
-// ─── Code 33: 3-quarter EPS acceleration (US only) ────────────
-// Returns true  = accelerating YoY EPS across the last 3 quarters.
-// Returns false = data present but condition not met.
-// Returns null  = HK stock, or FMP_KEY absent, or insufficient data.
-async function fetchCode33(symbol: string, exchange: string): Promise<boolean | null> {
-  if (exchange === 'HK') return null;
+// ─── Alpha Vantage earnings cache ─────────────────────────────
+// Loaded once from GitHub raw URL; refreshed every 6 h via module-level TTL.
+// The cache file (av_earnings_cache.json) is updated weekly by GitHub Actions
+// so Alpha Vantage is never called from the API route itself.
+interface AvQuarter { fiscalDateEnding: string; reportedEPS: string; }
 
-  const apiKey = process.env.FMP_KEY;
-  if (!apiKey) return null;
+let avCache: Record<string, AvQuarter[]> | null = null;
+let avCacheFetchedAt = 0;
+const AV_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 h
+const AV_CACHE_URL =
+  "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/av_earnings_cache.json";
 
+async function getAvCache(): Promise<Record<string, AvQuarter[]> | null> {
+  const now = Date.now();
+  if (avCache && now - avCacheFetchedAt < AV_CACHE_TTL_MS) return avCache;
   try {
-    const res = await fetch(
-      // /stable/ income-statement requires FMP paid tier (returns 402 on free) — null returned gracefully
-      `https://financialmodelingprep.com/stable/income-statement?symbol=${encodeURIComponent(symbol)}&period=quarter&limit=8&apikey=${apiKey}`,
-      { headers: { Accept: 'application/json' } }
-    );
+    const res = await fetch(AV_CACHE_URL, { cache: "no-store" });
     if (!res.ok) return null;
-
-    const data = await res.json();
-    // Need at least 7 quarters to compute 3 YoY comparisons
-    // (Q0 vs Q4, Q1 vs Q5, Q2 vs Q6 — indices 0–6)
-    if (!Array.isArray(data) || data.length < 7) return null;
-
-    // Quarters are sorted newest-first by FMP.
-    // YoY growth rate for quarter i = (eps[i] - eps[i+4]) / |eps[i+4]|
-    const growthRates: number[] = [];
-    for (let i = 0; i < 3; i++) {
-      const recent  = data[i]?.eps;
-      const yearAgo = data[i + 4]?.eps;
-      // Skip if data missing or denominator is zero / near-zero (avoids div-by-zero on turnarounds)
-      if (typeof recent !== 'number' || typeof yearAgo !== 'number' || Math.abs(yearAgo) < 0.001) {
-        return null;
-      }
-      growthRates.push((recent - yearAgo) / Math.abs(yearAgo));
-    }
-
-    // growthRates[0] = most recent quarter, [1] = prior, [2] = oldest
-    // Acceleration means each quarter's YoY rate is higher than the previous one
-    return growthRates[0] > growthRates[1] && growthRates[1] > growthRates[2];
+    const json = await res.json();
+    avCache = (json.data && Object.keys(json.data).length > 0) ? json.data : null;
+    avCacheFetchedAt = now;
+    return avCache;
   } catch {
     return null;
   }
+}
+
+// ─── Code 33: 3-quarter EPS acceleration (US only) ────────────
+// Returns true  = YoY EPS growth accelerating across last 3 quarters.
+// Returns false = data present but condition not met.
+// Returns null  = HK stock, cache empty/missing, or insufficient data.
+async function fetchCode33(symbol: string, exchange: string): Promise<boolean | null> {
+  if (exchange === "HK") return null;
+
+  const cache = await getAvCache();
+  const quarters = cache?.[symbol];
+  // Need ≥7 entries to compute 3 YoY comparisons (index i vs i+4)
+  if (!quarters || quarters.length < 7) return null;
+
+  // quarters sorted newest-first (matches AV response order)
+  // YoY growth for quarter i = (eps[i] - eps[i+4]) / |eps[i+4]|
+  const growthRates: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    const recent  = parseFloat(quarters[i].reportedEPS);
+    const yearAgo = parseFloat(quarters[i + 4].reportedEPS);
+    if (isNaN(recent) || isNaN(yearAgo) || Math.abs(yearAgo) < 0.001) return null;
+    growthRates.push((recent - yearAgo) / Math.abs(yearAgo));
+  }
+
+  // growthRates[0] = most recent, [1] = prior, [2] = oldest
+  // Acceleration: each quarter's YoY rate must be higher than the previous
+  return growthRates[0] > growthRates[1] && growthRates[1] > growthRates[2];
 }
 
 // ─── OHLCV + current price ─────────────────────────────────────
