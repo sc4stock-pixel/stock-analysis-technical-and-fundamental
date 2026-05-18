@@ -1,5 +1,5 @@
 {
-  "updated": "2026-05-18T07:21:04Z",
+  "updated": "2026-05-18T08:28:55Z",
   "stocks": [
     "AAPL",
     "MSFT",
@@ -9,358 +9,386 @@
     "NVDA",
     "TSM",
     "SPY",
-    "QQQ"
+    "QQQ",
+    "9988.HK",
+    "0700.HK",
+    "1211.HK",
+    "1810.HK",
+    "0175.HK",
+    "3033.HK",
+    "0939.HK"
   ],
   "data": {
-    "AAPL": [
-      {
-        "fiscalDateEnding": "2026-03-31",
-        "reportedEPS": "2.01"
-      },
-      {
-        "fiscalDateEnding": "2025-12-31",
-        "reportedEPS": "2.84"
-      },
-      {
-        "fiscalDateEnding": "2025-09-30",
-        "reportedEPS": "1.85"
-      },
-      {
-        "fiscalDateEnding": "2025-06-30",
-        "reportedEPS": "1.57"
-      },
-      {
-        "fiscalDateEnding": "2025-03-31",
-        "reportedEPS": "1.65"
-      },
-      {
-        "fiscalDateEnding": "2024-12-31",
-        "reportedEPS": "2.4"
-      },
-      {
-        "fiscalDateEnding": "2024-09-30",
-        "reportedEPS": "0.97"
-      },
-      {
-        "fiscalDateEnding": "2024-06-30",
-        "reportedEPS": "1.4"
-      },
-      {
-        "fiscalDateEnding": "2024-03-31",
-        "reportedEPS": "1.53"
-      },
-      {
-        "fiscalDateEnding": "2023-12-31",
-        "reportedEPS": "2.18"
-      },
-      {
-        "fiscalDateEnding": "2023-09-30",
-        "reportedEPS": "1.46"
-      },
-      {
-        "fiscalDateEnding": "2023-06-30",
-        "reportedEPS": "1.26"
-      }
-    ],
-    "MSFT": [
-      {
-        "fiscalDateEnding": "2026-03-31",
-        "reportedEPS": "4.27"
-      },
-      {
-        "fiscalDateEnding": "2025-12-31",
-        "reportedEPS": "5.16"
-      },
-      {
-        "fiscalDateEnding": "2025-09-30",
-        "reportedEPS": "3.72"
-      },
-      {
-        "fiscalDateEnding": "2025-06-30",
-        "reportedEPS": "3.65"
-      },
-      {
-        "fiscalDateEnding": "2025-03-31",
-        "reportedEPS": "3.46"
-      },
-      {
-        "fiscalDateEnding": "2024-12-31",
-        "reportedEPS": "3.23"
-      },
-      {
-        "fiscalDateEnding": "2024-09-30",
-        "reportedEPS": "3.3"
-      },
-      {
-        "fiscalDateEnding": "2024-06-30",
-        "reportedEPS": "2.95"
-      },
-      {
-        "fiscalDateEnding": "2024-03-31",
-        "reportedEPS": "2.94"
-      },
-      {
-        "fiscalDateEnding": "2023-12-31",
-        "reportedEPS": "2.93"
-      },
-      {
-        "fiscalDateEnding": "2023-09-30",
-        "reportedEPS": "2.99"
-      },
-      {
-        "fiscalDateEnding": "2023-06-30",
-        "reportedEPS": "2.69"
-      }
-    ],
-    "GOOGL": [
-      {
-        "fiscalDateEnding": "2026-03-31",
-        "reportedEPS": "5.11"
-      },
-      {
-        "fiscalDateEnding": "2025-12-31",
-        "reportedEPS": "2.82"
-      },
-      {
-        "fiscalDateEnding": "2025-09-30",
-        "reportedEPS": "2.87"
-      },
-      {
-        "fiscalDateEnding": "2025-06-30",
-        "reportedEPS": "2.31"
-      },
-      {
-        "fiscalDateEnding": "2025-03-31",
-        "reportedEPS": "2.81"
-      },
-      {
-        "fiscalDateEnding": "2024-12-31",
-        "reportedEPS": "2.15"
-      },
-      {
-        "fiscalDateEnding": "2024-09-30",
-        "reportedEPS": "2.12"
-      },
-      {
-        "fiscalDateEnding": "2024-06-30",
-        "reportedEPS": "1.89"
-      },
-      {
-        "fiscalDateEnding": "2024-03-31",
-        "reportedEPS": "1.89"
-      },
-      {
-        "fiscalDateEnding": "2023-12-31",
-        "reportedEPS": "1.64"
-      },
-      {
-        "fiscalDateEnding": "2023-09-30",
-        "reportedEPS": "1.55"
-      },
-      {
-        "fiscalDateEnding": "2023-06-30",
-        "reportedEPS": "1.44"
-      }
-    ],
-    "META": [
-      {
-        "fiscalDateEnding": "2026-03-31",
-        "reportedEPS": "7.31"
-      },
-      {
-        "fiscalDateEnding": "2025-12-31",
-        "reportedEPS": "8.88"
-      },
-      {
-        "fiscalDateEnding": "2025-09-30",
-        "reportedEPS": "7.25"
-      },
-      {
-        "fiscalDateEnding": "2025-06-30",
-        "reportedEPS": "7.14"
-      },
-      {
-        "fiscalDateEnding": "2025-03-31",
-        "reportedEPS": "6.43"
-      },
-      {
-        "fiscalDateEnding": "2024-12-31",
-        "reportedEPS": "8.02"
-      },
-      {
-        "fiscalDateEnding": "2024-09-30",
-        "reportedEPS": "6.03"
-      },
-      {
-        "fiscalDateEnding": "2024-06-30",
-        "reportedEPS": "5.16"
-      },
-      {
-        "fiscalDateEnding": "2024-03-31",
-        "reportedEPS": "4.71"
-      },
-      {
-        "fiscalDateEnding": "2023-12-31",
-        "reportedEPS": "5.33"
-      },
-      {
-        "fiscalDateEnding": "2023-09-30",
-        "reportedEPS": "4.39"
-      },
-      {
-        "fiscalDateEnding": "2023-06-30",
-        "reportedEPS": "2.98"
-      }
-    ],
-    "AMD": [
-      {
-        "fiscalDateEnding": "2026-03-31",
-        "reportedEPS": "1.37"
-      },
-      {
-        "fiscalDateEnding": "2025-12-31",
-        "reportedEPS": "1.53"
-      },
-      {
-        "fiscalDateEnding": "2025-09-30",
-        "reportedEPS": "0.75"
-      },
-      {
-        "fiscalDateEnding": "2025-06-30",
-        "reportedEPS": "0.54"
-      },
-      {
-        "fiscalDateEnding": "2025-03-31",
-        "reportedEPS": "0.96"
-      },
-      {
-        "fiscalDateEnding": "2024-12-31",
-        "reportedEPS": "1.09"
-      },
-      {
-        "fiscalDateEnding": "2024-09-30",
-        "reportedEPS": "0.92"
-      },
-      {
-        "fiscalDateEnding": "2024-06-30",
-        "reportedEPS": "0.69"
-      },
-      {
-        "fiscalDateEnding": "2024-03-31",
-        "reportedEPS": "0.62"
-      },
-      {
-        "fiscalDateEnding": "2023-12-31",
-        "reportedEPS": "0.77"
-      },
-      {
-        "fiscalDateEnding": "2023-09-30",
-        "reportedEPS": "0.7"
-      },
-      {
-        "fiscalDateEnding": "2023-06-30",
-        "reportedEPS": "0.58"
-      }
-    ],
-    "NVDA": [
-      {
-        "fiscalDateEnding": "2026-01-31",
-        "reportedEPS": "1.62"
-      },
-      {
-        "fiscalDateEnding": "2025-10-31",
-        "reportedEPS": "1.3"
-      },
-      {
-        "fiscalDateEnding": "2025-07-31",
-        "reportedEPS": "1.05"
-      },
-      {
-        "fiscalDateEnding": "2025-04-30",
-        "reportedEPS": "0.81"
-      },
-      {
-        "fiscalDateEnding": "2025-01-31",
-        "reportedEPS": "0.89"
-      },
-      {
-        "fiscalDateEnding": "2024-10-31",
-        "reportedEPS": "0.81"
-      },
-      {
-        "fiscalDateEnding": "2024-07-31",
-        "reportedEPS": "0.68"
-      },
-      {
-        "fiscalDateEnding": "2024-04-30",
-        "reportedEPS": "0.612"
-      },
-      {
-        "fiscalDateEnding": "2024-01-31",
-        "reportedEPS": "0.516"
-      },
-      {
-        "fiscalDateEnding": "2023-10-31",
-        "reportedEPS": "0.402"
-      },
-      {
-        "fiscalDateEnding": "2023-07-31",
-        "reportedEPS": "0.27"
-      },
-      {
-        "fiscalDateEnding": "2023-04-30",
-        "reportedEPS": "0.109"
-      }
-    ],
-    "TSM": [
-      {
-        "fiscalDateEnding": "2026-03-31",
-        "reportedEPS": "3.49"
-      },
-      {
-        "fiscalDateEnding": "2025-12-31",
-        "reportedEPS": "3.14"
-      },
-      {
-        "fiscalDateEnding": "2025-09-30",
-        "reportedEPS": "2.92"
-      },
-      {
-        "fiscalDateEnding": "2025-06-30",
-        "reportedEPS": "2.47"
-      },
-      {
-        "fiscalDateEnding": "2025-03-31",
-        "reportedEPS": "2.12"
-      },
-      {
-        "fiscalDateEnding": "2024-12-31",
-        "reportedEPS": "2.24"
-      },
-      {
-        "fiscalDateEnding": "2024-09-30",
-        "reportedEPS": "1.94"
-      },
-      {
-        "fiscalDateEnding": "2024-06-30",
-        "reportedEPS": "1.48"
-      },
-      {
-        "fiscalDateEnding": "2024-03-31",
-        "reportedEPS": "1.38"
-      },
-      {
-        "fiscalDateEnding": "2023-12-31",
-        "reportedEPS": "1.45"
-      },
-      {
-        "fiscalDateEnding": "2023-09-30",
-        "reportedEPS": "1.29"
-      },
-      {
-        "fiscalDateEnding": "2023-06-30",
-        "reportedEPS": "1.14"
-      }
-    ]
+    "AAPL": {
+      "frequency": "Q",
+      "quarters": [
+        {
+          "fiscalDateEnding": "2026-03-31",
+          "reportedEPS": "2.01"
+        },
+        {
+          "fiscalDateEnding": "2025-12-31",
+          "reportedEPS": "2.84"
+        },
+        {
+          "fiscalDateEnding": "2025-09-30",
+          "reportedEPS": "1.85"
+        },
+        {
+          "fiscalDateEnding": "2025-06-30",
+          "reportedEPS": "1.57"
+        },
+        {
+          "fiscalDateEnding": "2025-03-31",
+          "reportedEPS": "1.65"
+        },
+        {
+          "fiscalDateEnding": "2024-12-31",
+          "reportedEPS": "2.4"
+        },
+        {
+          "fiscalDateEnding": "2024-09-30",
+          "reportedEPS": "0.97"
+        },
+        {
+          "fiscalDateEnding": "2024-06-30",
+          "reportedEPS": "1.4"
+        },
+        {
+          "fiscalDateEnding": "2024-03-31",
+          "reportedEPS": "1.53"
+        },
+        {
+          "fiscalDateEnding": "2023-12-31",
+          "reportedEPS": "2.18"
+        },
+        {
+          "fiscalDateEnding": "2023-09-30",
+          "reportedEPS": "1.46"
+        },
+        {
+          "fiscalDateEnding": "2023-06-30",
+          "reportedEPS": "1.26"
+        }
+      ]
+    },
+    "MSFT": {
+      "frequency": "Q",
+      "quarters": [
+        {
+          "fiscalDateEnding": "2026-03-31",
+          "reportedEPS": "4.27"
+        },
+        {
+          "fiscalDateEnding": "2025-12-31",
+          "reportedEPS": "5.16"
+        },
+        {
+          "fiscalDateEnding": "2025-09-30",
+          "reportedEPS": "3.72"
+        },
+        {
+          "fiscalDateEnding": "2025-06-30",
+          "reportedEPS": "3.65"
+        },
+        {
+          "fiscalDateEnding": "2025-03-31",
+          "reportedEPS": "3.46"
+        },
+        {
+          "fiscalDateEnding": "2024-12-31",
+          "reportedEPS": "3.23"
+        },
+        {
+          "fiscalDateEnding": "2024-09-30",
+          "reportedEPS": "3.3"
+        },
+        {
+          "fiscalDateEnding": "2024-06-30",
+          "reportedEPS": "2.95"
+        },
+        {
+          "fiscalDateEnding": "2024-03-31",
+          "reportedEPS": "2.94"
+        },
+        {
+          "fiscalDateEnding": "2023-12-31",
+          "reportedEPS": "2.93"
+        },
+        {
+          "fiscalDateEnding": "2023-09-30",
+          "reportedEPS": "2.99"
+        },
+        {
+          "fiscalDateEnding": "2023-06-30",
+          "reportedEPS": "2.69"
+        }
+      ]
+    },
+    "GOOGL": {
+      "frequency": "Q",
+      "quarters": [
+        {
+          "fiscalDateEnding": "2026-03-31",
+          "reportedEPS": "5.11"
+        },
+        {
+          "fiscalDateEnding": "2025-12-31",
+          "reportedEPS": "2.82"
+        },
+        {
+          "fiscalDateEnding": "2025-09-30",
+          "reportedEPS": "2.87"
+        },
+        {
+          "fiscalDateEnding": "2025-06-30",
+          "reportedEPS": "2.31"
+        },
+        {
+          "fiscalDateEnding": "2025-03-31",
+          "reportedEPS": "2.81"
+        },
+        {
+          "fiscalDateEnding": "2024-12-31",
+          "reportedEPS": "2.15"
+        },
+        {
+          "fiscalDateEnding": "2024-09-30",
+          "reportedEPS": "2.12"
+        },
+        {
+          "fiscalDateEnding": "2024-06-30",
+          "reportedEPS": "1.89"
+        },
+        {
+          "fiscalDateEnding": "2024-03-31",
+          "reportedEPS": "1.89"
+        },
+        {
+          "fiscalDateEnding": "2023-12-31",
+          "reportedEPS": "1.64"
+        },
+        {
+          "fiscalDateEnding": "2023-09-30",
+          "reportedEPS": "1.55"
+        },
+        {
+          "fiscalDateEnding": "2023-06-30",
+          "reportedEPS": "1.44"
+        }
+      ]
+    },
+    "META": {
+      "frequency": "Q",
+      "quarters": [
+        {
+          "fiscalDateEnding": "2026-03-31",
+          "reportedEPS": "7.31"
+        },
+        {
+          "fiscalDateEnding": "2025-12-31",
+          "reportedEPS": "8.88"
+        },
+        {
+          "fiscalDateEnding": "2025-09-30",
+          "reportedEPS": "7.25"
+        },
+        {
+          "fiscalDateEnding": "2025-06-30",
+          "reportedEPS": "7.14"
+        },
+        {
+          "fiscalDateEnding": "2025-03-31",
+          "reportedEPS": "6.43"
+        },
+        {
+          "fiscalDateEnding": "2024-12-31",
+          "reportedEPS": "8.02"
+        },
+        {
+          "fiscalDateEnding": "2024-09-30",
+          "reportedEPS": "6.03"
+        },
+        {
+          "fiscalDateEnding": "2024-06-30",
+          "reportedEPS": "5.16"
+        },
+        {
+          "fiscalDateEnding": "2024-03-31",
+          "reportedEPS": "4.71"
+        },
+        {
+          "fiscalDateEnding": "2023-12-31",
+          "reportedEPS": "5.33"
+        },
+        {
+          "fiscalDateEnding": "2023-09-30",
+          "reportedEPS": "4.39"
+        },
+        {
+          "fiscalDateEnding": "2023-06-30",
+          "reportedEPS": "2.98"
+        }
+      ]
+    },
+    "AMD": {
+      "frequency": "Q",
+      "quarters": [
+        {
+          "fiscalDateEnding": "2026-03-31",
+          "reportedEPS": "1.37"
+        },
+        {
+          "fiscalDateEnding": "2025-12-31",
+          "reportedEPS": "1.53"
+        },
+        {
+          "fiscalDateEnding": "2025-09-30",
+          "reportedEPS": "0.75"
+        },
+        {
+          "fiscalDateEnding": "2025-06-30",
+          "reportedEPS": "0.54"
+        },
+        {
+          "fiscalDateEnding": "2025-03-31",
+          "reportedEPS": "0.96"
+        },
+        {
+          "fiscalDateEnding": "2024-12-31",
+          "reportedEPS": "1.09"
+        },
+        {
+          "fiscalDateEnding": "2024-09-30",
+          "reportedEPS": "0.92"
+        },
+        {
+          "fiscalDateEnding": "2024-06-30",
+          "reportedEPS": "0.69"
+        },
+        {
+          "fiscalDateEnding": "2024-03-31",
+          "reportedEPS": "0.62"
+        },
+        {
+          "fiscalDateEnding": "2023-12-31",
+          "reportedEPS": "0.77"
+        },
+        {
+          "fiscalDateEnding": "2023-09-30",
+          "reportedEPS": "0.7"
+        },
+        {
+          "fiscalDateEnding": "2023-06-30",
+          "reportedEPS": "0.58"
+        }
+      ]
+    },
+    "NVDA": {
+      "frequency": "Q",
+      "quarters": [
+        {
+          "fiscalDateEnding": "2026-01-31",
+          "reportedEPS": "1.62"
+        },
+        {
+          "fiscalDateEnding": "2025-10-31",
+          "reportedEPS": "1.3"
+        },
+        {
+          "fiscalDateEnding": "2025-07-31",
+          "reportedEPS": "1.05"
+        },
+        {
+          "fiscalDateEnding": "2025-04-30",
+          "reportedEPS": "0.81"
+        },
+        {
+          "fiscalDateEnding": "2025-01-31",
+          "reportedEPS": "0.89"
+        },
+        {
+          "fiscalDateEnding": "2024-10-31",
+          "reportedEPS": "0.81"
+        },
+        {
+          "fiscalDateEnding": "2024-07-31",
+          "reportedEPS": "0.68"
+        },
+        {
+          "fiscalDateEnding": "2024-04-30",
+          "reportedEPS": "0.612"
+        },
+        {
+          "fiscalDateEnding": "2024-01-31",
+          "reportedEPS": "0.516"
+        },
+        {
+          "fiscalDateEnding": "2023-10-31",
+          "reportedEPS": "0.402"
+        },
+        {
+          "fiscalDateEnding": "2023-07-31",
+          "reportedEPS": "0.27"
+        },
+        {
+          "fiscalDateEnding": "2023-04-30",
+          "reportedEPS": "0.109"
+        }
+      ]
+    },
+    "TSM": {
+      "frequency": "Q",
+      "quarters": [
+        {
+          "fiscalDateEnding": "2026-03-31",
+          "reportedEPS": "3.49"
+        },
+        {
+          "fiscalDateEnding": "2025-12-31",
+          "reportedEPS": "3.14"
+        },
+        {
+          "fiscalDateEnding": "2025-09-30",
+          "reportedEPS": "2.92"
+        },
+        {
+          "fiscalDateEnding": "2025-06-30",
+          "reportedEPS": "2.47"
+        },
+        {
+          "fiscalDateEnding": "2025-03-31",
+          "reportedEPS": "2.12"
+        },
+        {
+          "fiscalDateEnding": "2024-12-31",
+          "reportedEPS": "2.24"
+        },
+        {
+          "fiscalDateEnding": "2024-09-30",
+          "reportedEPS": "1.94"
+        },
+        {
+          "fiscalDateEnding": "2024-06-30",
+          "reportedEPS": "1.48"
+        },
+        {
+          "fiscalDateEnding": "2024-03-31",
+          "reportedEPS": "1.38"
+        },
+        {
+          "fiscalDateEnding": "2023-12-31",
+          "reportedEPS": "1.45"
+        },
+        {
+          "fiscalDateEnding": "2023-09-30",
+          "reportedEPS": "1.29"
+        },
+        {
+          "fiscalDateEnding": "2023-06-30",
+          "reportedEPS": "1.14"
+        }
+      ]
+    }
   }
 }
