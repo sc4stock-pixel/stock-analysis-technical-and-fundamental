@@ -1,5 +1,23 @@
 # CLAUDE.md
 
+## Morning Briefing Protocol (Auto-run at Session Start)
+
+**At the start of every new session** (when `source` is `startup` or `resume`), automatically run the full morning briefing WITHOUT waiting to be asked. Do all steps in parallel:
+
+1. **Gmail** — `mcp__Gmail__search_threads` with `query: "is:important newer_than:2d"` and `pageSize: 20`
+2. **Calendar** — `mcp__Google-Calendar__list_events` for today across `sc4stock@gmail.com` + `en.hong_kong#holiday@group.v.calendar.google.com` calendars (today through +7 days)
+3. **HK Market** — `WebSearch` for "Hang Seng HSI morning briefing [today's date] Hong Kong equity market"
+4. **Repo status** — `git log --oneline -10` to see what was last worked on
+
+Then output a structured briefing with these sections:
+- **CALENDAR** — today's events + upcoming week + HK public holidays
+- **EMAIL — ACTION ITEMS** — flag anything time-sensitive (IPOs, deadlines, alerts); list newsletters as FYI. Skip self-sent TA report emails.
+- **HK MORNING EQUITY NOTES** — HSI/HKTECH levels, key macro context, watchlist stocks from last TA report
+- **PROJECT CATCH-UP** — last commits, any open work in progress
+- **IDEAS & IMPROVEMENTS** — 2–3 concrete, specific next features for the stock analysis app ranked by effort/value
+
+Load these tool schemas first via `ToolSearch` if needed: `mcp__Gmail__search_threads`, `mcp__Google-Calendar__list_events`, `WebSearch`.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Commands
