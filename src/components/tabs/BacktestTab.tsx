@@ -111,6 +111,66 @@ export default function BacktestTab({ result }: Props) {
               </div>
             </div>
           )}
+
+          {/* AUDIT FIX C2 (2026-05-20): ST Walk-Forward (true OOS) — train slice
+              produces params; test slice produces the honest OOS numbers below.
+              The "ST" column metrics above (Return/Sharpe/Win%) are STILL in-sample. */}
+          {cmp.supertrend.wf_is_true_oos && cmp.supertrend.wf_efficiency_quality && (() => {
+            const wf = cmp.supertrend;
+            const qcolors: Record<string, string> = {
+              "GOOD": "#00ff88", "ACCEPTABLE": "#ffa502", "OVERFIT": "#ff8c42",
+              "NO DATA": "#4a6080", "POOR IS": "#ff4757", "FAILED OOS": "#ff4757",
+            };
+            const qcolor = qcolors[wf.wf_efficiency_quality!] ?? "#4a6080";
+            const passColor = wf.wf_passed ? "#00ff88" : "#ff4757";
+            const passBg    = wf.wf_passed ? "bg-[#00ff88]/15" : "bg-[#ff4757]/15";
+            const testRet = wf.wf_test_return ?? 0;
+            const testRetColor = testRet >= 0 ? "#00ff88" : "#ff4757";
+            return (
+              <div className="mt-2 pt-2 border-t border-[#1e2d4a]/40">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[#ffa502] text-[0.65rem] font-bold">🔄 ST Walk-Forward</span>
+                  <span className="text-[0.55rem] px-1.5 py-0.5 rounded bg-[#0f4c75] text-[#38bdf8]">TRUE OOS</span>
+                  <span className={`text-[0.55rem] px-1.5 py-0.5 rounded ${passBg}`} style={{ color: passColor }}>
+                    {wf.wf_passed ? "PASS" : "FAIL"}
+                  </span>
+                  <span className="text-[0.55rem] px-1.5 py-0.5 rounded" style={{ background: `${qcolor}20`, color: qcolor }}>
+                    {wf.wf_efficiency_quality}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-[0.6rem]">
+                  <div className="bg-[#1e2d4a]/40 rounded px-2 py-1 text-center">
+                    <div className="font-mono font-bold text-[#c8d8f0]">{wf.wf_train_sharpe?.toFixed(2) ?? "—"}</div>
+                    <div className="text-[#4a6080] text-[0.55rem]">Train Sharpe</div>
+                  </div>
+                  <div className="bg-[#1e2d4a]/40 rounded px-2 py-1 text-center">
+                    <div className="font-mono font-bold text-[#c8d8f0]">{wf.wf_test_sharpe?.toFixed(2) ?? "—"}</div>
+                    <div className="text-[#4a6080] text-[0.55rem]">OOS Sharpe</div>
+                  </div>
+                  <div className="bg-[#1e2d4a]/40 rounded px-2 py-1 text-center">
+                    <div className="font-mono font-bold" style={{ color: qcolor }}>{wf.wf_efficiency_ratio?.toFixed(2) ?? "—"}</div>
+                    <div className="text-[#4a6080] text-[0.55rem]">Efficiency</div>
+                  </div>
+                  <div className="bg-[#1e2d4a]/40 rounded px-2 py-1 text-center">
+                    <div className="font-mono font-bold" style={{ color: testRetColor }}>
+                      {testRet >= 0 ? "+" : ""}{testRet.toFixed(1)}%
+                    </div>
+                    <div className="text-[#4a6080] text-[0.55rem]">OOS Return</div>
+                  </div>
+                  <div className="bg-[#1e2d4a]/40 rounded px-2 py-1 text-center">
+                    <div className="font-mono font-bold text-[#c8d8f0]">{wf.wf_test_trades ?? "—"}</div>
+                    <div className="text-[#4a6080] text-[0.55rem]">OOS Trades</div>
+                  </div>
+                  <div className="bg-[#1e2d4a]/40 rounded px-2 py-1 text-center">
+                    <div className="font-mono font-bold text-[0.55rem] text-[#94a3b8]">
+                      ATR {wf.wf_train_atr_period}·{wf.wf_train_multiplier?.toFixed(2)}×
+                    </div>
+                    <div className="text-[#4a6080] text-[0.55rem]">Train Params</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           <div className="flex justify-between py-1 border-b border-[#1e2d4a]/30 text-xs">
             <span className="text-[#4a6080] w-28">Trades</span>
             <span className="text-[#c8d8f0] font-mono w-16 text-right">{cmp.score.num_trades}</span>

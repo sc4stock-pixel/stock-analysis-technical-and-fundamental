@@ -67,6 +67,7 @@ LOOKBACK_DAYS = 500       # trading days kept after fetch
 COMMISSION    = 0.001     # 0.1% — matches Python config commissionRate
 SLIPPAGE      = 0.0005    # 0.05% — matches Python config slippageRate
 INITIAL_CAP   = 10_000
+TRAIN_RATIO   = 0.7       # AUDIT FIX C2 (2026-05-20): 70% train, 30% test for OOS WFO
 
 # Output: repo root/st_params.json  (script lives in repo root/scripts/)
 OUTPUT_PATH = Path(__file__).parent.parent / "st_params.json"
@@ -256,6 +257,87 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
 
 # ─── Per-symbol optimisation ──────────────────────────────────────────────────
 
+def _grid_search(df: pd.DataFrame) -> dict:
+    """Run full ATR×Mult grid on the given window. Returns best by Sharpe."""
+    best_score  = -999.0
+    best = {"atr_period": 10, "multiplier": 3.0,
+            "total_return": 0.0, "sharpe": 0.0, "num_trades": 0}
+    for atr_p in ATR_PERIODS:
+        for mult in MULTIPLIERS:
+            try:
+                r = _run_st_backtest(df, atr_p, mult)
+                score = r["sharpe"] if r["num_trades"] >= 2 else r["total_return"]
+                if score > best_score:
+                    best_score = score
+                    best = {
+                        "atr_period":   atr_p,
+                        "multiplier":   mult,
+                        "total_return": round(r["total_return"], 2),
+                        "sharpe":       round(r["sharpe"], 2),
+                        "num_trades":   r["num_trades"],
+                    }
+            except Exception:
+                pass
+    return best
+
+
+def _compute_oos_wfo(df: pd.DataFrame) -> dict:
+    """AUDIT FIX C2 (2026-05-20): true train/test split for honest OOS metrics.
+
+    Returns wf_* fields to write alongside the live (full-window) params.
+    The live params are still chosen on the full window so they incorporate the
+    most recent data; the wf_* fields are independent and computed via a strict
+    train-only grid evaluated on a held-out test slice.
+    """
+    n = len(df)
+    split_idx = int(n * TRAIN_RATIO)
+    train_df = df.iloc[:split_idx]
+    test_df  = df.iloc[split_idx:]
+    if len(train_df) < 50 or len(test_df) < 20:
+        return {}
+
+    train_best = _grid_search(train_df)
+    train_atr, train_mult = train_best["atr_period"], train_best["multiplier"]
+    train_sharpe, train_return = train_best["sharpe"], train_best["total_return"]
+    train_trades = train_best["num_trades"]
+
+    # Evaluate train-derived params on test slice
+    try:
+        test_r = _run_st_backtest(test_df, train_atr, train_mult)
+    except Exception:
+        return {}
+    test_sharpe = round(test_r["sharpe"], 2)
+    test_return = round(test_r["total_return"], 2)
+    test_trades = test_r["num_trades"]
+
+    # Efficiency ratio + quality classification (mirrors Python analyzer.py)
+    if train_trades < 3 or test_trades < 2:
+        eff, quality = 0.0, "NO DATA"
+    elif train_sharpe <= 0:
+        eff, quality = 0.0, "POOR IS"
+    elif test_sharpe <= 0:
+        eff, quality = 0.0, "FAILED OOS"
+    else:
+        eff = min(test_sharpe / train_sharpe, 1.5)
+        quality = "GOOD" if eff >= 0.7 else "ACCEPTABLE" if eff >= 0.4 else "OVERFIT"
+    passed = bool(eff >= 0.4 and test_sharpe > 0)
+
+    return {
+        "wf_train_atr_period":   train_atr,
+        "wf_train_multiplier":   train_mult,
+        "wf_train_sharpe":       train_sharpe,
+        "wf_train_return":       train_return,
+        "wf_train_trades":       train_trades,
+        "wf_test_sharpe":        test_sharpe,
+        "wf_test_return":        test_return,
+        "wf_test_trades":        test_trades,
+        "wf_efficiency_ratio":   round(eff, 2),
+        "wf_efficiency_quality": quality,
+        "wf_passed":             passed,
+        "wf_is_true_oos":        True,
+    }
+
+
 def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
     symbol = stock["symbol"]
     print(f"  Optimizing {symbol} ({stock['name']})...", flush=True)
@@ -272,32 +354,22 @@ def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
         print(f"    ⚠  {symbol}: data fetch failed — {e}")
         return symbol, None
 
-    best_score  = -999.0
-    best_params = {"atr_period": 10, "multiplier": 3.0,
-                   "total_return": 0.0, "sharpe": 0.0, "num_trades": 0}
+    # Step 1: Full-window grid → params used for live trading
+    best_params = _grid_search(df)
 
-    for atr_p in ATR_PERIODS:
-        for mult in MULTIPLIERS:
-            try:
-                r = _run_st_backtest(df, atr_p, mult)
-                # Primary: Sharpe; fallback to total_return if too few trades
-                score = r["sharpe"] if r["num_trades"] >= 2 else r["total_return"]
-                if score > best_score:
-                    best_score  = score
-                    best_params = {
-                        "atr_period":   atr_p,
-                        "multiplier":   mult,
-                        "total_return": round(r["total_return"], 2),
-                        "sharpe":       round(r["sharpe"], 2),
-                        "num_trades":   r["num_trades"],
-                    }
-            except Exception as e:
-                print(f"    ⚠  {symbol} ATR={atr_p} Mult={mult}: {e}")
+    # Step 2: True OOS walk-forward → wf_* fields for dashboard
+    oos = _compute_oos_wfo(df)
+    best_params.update(oos)
 
     bp = best_params
+    oos_str = ""
+    if oos:
+        oos_str = (f" | OOS Sharpe={oos['wf_test_sharpe']:.2f}, "
+                   f"Return={oos['wf_test_return']:.1f}%, "
+                   f"eff={oos['wf_efficiency_ratio']:.2f} ({oos['wf_efficiency_quality']})")
     print(f"    ✅ {symbol}: ATR={bp['atr_period']}, Mult={bp['multiplier']} "
           f"→ Return={bp['total_return']:.1f}%, Sharpe={bp['sharpe']:.2f}, "
-          f"Trades={bp['num_trades']}")
+          f"Trades={bp['num_trades']}{oos_str}")
     return symbol, best_params
 
 

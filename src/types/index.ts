@@ -245,6 +245,22 @@ export interface StrategyMetrics {
   avg_loss: number;
   alpha: number;
   trades: Trade[];
+  // AUDIT FIX C2 (2026-05-20): optional true-OOS walk-forward fields. Present
+  // on the `supertrend` metrics object when the per-run WFO succeeds. The IS
+  // numbers above (sharpe/total_return) are from the full window; the wf_*
+  // fields are the genuine OOS counterparts.
+  wf_train_atr_period?:   number;
+  wf_train_multiplier?:   number;
+  wf_train_sharpe?:       number;
+  wf_train_return?:       number;
+  wf_train_trades?:       number;
+  wf_test_sharpe?:        number;
+  wf_test_return?:        number;
+  wf_test_trades?:        number;
+  wf_efficiency_ratio?:   number;
+  wf_efficiency_quality?: "GOOD" | "ACCEPTABLE" | "OVERFIT" | "NO DATA" | "POOR IS" | "FAILED OOS";
+  wf_passed?:             boolean;
+  wf_is_true_oos?:        boolean;
 }
 
 export interface StrategyComparison {

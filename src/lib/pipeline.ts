@@ -17,7 +17,7 @@ import { calculateScores, detectRsiDivergence } from "./scoring";
 import { generateSignals } from "./signals";
 import { runBacktest, runSupertrendBacktest } from "./backtest";
 import { runMonteCarlo } from "./montecarlo";
-import { optimizeSupertrend } from "./supertrend_optimizer";
+import { optimizeSupertrend, optimizeSupertrendOos } from "./supertrend_optimizer";
 
 export interface RawOHLCV {
   date: string; open: number; high: number; low: number; close: number; volume: number;
@@ -246,6 +246,22 @@ export function runPipeline(
     config.backtest.slippageRate
   );
   console.log(`    ✅ Best: ATR=${optResult.atrPeriod}, Mult=${optResult.multiplier} => Return=${optResult.totalReturn.toFixed(1)}%, Sharpe=${optResult.sharpe.toFixed(2)}, Trades=${optResult.numTrades}`);
+
+  // AUDIT FIX C2 (2026-05-20): true OOS walk-forward for SuperTrend.
+  // optResult above is from a full-window grid (used for live trading params).
+  // For honest dashboard display, run a separate train/test split: optimize on
+  // train slice only, then evaluate train-derived params on the held-out test
+  // slice. The wf_* fields surface as "TRUE OOS" on the stock card.
+  const stOosResult = optimizeSupertrendOos(
+    bars,
+    config.backtest.initialCapital,
+    config.backtest.commissionRate,
+    config.backtest.slippageRate,
+    config.walkForward.trainRatio
+  );
+  if (stOosResult) {
+    dbg(sym, `ST WFO (true OOS): train(ATR=${stOosResult.wf_train_atr_period},Mult=${stOosResult.wf_train_multiplier}) Sharpe=${stOosResult.wf_train_sharpe.toFixed(2)} | test Sharpe=${stOosResult.wf_test_sharpe.toFixed(2)}, Return=${stOosResult.wf_test_return.toFixed(1)}% | eff=${stOosResult.wf_efficiency_ratio.toFixed(2)} (${stOosResult.wf_efficiency_quality})`);
+  }
 
   // Recompute ST with optimal params
   const [optStArr, optStDirArr, optStSigArr] = supertrend(
@@ -520,7 +536,11 @@ export function runPipeline(
     st_opt_params: { atrPeriod: optResult.atrPeriod, multiplier: optResult.multiplier, sharpe: optResult.sharpe, numTrades: optResult.numTrades },
     sepa_metadata: sepaMetadata,
     comparison: {
-      score: toMetrics(backtestResult), supertrend: toMetrics(stBacktestResult),
+      score: toMetrics(backtestResult),
+      // AUDIT FIX C2 (2026-05-20): merge wf_* OOS fields into the ST metrics
+      // dict so the dashboard's ST WFO card can display "TRUE OOS" numbers.
+      // toMetrics() returns IS values (full-window); wf_* are added on top.
+      supertrend: { ...toMetrics(stBacktestResult), ...(stOosResult ?? {}) },
       winner, winner_margin: Math.abs(scoreAlpha - stAlpha),
     },
   };
