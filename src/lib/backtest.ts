@@ -351,12 +351,16 @@ export function runBacktest(
       if (exitSignal || maxDaysReached || atrStopHit || trailingStopHit || rangingExit || profitTargetHit) {
         let exitPrice: number; let exitReason: string;
 
-        if (profitTargetHit) {
-          exitPrice = position.profit_target as number; exitReason = "Profit Target";
-        } else if (atrStopHit && !trailingStopHit) {
+        // AUDIT FIX H6 (2026-05-20): stops evaluated BEFORE profit target.
+        // Previously profitTargetHit won on a same-bar both-hit (low ≤ stop AND
+        // high ≥ target), which is optimistic — without intraday data we cannot
+        // know which fired first. Conservative assumption: stop fires first.
+        if (atrStopHit && !trailingStopHit) {
           exitPrice = position.atr_stop_price as number; exitReason = "ATR Stop";
         } else if (trailingStopHit) {
           exitPrice = position.trailing_stop as number; exitReason = "Trailing Stop";
+        } else if (profitTargetHit) {
+          exitPrice = position.profit_target as number; exitReason = "Profit Target";
         } else if (rangingExit) {
           exitPrice = cur.open; exitReason = "Range Mean Reversion";
         } else if (exitSignal) {
@@ -398,8 +402,11 @@ export function runBacktest(
       }
     }
 
+    // AUDIT FIX H5 (2026-05-20): see runSupertrendBacktest below for rationale.
     const curValue = position !== null
-      ? (position.entry_equity as number) + (cur.close - (position.entry_price as number)) * (position.shares as number)
+      ? (position.entry_equity as number)
+        - (position.entry_cost_per_share as number) * (position.shares as number)
+        + cur.close * (position.shares as number)
       : runningEquity;
     equityCurve.push(curValue);
     equityDates.push(cur.date);
@@ -501,14 +508,51 @@ export function runSupertrendBacktest(
         position.atr_stop_price = cur.supertrend;
       }
 
-      // Only exit on stop breach when ST direction has actually flipped bearish.
-      // Prevents false exits from intraday wicks that recover above the ST line by close.
+      // AUDIT FIX H3 (2026-05-20): deferred stop exit.
+      // supertrendDir is a close-derived event — cannot know a direction flip at
+      // the OPEN of the same bar. When a stop-hit exit triggers, mark as pending
+      // and execute at the NEXT bar's open instead.
+      // stSellSignal uses prev bar's signal, so it already exits at the next-bar
+      // open by convention and needs no deferral.
+      if ((position as Record<string, unknown>).pending_st_exit) {
+        const exitPrice = cur.open * (1 - slippage);
+        const exitProceedsPerShare = exitPrice * (1 - commission);
+        const perSharePnl = exitProceedsPerShare - (position.entry_cost_per_share as number);
+        const totalPnl    = perSharePnl * (position.shares as number);
+        const returnPct   = perSharePnl / (position.entry_cost_per_share as number);
+        runningEquity     = (position.entry_equity as number) + totalPnl;
+
+        const entryBar  = bars[position.entry_idx as number];
+        const riskPerShare = (position.entry_price as number) - (position.original_stop as number ?? (position.entry_price as number) - 2 * entryBar.atr);
+        const actualRiskPct = riskPerShare > 0 ? riskPerShare / (position.entry_price as number) : 0.02;
+        const rMultiple = actualRiskPct > 0 ? returnPct / actualRiskPct : 0;
+
+        tradeNum++;
+        trades.push({
+          trade_num: tradeNum, entry_date: position.entry_date as string, exit_date: cur.date,
+          entry_idx: position.entry_idx as number, exit_idx: i,
+          entry_price: position.entry_price as number, exit_price: exitPrice,
+          return: returnPct, pnl: totalPnl, shares: position.shares as number,
+          bars_held: position.bars_held as number, r_multiple: rMultiple,
+          exit_reason: (position as Record<string, unknown>).pending_st_reason as string ?? "ST Stop Hit",
+          atr_stop_price: position.original_stop as number, trailing_stop: null,
+          mae_pct: (position.mae_pct as number) * 100, mfe_pct: (position.mfe_pct as number) * 100,
+          actual_risk_pct: actualRiskPct * 100, entry_regime: entryBar.regime,
+          atr_mult: 2, trail_mult: 0, max_hold_days: 9999,
+        });
+        position = null;
+      } else {
       const stStopHit  = cur.low <= (position.atr_stop_price as number) && cur.supertrendDir === -1;
       const stSellSignal = prev.supertrendSignal === "SELL";
 
-      if (stStopHit || stSellSignal) {
-        const rawExit  = Math.min(position.atr_stop_price as number, cur.open);
-        const exitPrice = rawExit * (1 - slippage);
+      if (stStopHit) {
+        // Defer to next bar open — can't act on close-derived direction at today's open
+        (position as Record<string, unknown>).pending_st_exit = true;
+        (position as Record<string, unknown>).pending_st_reason = "ST Stop Hit";
+      } else if (stSellSignal) {
+        // AUDIT FIX H7 (2026-05-20): signal-only exit fills at cur.open, not
+        // min(stop, open). The stop price was never breached; filling there is unrealistic.
+        const exitPrice = cur.open * (1 - slippage);
         const exitProceedsPerShare = exitPrice * (1 - commission);
         const perSharePnl = exitProceedsPerShare - (position.entry_cost_per_share as number);
         const totalPnl    = perSharePnl * (position.shares as number);
@@ -529,7 +573,7 @@ export function runSupertrendBacktest(
           entry_price: position.entry_price as number, exit_price: exitPrice,
           return: returnPct, pnl: totalPnl, shares: position.shares as number,
           bars_held: position.bars_held as number, r_multiple: rMultiple,
-          exit_reason: "SuperTrend Exit",
+          exit_reason: "ST Trend Flip",
           atr_stop_price: position.original_stop as number, trailing_stop: null,
           mae_pct: (position.mae_pct as number) * 100, mfe_pct: (position.mfe_pct as number) * 100,
           actual_risk_pct: actualRiskPct * 100, entry_regime: entryBar.regime,
@@ -537,10 +581,14 @@ export function runSupertrendBacktest(
         });
         position = null;
       }
+      } // close outer else (not pending_st_exit)
     }
 
+    // AUDIT FIX H5 (2026-05-20): see Score engine above for rationale.
     const curValue = position !== null
-      ? (position.entry_equity as number) + (cur.close - (position.entry_price as number)) * (position.shares as number)
+      ? (position.entry_equity as number)
+        - (position.entry_cost_per_share as number) * (position.shares as number)
+        + cur.close * (position.shares as number)
       : runningEquity;
     equityCurve.push(curValue);
     equityDates.push(cur.date);

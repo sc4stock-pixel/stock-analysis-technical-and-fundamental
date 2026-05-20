@@ -284,6 +284,28 @@ export function runPipeline(
     dbg(sym, `No ST flip detected in lookback window`);
   }
 
+  // ── AUDIT FIX H10 (2026-05-20): precompute per-bar ATR filters for "full" mode.
+  // Python's Full Filter uses (a) ATR > 40th-pctile of rolling-50-bar ATR window
+  // and (b) ADX > dynamic threshold (25/20/15 based on ATR ratio). Previously the
+  // web app's "full" mode only checked `adx > 20`, missing the volatility gate.
+  const _atrVals = bars.map(b => b.atr);
+  // Rolling 40th-percentile of ATR over 50-bar window (min 10 observations)
+  const _atrPct40 = _atrVals.map((_, i) => {
+    const slice = _atrVals.slice(Math.max(0, i - 49), i + 1).filter(v => !isNaN(v) && v > 0);
+    if (slice.length < 10) return 0;
+    const sorted = [...slice].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length * 0.4)];
+  });
+  // ATR ratio = current ATR / 50-bar mean → drives dynamic ADX threshold
+  const _atrMean50 = _atrVals.map((_, i) => {
+    const slice = _atrVals.slice(Math.max(0, i - 49), i + 1).filter(v => !isNaN(v) && v > 0);
+    return slice.length > 0 ? slice.reduce((s, v) => s + v, 0) / slice.length : 1;
+  });
+  const _adxDynThreshold = _atrVals.map((v, i) => {
+    const ratio = _atrMean50[i] > 0 ? v / _atrMean50[i] : 1;
+    return ratio > 1.5 ? 25 : ratio > 1.0 ? 20 : 15;
+  });
+
   // ── SuperTrend entry signals using OPTIMAL params ─────────────
   for (let i = 1; i < bars.length; i++) {
     if (i + 1 >= bars.length) continue;
@@ -297,7 +319,11 @@ export function runPipeline(
     if (optStSigArr[i] === "BUY") {
       const smaFilter = stConfig.filter_mode === "ema_only"
         ? cur.close > cur.sma50
-        : cur.close > cur.sma50 && cur.adx > 20;
+        // Full filter: SMA50 + ATR above 40th pctile + ADX above dynamic threshold
+        // (mirrors Python signals.py:379-401)
+        : cur.close > cur.sma50
+          && cur.atr > _atrPct40[i]
+          && cur.adx > _adxDynThreshold[i];
       if (smaFilter) bars[i + 1].stEntrySignal = "BUY";
       continue;
     }
