@@ -227,7 +227,9 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
             if st_vals[i] > position["stop"]:
                 position["stop"] = st_vals[i]
 
-            stop_hit    = lows_a[i] <= position["stop"]
+            # Only exit on stop breach when ST direction is actually bearish.
+            # Prevents false exits from intraday wicks that recover above ST by close.
+            stop_hit    = (lows_a[i] <= position["stop"]) and (st_dirs[i] == -1)
             signal_exit = sig == "SELL"
 
             if stop_hit or signal_exit:
