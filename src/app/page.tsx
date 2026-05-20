@@ -56,6 +56,9 @@ export default function Dashboard() {
   const [stOptimizing, setStOptimizing] = useState(false);
   const [stOptMsg, setStOptMsg]         = useState<string | null>(null);
 
+  const [tgSending, setTgSending]   = useState(false);
+  const [tgMsg, setTgMsg]           = useState<string | null>(null);
+
   const [savePortfolioLoading, setSavePortfolioLoading] = useState(false);
   const [savePortfolioMsg, setSavePortfolioMsg]         = useState<string | null>(null);
   const [backtestLoading, setBacktestLoading]           = useState(false);
@@ -231,6 +234,30 @@ export default function Dashboard() {
     }
   }
 
+  async function sendTelegramNotification(finalResults: StockAnalysisResult[]) {
+    if (finalResults.length === 0) return;
+    setTgSending(true);
+    setTgMsg(null);
+    try {
+      const res = await fetch("/api/telegram", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ results: finalResults }),
+      });
+      const data = await res.json();
+      if (res.status === 503) {
+        setTgMsg("Telegram not configured — add TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID to env vars.");
+      } else {
+        setTgMsg(data.ok ? "📱 Sent to Telegram!" : `Telegram error: ${data.error ?? "unknown"}`);
+      }
+    } catch (e) {
+      setTgMsg(`Telegram error: ${String(e)}`);
+    } finally {
+      setTgSending(false);
+      setTimeout(() => setTgMsg(null), 6000);
+    }
+  }
+
   const runAnalysis = useCallback(async () => {
     setLoading(true);
     setProgress(0);
@@ -264,17 +291,22 @@ export default function Dashboard() {
     }
 
     const [usResult, hkResult] = await Promise.all([usPromise, hkPromise]);
+    let finalResults = allResults;
     if (config.macro?.enabled) {
-      const adjusted = applyDualMacroAdjustment(
+      finalResults = applyDualMacroAdjustment(
         allResults,
         usResult?.mbs ?? null,
         hkResult?.mbs ?? null,
         config.macro?.applyToScore ?? false,
       );
-      setResults(adjusted);
+      setResults(finalResults);
     }
 
     fetchTimesfm();
+
+    // Auto-send Telegram when there are actionable BUY or SELL signals
+    const hasSignals = finalResults.some(r => r.signal === "BUY" || r.signal === "SELL" || r.signal === "STRONG_SELL");
+    if (hasSignals) sendTelegramNotification(finalResults);
 
     setLastUpdated(new Date().toLocaleTimeString());
     setProgressSymbol("");
@@ -341,6 +373,13 @@ export default function Dashboard() {
             className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#6b85a0] hover:border-[#f59e0b] hover:text-[#f59e0b] disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
             {stOptimizing ? "TRIGGERING…" : "⚡ OPTIMIZE ST"}
           </button>
+          <button
+            onClick={() => sendTelegramNotification(results)}
+            disabled={tgSending || results.length === 0}
+            title="Send current analysis to Telegram"
+            className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#6b85a0] hover:border-[#7c3aed] hover:text-[#a78bfa] disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
+            {tgSending ? "SENDING…" : "📱 NOTIFY"}
+          </button>
           <button onClick={runAnalysis} disabled={loading}
             className="px-4 py-1.5 text-xs font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
             {loading ? `SCANNING… ${progress}%` : "▶ RUN ANALYSIS"}
@@ -350,6 +389,11 @@ export default function Dashboard() {
       {stOptMsg && (
         <div className={`px-4 py-1.5 text-xs border-b ${stOptMsg.startsWith("Error") ? "border-red-900/40 text-red-400 bg-red-900/10" : "border-[#1e2d4a] text-[#f59e0b] bg-[#0a0e1a]"}`}>
           {stOptMsg}
+        </div>
+      )}
+      {tgMsg && (
+        <div className={`px-4 py-1.5 text-xs border-b ${tgMsg.startsWith("Telegram error") || tgMsg.startsWith("Telegram not") ? "border-red-900/40 text-red-400 bg-red-900/10" : "border-[#1e2d4a] text-[#a78bfa] bg-[#0a0e1a]"}`}>
+          {tgMsg}
         </div>
       )}
 
