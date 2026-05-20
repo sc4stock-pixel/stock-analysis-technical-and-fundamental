@@ -130,7 +130,10 @@ export function calculateScores(params: {
 
   for (let i = 0; i < n; i++) {
     const regime = params.regimeArr[i] ?? "NEUTRAL";
-    const isUptrend = /UPTREND|STRENGTHENING|STRONG/i.test(regime);
+    // AUDIT FIX C4 (2026-05-20): old pattern matched STRONG_DOWNTREND,
+    // STRENGTHENING_DOWNTREND, etc. — applied the RSI uptrend bonus in bear regimes.
+    // Anchor to *UPTREND suffix so only bullish regime labels qualify.
+    const isUptrend = /UPTREND$/i.test(regime);
 
     // RSI
     const rScore = rsiScore(params.rsiArr[i], isUptrend, params.rsiDivergenceArr[i] ?? 0);

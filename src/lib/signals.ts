@@ -40,10 +40,22 @@ export function generateSignals(
   // ── Step 1: Volume Surge + Score adjustment ────────────────────
   // Python: volume_surge = (vol_ratio > 2.0) & bullish_candle & is_bullish_regime
   //         Score_Adjusted = Score + 2.0 if volume_surge else Score
+  //
+  // AUDIT NOTE C8 (2026-05-20): the Python live-signal pipeline ALSO applies a
+  // macro-background-score (MBS) band adjustment to the Score Alpha live signal
+  // (signals.py:759-770, bands +0.5 / 0 / -0.3 / -0.5 / -1.0). This web app
+  // does NOT include the MBS adjustment, so the displayed live Score here can
+  // diverge from the Python report whenever the macro overlay is non-neutral.
+  // Backtest parity is preserved because Python explicitly passes mbs=None to
+  // the backtest engine. To eliminate this divergence, either port the macro
+  // engine into the TypeScript pipeline, or surface a UI banner that links
+  // users to the Python report for the MBS-adjusted live Score.
   for (let i = 0; i < bars.length; i++) {
     const bar = bars[i];
     const isBullishCandle = bar.close > bar.open;
-    const isUptrendRegime = /UPTREND|STRENGTHENING|STRONG/i.test(bar.regime ?? "");
+    // AUDIT FIX C4 (2026-05-20): same anchor fix as scoring.ts — prevents
+    // volume-surge force-entry from firing inside bear regimes.
+    const isUptrendRegime = /UPTREND$/i.test(bar.regime ?? "");
     bar.volumeSurge   = bar.volRatio > 2.0 && isBullishCandle && isUptrendRegime ? 1 : 0;
     bar.scoreAdjusted = bar.volumeSurge ? bar.score + 2.0 : bar.score;
   }

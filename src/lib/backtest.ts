@@ -369,7 +369,11 @@ export function runBacktest(
         const exitProceedsPerShare = exitPrice * (1 - commission);
         const perSharePnl = exitProceedsPerShare - (position.entry_cost_per_share as number);
         const totalPnl    = perSharePnl * (position.shares as number);
-        const returnPct   = (exitPrice - (position.entry_price as number)) / (position.entry_price as number);
+        // AUDIT FIX C6 (2026-05-20): use NET per-share PnL over net entry cost to mirror
+        // Python (backtest.py:862). The old `(exitPrice - entry_price) / entry_price`
+        // ignored both buy and sell commissions and used pre-commission entry as denom,
+        // making win-rate/expectancy/R-multiple systematically optimistic vs Python.
+        const returnPct   = perSharePnl / (position.entry_cost_per_share as number);
         runningEquity     = (position.entry_equity as number) + totalPnl;
 
         const riskPerShare = (position.entry_price as number) - (position.original_stop_price as number);
@@ -508,7 +512,9 @@ export function runSupertrendBacktest(
         const exitProceedsPerShare = exitPrice * (1 - commission);
         const perSharePnl = exitProceedsPerShare - (position.entry_cost_per_share as number);
         const totalPnl    = perSharePnl * (position.shares as number);
-        const returnPct   = (exitPrice - (position.entry_price as number)) / (position.entry_price as number);
+        // AUDIT FIX C7 (2026-05-20): same gross-vs-net fix as the Score engine above.
+        // SuperTrend per-trade return now nets out commissions on both sides.
+        const returnPct   = perSharePnl / (position.entry_cost_per_share as number);
         runningEquity     = (position.entry_equity as number) + totalPnl;
 
         const entryBar  = bars[position.entry_idx as number];
