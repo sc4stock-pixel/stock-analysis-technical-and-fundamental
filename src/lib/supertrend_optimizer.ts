@@ -142,8 +142,30 @@ function quickSTBacktest(
   // combos — always seeing 0 made the fallback pick arbitrary params). The grid loop
   // below already filters by `numTrades >= MIN_TRADES` for its primary path, so the
   // sentinel was redundant for the grid AND wrong for the direct-eval OOS path.
+  // AUDIT FIX Sharpe (2026-05-20): if the backtest ends with an open position,
+  // MtM bars for that unclosed trade inflate the equity curve while contributing
+  // nothing to totalReturn (realized cash only). Truncate the daily-return series
+  // at the last completed trade's close bar. Mirrors Python backtest.py fix.
+  const hasOpenPos = pos !== null;
+  let lastClosedBar = equity.length - 1;
+  if (hasOpenPos && trades.length > 0) {
+    // Find the bar index immediately after the last completed trade closed.
+    // trades are appended in order, so the last `running` update from a trade
+    // corresponds to the equity value at that bar. Walk backward to find the
+    // last bar where pos was null (= last trade exit + any subsequent flat bars).
+    // Simpler approximation: count back from the bar where equity stopped
+    // matching `running` — i.e., the first bar where equity diverges from
+    // the final running value.
+    for (let i = equity.length - 1; i >= 0; i--) {
+      if (Math.abs(equity[i] - running) < 0.01) {
+        lastClosedBar = i;
+        break;
+      }
+    }
+  }
+
   const dailyRets: number[] = [];
-  for (let i = 1; i < equity.length; i++) {
+  for (let i = 1; i <= lastClosedBar; i++) {
     const prev = equity[i - 1];
     dailyRets.push(prev > 0 ? (equity[i] - prev) / prev : 0);
   }
