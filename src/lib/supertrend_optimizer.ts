@@ -92,17 +92,40 @@ function quickSTBacktest(
       // Trail stop upward
       if (!isNaN(stLine[i]) && stLine[i] > pos.stop) pos.stop = stLine[i];
 
-      const stopHit  = cur.low  <= pos.stop;
-      const sellSig  = stSig[i - 1] === "SELL";  // prev bar signal
-      if (stopHit || sellSig) {
-        const rawExit = Math.min(pos.stop, cur.open);
-        const exitPrice = rawExit * (1 - slippage);
+      // AUDIT FIX C1+H3 (2026-05-20): the optimizer's mini-backtest must mirror
+      // the production runSupertrendBacktest exit logic. Previously it was
+      // missing (a) the direction gate — exiting on every intraday wick below
+      // the stop, even when ST direction was still bullish — and (b) the
+      // deferred next-bar-open exit when direction does flip. Without these the
+      // optimizer was picking params based on a buggy backtest and the resulting
+      // OOS metrics never matched the dashboard's runSupertrendBacktest.
+      const pendingStopExit = (pos as { pending_st_exit?: boolean }).pending_st_exit === true;
+      if (pendingStopExit) {
+        // Execute the deferred stop exit at this bar's open
+        const exitPrice = cur.open * (1 - slippage);
         const proceeds  = exitPrice * (1 - commission);
         const pnl = (proceeds - pos.entryCost) * pos.shares;
         const ret = (exitPrice - pos.entryPrice) / pos.entryPrice;
         running = pos.equity + pnl;
         trades.push({ ret, pnl });
         pos = null;
+      } else {
+        const stopHit  = cur.low <= pos.stop && stDir[i] === -1; // direction-gated
+        const sellSig  = stSig[i - 1] === "SELL"; // prev bar signal (already deferred)
+        if (stopHit) {
+          // Defer to next bar open — close-derived direction flip can't be acted on
+          // at the same bar's open
+          (pos as { pending_st_exit?: boolean }).pending_st_exit = true;
+        } else if (sellSig) {
+          // Signal exit fills at cur.open (prev bar's signal already deferred)
+          const exitPrice = cur.open * (1 - slippage);
+          const proceeds  = exitPrice * (1 - commission);
+          const pnl = (proceeds - pos.entryCost) * pos.shares;
+          const ret = (exitPrice - pos.entryPrice) / pos.entryPrice;
+          running = pos.equity + pnl;
+          trades.push({ ret, pnl });
+          pos = null;
+        }
       }
     }
 
@@ -158,8 +181,12 @@ export function optimizeSupertrend(
       const [stLine, stDir, stSig] = supertrend(highs, lows, closes, atrP, mult);
       const result = quickSTBacktest(bars, stLine, stDir, stSig, initialCapital, commission, slippage);
 
+      // AUDIT METRIC ALIGNMENT (2026-05-20): score by totalReturn to match
+      // Python local (`analyzer.py` passes `metric='total_return'`). Sharpe was
+      // used previously, which selected different winners than Python on the
+      // same data. Cron `scripts/optimize_supertrend.py` is aligned in parallel.
       if (result.numTrades >= MIN_TRADES) {
-        if (result.sharpe > best.sharpe) {
+        if (result.totalReturn > best.totalReturn) {
           best = { atrPeriod: atrP, multiplier: mult, ...result };
         }
       } else {
@@ -172,7 +199,7 @@ export function optimizeSupertrend(
   }
 
   // If no combo met MIN_TRADES, use fallback
-  if (best.sharpe === -Infinity) return bestFallback;
+  if (best.totalReturn === -Infinity) return bestFallback;
   return best;
 }
 

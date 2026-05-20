@@ -228,19 +228,30 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
             if st_vals[i] > position["stop"]:
                 position["stop"] = st_vals[i]
 
-            # Only exit on stop breach when ST direction is actually bearish.
-            # Prevents false exits from intraday wicks that recover above ST by close.
-            stop_hit    = (lows_a[i] <= position["stop"]) and (st_dirs[i] == -1)
-            signal_exit = sig == "SELL"
-
-            if stop_hit or signal_exit:
-                raw_exit = min(position["stop"], opens_a[i]) if stop_hit else opens_a[i]
-                net_exit = raw_exit * (1 - SLIPPAGE) * (1 - COMMISSION)
-
-                pnl    = (net_exit - position["entry"]) * position["shares"]
-                equity += pnl
+            # AUDIT FIX H3 (2026-05-20): deferred stop exit. ST direction flip is
+            # close-derived; cannot be acted on at the same bar's open. Mark as
+            # pending and execute at the NEXT bar's open. Signal exit (prev bar's
+            # SELL) is already deferred by convention. Mirrors Python backtest.py
+            # and TS quickSTBacktest. Without this the cron's monthly cache
+            # selected different winners than the production engine.
+            if position.get("pending_st_exit"):
+                net_exit = opens_a[i] * (1 - SLIPPAGE) * (1 - COMMISSION)
+                pnl      = (net_exit - position["entry"]) * position["shares"]
+                equity  += pnl
                 trades.append((net_exit - position["entry"]) / position["entry"])
                 position = None
+            else:
+                stop_hit    = (lows_a[i] <= position["stop"]) and (st_dirs[i] == -1)
+                signal_exit = sig == "SELL"
+                if stop_hit:
+                    # Defer to next bar — can't act on close-derived direction at today's open
+                    position["pending_st_exit"] = True
+                elif signal_exit:
+                    net_exit = opens_a[i] * (1 - SLIPPAGE) * (1 - COMMISSION)
+                    pnl      = (net_exit - position["entry"]) * position["shares"]
+                    equity  += pnl
+                    trades.append((net_exit - position["entry"]) / position["entry"])
+                    position = None
 
         equity_curve.append(equity)
 
@@ -266,7 +277,12 @@ def _grid_search(df: pd.DataFrame) -> dict:
         for mult in MULTIPLIERS:
             try:
                 r = _run_st_backtest(df, atr_p, mult)
-                score = r["sharpe"] if r["num_trades"] >= 2 else r["total_return"]
+                # AUDIT METRIC ALIGNMENT (2026-05-20): score by total_return to
+                # match Python local analyzer.py (which passes metric='total_return'
+                # to SuperTrendOptimizer). Web supertrend_optimizer.ts is aligned
+                # in parallel. Sharpe stays in the result for the efficiency-ratio
+                # quality check, but winner selection is total_return-based.
+                score = r["total_return"]
                 if score > best_score:
                     best_score = score
                     best = {
