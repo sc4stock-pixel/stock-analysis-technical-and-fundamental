@@ -497,7 +497,9 @@ export function runSupertrendBacktest(
         position.atr_stop_price = cur.supertrend;
       }
 
-      const stStopHit  = cur.low <= (position.atr_stop_price as number);
+      // Only exit on stop breach when ST direction has actually flipped bearish.
+      // Prevents false exits from intraday wicks that recover above the ST line by close.
+      const stStopHit  = cur.low <= (position.atr_stop_price as number) && cur.supertrendDir === -1;
       const stSellSignal = prev.supertrendSignal === "SELL";
 
       if (stStopHit || stSellSignal) {
