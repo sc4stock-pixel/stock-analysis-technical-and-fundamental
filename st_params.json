@@ -1,119 +1,119 @@
 {
-  "last_optimized": "2026-05-17",
+  "last_optimized": "2026-05-20",
   "next_optimization": "2026-06-07",
-  "optimization_count": 5,
+  "optimization_count": 6,
   "stocks": {
-    "1211.HK": {
-      "atr_period": 14,
+    "9988.HK": {
+      "atr_period": 12,
       "multiplier": 2.5,
-      "total_return": 8.23,
-      "sharpe": 0.27,
-      "num_trades": 10
+      "total_return": 140.37,
+      "sharpe": 1.07,
+      "num_trades": 5
     },
     "0700.HK": {
       "atr_period": 14,
       "multiplier": 3.25,
-      "total_return": 44.24,
-      "sharpe": 1.12,
+      "total_return": 47.94,
+      "sharpe": 1.1,
       "num_trades": 3
     },
-    "9988.HK": {
-      "atr_period": 14,
-      "multiplier": 2.75,
-      "total_return": 143.45,
-      "sharpe": 1.07,
-      "num_trades": 5
-    },
-    "1810.HK": {
+    "1211.HK": {
       "atr_period": 14,
       "multiplier": 2.5,
-      "total_return": 119.21,
+      "total_return": 27.09,
+      "sharpe": 0.56,
+      "num_trades": 8
+    },
+    "1810.HK": {
+      "atr_period": 10,
+      "multiplier": 2.5,
+      "total_return": 123.72,
       "sharpe": 1.21,
       "num_trades": 6
-    },
-    "0175.HK": {
-      "atr_period": 14,
-      "multiplier": 3.5,
-      "total_return": 61.89,
-      "sharpe": 0.92,
-      "num_trades": 5
     },
     "3033.HK": {
       "atr_period": 14,
       "multiplier": 3.25,
-      "total_return": 67.24,
-      "sharpe": 0.91,
+      "total_return": 70.04,
+      "sharpe": 0.93,
       "num_trades": 5
+    },
+    "0175.HK": {
+      "atr_period": 14,
+      "multiplier": 3.5,
+      "total_return": 109.81,
+      "sharpe": 0.89,
+      "num_trades": 4
+    },
+    "AAPL": {
+      "atr_period": 14,
+      "multiplier": 2.5,
+      "total_return": 12.52,
+      "sharpe": 0.78,
+      "num_trades": 9
+    },
+    "GOOGL": {
+      "atr_period": 14,
+      "multiplier": 2.5,
+      "total_return": 82.9,
+      "sharpe": 1.19,
+      "num_trades": 6
     },
     "MSFT": {
       "atr_period": 14,
       "multiplier": 2.5,
-      "total_return": 12.18,
-      "sharpe": 0.34,
-      "num_trades": 8
-    },
-    "AAPL": {
-      "atr_period": 14,
-      "multiplier": 3.5,
-      "total_return": 16.84,
-      "sharpe": 0.53,
-      "num_trades": 6
-    },
-    "GOOGL": {
-      "atr_period": 10,
-      "multiplier": 2.5,
-      "total_return": 66.08,
-      "sharpe": 1.05,
+      "total_return": 13.06,
+      "sharpe": 0.35,
       "num_trades": 7
     },
     "META": {
-      "atr_period": 14,
-      "multiplier": 3.5,
-      "total_return": 26.47,
-      "sharpe": 0.66,
-      "num_trades": 7
+      "atr_period": 10,
+      "multiplier": 3.25,
+      "total_return": 38.23,
+      "sharpe": 0.91,
+      "num_trades": 6
     },
     "AMD": {
       "atr_period": 10,
       "multiplier": 3.0,
-      "total_return": 72.8,
-      "sharpe": 0.77,
+      "total_return": 68.51,
+      "sharpe": 0.75,
       "num_trades": 5
     },
     "NVDA": {
-      "atr_period": 12,
-      "multiplier": 2.75,
-      "total_return": 22.95,
-      "sharpe": 0.43,
-      "num_trades": 9
-    },
-    "TSM": {
-      "atr_period": 14,
-      "multiplier": 3.5,
-      "total_return": 63.5,
-      "sharpe": 1.14,
-      "num_trades": 6
-    },
-    "QQQ": {
-      "atr_period": 14,
-      "multiplier": 2.75,
-      "total_return": 16.69,
-      "sharpe": 0.64,
-      "num_trades": 8
+      "atr_period": 10,
+      "multiplier": 3.0,
+      "total_return": 25.33,
+      "sharpe": 0.46,
+      "num_trades": 7
     },
     "SPY": {
       "atr_period": 14,
       "multiplier": 2.5,
-      "total_return": 16.05,
-      "sharpe": 0.88,
+      "total_return": 16.95,
+      "sharpe": 0.94,
       "num_trades": 8
+    },
+    "TSM": {
+      "atr_period": 14,
+      "multiplier": 2.75,
+      "total_return": 73.7,
+      "sharpe": 1.14,
+      "num_trades": 6
+    },
+    "QQQ": {
+      "atr_period": 12,
+      "multiplier": 3.0,
+      "total_return": 23.41,
+      "sharpe": 0.84,
+      "num_trades": 7
     },
     "0939.HK": {
       "atr_period": 10,
       "multiplier": 2.75,
-      "total_return": 49.93,
-      "sharpe": 1.14,
-      "num_trades": 8
+      "total_return": 56.9,
+      "sharpe": 1.27,
+      "num_trades": 5
     }
   }
 }
