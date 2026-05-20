@@ -377,7 +377,10 @@ export function runPipeline(
         if (!isNaN(curOptST) && (trailingStop === null || curOptST > trailingStop)) {
           trailingStop = curOptST;
         }
-        const stopHit    = trailingStop !== null && cur.low <= trailingStop;
+        // Mirror the backtest.ts exit gate: only stop out when ST direction has
+        // actually flipped bearish. Prevents intraday wicks from closing the
+        // open-position tracker while the backtest still holds the position.
+        const stopHit    = trailingStop !== null && cur.low <= trailingStop && optStDirArr[i] === -1;
         const sellSignal = optStSigArr[i - 1] === "SELL";
         if (stopHit || sellSignal) {
           openEntryPrice = null;
