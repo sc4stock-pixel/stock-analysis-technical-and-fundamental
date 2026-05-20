@@ -112,11 +112,13 @@ function quickSTBacktest(
     equity.push(curValue);
   }
 
-  if (trades.length < MIN_TRADES) {
-    return { sharpe: -999, totalReturn: 0, numTrades: trades.length };
-  }
-
-  // Compute Sharpe from daily equity curve returns
+  // AUDIT FIX (2026-05-20): always compute real metrics, even when trades < MIN_TRADES.
+  // The previous `return { sharpe: -999, totalReturn: 0, ... }` sentinel leaked through
+  // the OOS WFO evaluation path (causing OOS Sharpe = -999.00 on the dashboard) AND
+  // broke the grid's own fallback comparison (which checks totalReturn for low-trade
+  // combos — always seeing 0 made the fallback pick arbitrary params). The grid loop
+  // below already filters by `numTrades >= MIN_TRADES` for its primary path, so the
+  // sentinel was redundant for the grid AND wrong for the direct-eval OOS path.
   const dailyRets: number[] = [];
   for (let i = 1; i < equity.length; i++) {
     const prev = equity[i - 1];
