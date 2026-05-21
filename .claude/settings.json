@@ -3,7 +3,8 @@
     "allow": [
       "mcp__Gmail__search_threads",
       "mcp__Gmail__get_thread",
-      "mcp__Google-Calendar__list_events"
+      "mcp__Google-Calendar__list_events",
+      "mcp__Google-Calendar__create_event"
     ]
   },
   "hooks": {
