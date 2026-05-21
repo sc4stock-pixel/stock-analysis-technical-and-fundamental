@@ -74,6 +74,9 @@ export interface AppConfig {
     atrPeriod: number;
     multiplier: number;
     filter_mode: "ema_only" | "full";
+    // Set by route.ts when a valid monthly-cached entry is found in st_params.json.
+    // pipeline.ts skips the live optimizer and uses atrPeriod/multiplier directly.
+    useCachedParams?: boolean;
   };
   // V15.1 MacroEngine
   macro: {

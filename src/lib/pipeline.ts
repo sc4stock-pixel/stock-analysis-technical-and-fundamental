@@ -238,14 +238,25 @@ export function runPipeline(
   }));
 
   // ── SuperTrend Parameter Optimization ────────────────────────
-  console.log(`  🔍 Optimizing SuperTrend for ${sym}...`);
-  const optResult = optimizeSupertrend(
-    bars,
-    config.backtest.initialCapital,
-    config.backtest.commissionRate,
-    config.backtest.slippageRate
-  );
-  console.log(`    ✅ Best: ATR=${optResult.atrPeriod}, Mult=${optResult.multiplier} => Return=${optResult.totalReturn.toFixed(1)}%, Sharpe=${optResult.sharpe.toFixed(2)}, Trades=${optResult.numTrades}`);
+  // If route.ts found a valid monthly-cached entry in st_params.json, use it
+  // directly — same params Python uses. No live grid search needed.
+  // Falls back to live optimization if no cache entry exists (new symbol).
+  const stCfg = config.supertrend;
+  let optResult: import("./supertrend_optimizer").STOptResult;
+  if (stCfg.useCachedParams && stCfg.atrPeriod > 0 && stCfg.multiplier > 0) {
+    console.log(`  📋 Using cached ST params for ${sym}: ATR=${stCfg.atrPeriod}, Mult=${stCfg.multiplier} (from monthly st_params.json)`);
+    optResult = { atrPeriod: stCfg.atrPeriod, multiplier: stCfg.multiplier,
+                  sharpe: 0, totalReturn: 0, numTrades: 0 };
+  } else {
+    console.log(`  🔍 No cached params for ${sym} — running live optimizer...`);
+    optResult = optimizeSupertrend(
+      bars,
+      config.backtest.initialCapital,
+      config.backtest.commissionRate,
+      config.backtest.slippageRate
+    );
+    console.log(`    ✅ Best: ATR=${optResult.atrPeriod}, Mult=${optResult.multiplier} => Return=${optResult.totalReturn.toFixed(1)}%, Sharpe=${optResult.sharpe.toFixed(2)}, Trades=${optResult.numTrades}`);
+  }
 
   // AUDIT FIX C2 (2026-05-20): true OOS walk-forward for SuperTrend.
   // optResult above is from a full-window grid (used for live trading params).

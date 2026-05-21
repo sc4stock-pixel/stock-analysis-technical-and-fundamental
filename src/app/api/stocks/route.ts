@@ -9,6 +9,38 @@ export const maxDuration = 30;
 // This ensures config changes always trigger a full recompute
 export const dynamic = "force-dynamic";
 
+// ─── Monthly ST params cache (mirrors Python STParamsCache) ───────────────────
+// st_params.json is written monthly by .github/workflows/optimize-supertrend.yml
+// (same file Python reads). Fetching it here makes the web use the same stable
+// monthly params instead of re-optimizing live on every request.
+const ST_PARAMS_URL =
+  "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/st_params.json";
+
+// Module-level in-memory cache: one fetch shared across all stocks in a request
+// batch. Revalidated hourly by Next.js fetch cache between request batches.
+let _stParamsCache: Record<string, { atr_period: number; multiplier: number }> | null = null;
+let _stParamsFetchedAt = 0;
+const ST_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+async function getSTParams(symbol: string): Promise<{ atrPeriod: number; multiplier: number } | null> {
+  const now = Date.now();
+  if (!_stParamsCache || now - _stParamsFetchedAt > ST_CACHE_TTL_MS) {
+    try {
+      const res = await fetch(ST_PARAMS_URL, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        _stParamsCache = data?.stocks ?? {};
+        _stParamsFetchedAt = now;
+      }
+    } catch {
+      _stParamsCache = _stParamsCache ?? {}; // keep stale on error
+    }
+  }
+  const entry = _stParamsCache?.[symbol];
+  if (!entry || !entry.atr_period || !entry.multiplier) return null;
+  return { atrPeriod: entry.atr_period, multiplier: entry.multiplier };
+}
+
 // ─── Fundamentals via FMP /stable/ endpoints ──────────────────
 // FMP migrated from /api/v3/ (legacy, blocked Aug 2025) to /stable/.
 // Free tier provides: ratios-ttm, price-target-consensus.
@@ -311,7 +343,14 @@ async function analyzeStock(
       };
     }
 
-    const result = runPipeline(data.bars, stock, config, data.currentPrice, data.changePct);
+    // Inject monthly-cached ST params so the pipeline skips live optimization.
+    // Mirrors Python's STParamsCache: same source file, same monthly cadence.
+    const cachedST = await getSTParams(stock.symbol);
+    const configWithST: AppConfig = cachedST
+      ? { ...config, supertrend: { ...config.supertrend, ...cachedST, useCachedParams: true } }
+      : config;
+
+    const result = runPipeline(data.bars, stock, configWithST, data.currentPrice, data.changePct);
 
     // Patch code_33 + eps_quarters into sepa_metadata.
     // buildEpsQuarters reads the same in-memory AV cache — no extra network call.
