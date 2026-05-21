@@ -152,6 +152,9 @@ function buildMetrics(
   const last = bars[bars.length - 1];
   const week52High = bars.length >= 252 ? Math.max(...bars.slice(-252).map(b => b.high)) : Math.max(...bars.map(b => b.high));
   const week52Low  = bars.length >= 252 ? Math.min(...bars.slice(-252).map(b => b.low))  : Math.min(...bars.map(b => b.low));
+  // M5 AUDIT FIX: slice(-21, -1) gives prior 20 bars excluding today — correct.
+  // This was already excluding the current bar, matching the intent. Kept as-is;
+  // Python signals.py now also uses .shift(1) so both codebases agree.
   const volMean20  = mean(bars.slice(-21, -1).map(b => b.volume));
 
   const exitReasons: Record<string, number> = {};
@@ -272,6 +275,9 @@ export function runBacktest(
       } else {
         shares = Math.floor((runningEquity * 0.998) / entryPrice);
       }
+      // M8 AUDIT FIX: skip entry when equity < entry price (would open 0-share
+      // phantom trade corrupting trade count, win rate, and expectancy).
+      if (shares <= 0) continue;
 
       const entryCostPerShare = entryPrice * (1 + commission);
 
@@ -484,6 +490,8 @@ export function runSupertrendBacktest(
         } else {
           shares = Math.floor((runningEquity * 0.998) / entryPrice);
         }
+        // M8 AUDIT FIX: same 0-share guard as Score engine above.
+        if (shares <= 0) continue;
         // Initial stop = prev bar's ST line
         const stStop = (!isNaN(prev.supertrend) && prev.supertrend > 0) ? prev.supertrend : entryPrice - 2 * entryAtr;
         position = {

@@ -563,14 +563,16 @@ function runWalkForward(bars: OHLCVBar[], symbol: string, config: AppConfig, exc
   const testBars  = bars.slice(splitIdx);
   if (trainBars.length < 50 || testBars.length < 20) return null;
 
-  let bestParams = { entryThreshold: 5.5, maxHoldingDays: 8 };
+  // M4 AUDIT FIX: removed inner maxHoldingDays loop (was 4 entries × 4 maxDays = 16
+  // combos). maxHoldingDays has no behavioural effect in runBacktest — the engine
+  // uses REGIME_MAX_HOLDING_DAYS lookup tables and ignores the config value. The
+  // extra 4× compute was wasted. Matches Python's 4-combo grid (entryThreshold only).
+  let bestParams = { entryThreshold: 5.5 };
   let bestSharpe = -999;
 
   for (const entry of [5.0, 5.5, 6.0, 6.5]) {
-    for (const maxDays of [8, 10, 12, 15]) {
-      const r = runBacktest([...trainBars], symbol, { ...config, signal: { ...config.signal, entryThreshold: entry, maxHoldingDays: maxDays } }, exchange);
-      if (r.sharpe > bestSharpe) { bestSharpe = r.sharpe; bestParams = { entryThreshold: entry, maxHoldingDays: maxDays }; }
-    }
+    const r = runBacktest([...trainBars], symbol, { ...config, signal: { ...config.signal, entryThreshold: entry } }, exchange);
+    if (r.sharpe > bestSharpe) { bestSharpe = r.sharpe; bestParams = { entryThreshold: entry }; }
   }
 
   const testResult = runBacktest([...testBars], symbol, { ...config, signal: { ...config.signal, ...bestParams } }, exchange);
