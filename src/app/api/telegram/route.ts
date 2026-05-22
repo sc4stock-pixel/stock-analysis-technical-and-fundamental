@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendTelegramMessage, buildTelegramMessage } from "@/lib/telegram";
-import { StockAnalysisResult } from "@/types";
 
 export const dynamic = "force-dynamic";
 
@@ -25,8 +24,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body                           = await req.json();
-    const results: StockAnalysisResult[] = body.results ?? [];
+    const body    = await req.json();
+    const results = body.results ?? [];
     if (results.length === 0) {
       return NextResponse.json({ ok: false, error: "no results" }, { status: 400 });
     }

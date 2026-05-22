@@ -240,10 +240,36 @@ export default function Dashboard() {
     setTgSending(true);
     setTgMsg(null);
     try {
+      // Strip chart_bars (too large for API body limit) and precompute flip info
+      // so buildTelegramMessage on the server can still include the ST flip section.
+      const payload = finalResults.map(r => {
+        const { chart_bars, ...slim } = r;
+        if (chart_bars && chart_bars.length >= 2) {
+          const atr = r.st_opt_params?.atrPeriod ?? 10;
+          const mul = r.st_opt_params?.multiplier ?? 3.0;
+          const [, dir] = supertrend(
+            chart_bars.map(b => b.high),
+            chart_bars.map(b => b.low),
+            chart_bars.map(b => b.close),
+            atr, mul,
+          );
+          let flipType: "BULLISH" | "BEARISH" | null = null;
+          let barsSince = 999;
+          for (let i = dir.length - 1; i >= 1; i--) {
+            if (dir[i] !== dir[i - 1]) {
+              barsSince = dir.length - 1 - i;
+              flipType = dir[i] === 1 ? "BULLISH" : "BEARISH";
+              break;
+            }
+          }
+          return { ...slim, _flip: { flipType, barsSince } };
+        }
+        return slim;
+      });
       const res = await fetch("/api/telegram", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ results: finalResults }),
+        body:    JSON.stringify({ results: payload }),
       });
       const data = await res.json();
       if (res.status === 503) {

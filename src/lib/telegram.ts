@@ -37,8 +37,13 @@ function fmtRegime(regime: string): string {
   return regime.replace(/_/g, " ");
 }
 
-// Returns flipType and barsSince for a stock based on its cached chart data.
-function detectFlip(r: StockAnalysisResult): { flipType: "BULLISH" | "BEARISH" | null; barsSince: number } {
+type ResultWithFlip = StockAnalysisResult & {
+  _flip?: { flipType: "BULLISH" | "BEARISH" | null; barsSince: number };
+};
+
+// Returns flipType and barsSince — uses precomputed _flip if chart_bars was stripped.
+function detectFlip(r: ResultWithFlip): { flipType: "BULLISH" | "BEARISH" | null; barsSince: number } {
+  if (r._flip) return r._flip;
   const bars = r.chart_bars;
   if (!bars || bars.length < 2) return { flipType: null, barsSince: 999 };
   const atr = r.st_opt_params?.atrPeriod ?? 10;
@@ -54,7 +59,7 @@ function detectFlip(r: StockAnalysisResult): { flipType: "BULLISH" | "BEARISH" |
   return { flipType: null, barsSince: 999 };
 }
 
-export function buildTelegramMessage(results: StockAnalysisResult[]): string {
+export function buildTelegramMessage(results: ResultWithFlip[]): string {
   const valid = results.filter(r => r.signal !== "ERROR" && !r.error);
   if (valid.length === 0) return "📊 TA Report — no valid results.";
 
