@@ -305,19 +305,22 @@ export default function Dashboard() {
 
     fetchTimesfm();
 
-    // Auto-send when there are BUY/SELL signals OR a same-day ST flip
+    // Auto-send when there are BUY/SELL signals OR an ST flip within the last 2 bars
+    // (covers same-day flips AND yesterday's close, since analysis often runs pre-market)
     const hasSignals = finalResults.some(
       r => r.signal === "BUY" || r.signal === "SELL" || r.signal === "STRONG_SELL"
     );
-    const hasTodayFlip = finalResults.some(r => {
+    const hasRecentFlip = finalResults.some(r => {
       const bars = r.chart_bars;
-      if (!bars || bars.length < 2) return false;
+      if (!bars || bars.length < 3) return false;
       const atr = r.st_opt_params?.atrPeriod ?? 10;
       const mul = r.st_opt_params?.multiplier ?? 3.0;
       const [, dir] = supertrend(bars.map(b => b.high), bars.map(b => b.low), bars.map(b => b.close), atr, mul);
-      return dir.length >= 2 && dir[dir.length - 1] !== dir[dir.length - 2];
+      if (dir.length < 3) return false;
+      return dir[dir.length - 1] !== dir[dir.length - 2] ||   // flipped today
+             dir[dir.length - 2] !== dir[dir.length - 3];      // flipped yesterday
     });
-    if (hasSignals || hasTodayFlip) sendTelegramNotification(finalResults);
+    if (hasSignals || hasRecentFlip) sendTelegramNotification(finalResults);
 
     setLastUpdated(new Date().toLocaleTimeString());
     setProgressSymbol("");
