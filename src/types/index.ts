@@ -206,7 +206,7 @@ export interface MonteCarloResult {
 }
 
 export interface WalkForwardResult {
-  best_params: { entryThreshold: number; maxHoldingDays: number };
+  best_params: { entryThreshold: number };
   train_sharpe: number;
   test_sharpe: number;
   efficiency_ratio: number;
