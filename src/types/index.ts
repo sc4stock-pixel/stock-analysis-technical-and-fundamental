@@ -279,9 +279,22 @@ export interface EpsQuarter {
   yoy:     number | null; // YoY growth as decimal (0.22 = +22%); null if year-ago unavailable
 }
 
+export interface TrendTemplateCriteria {
+  c1_price_above_sma150:    boolean;  // Minervini #1a: Close > SMA150
+  c2_price_above_sma200:    boolean;  // Minervini #1b: Close > SMA200
+  c3_sma150_above_sma200:   boolean;  // Minervini #2:  SMA150 > SMA200
+  c4_sma200_trending_up:    boolean;  // Minervini #3:  SMA200[now] > SMA200[20 bars ago]
+  c5_price_above_sma50:     boolean;  // Minervini #5:  Close > SMA50
+  c6_above_25pct_of_low52:  boolean;  // Minervini #6:  Close >= 1.25 × 52wk low
+  c7_within_25pct_of_high52: boolean; // Minervini #7:  Close >= 0.75 × 52wk high
+  criteria_met: number;               // count of true criteria (0–7)
+  passes: boolean;                    // criteria_met >= 5
+}
+
 export interface SepaMetadata {
   sepa_score: number;              // 0–3: how many SEPA conditions are true
   trend_template: boolean;         // Close > SMA50 > SMA200, Close > SMA200
+  trend_template_criteria?: TrendTemplateCriteria;
   code_33: boolean | null;         // true/false = evaluated; null = ETF / cache miss
   vcp_detected: boolean;           // ZigZag double-filter: ATR_5/ATR_50 < 0.75 + 3-wave contraction
   current_contraction_pct: number; // Depth of current (tightest) ZigZag wave as % of peak
