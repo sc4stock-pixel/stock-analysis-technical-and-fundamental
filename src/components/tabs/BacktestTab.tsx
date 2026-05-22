@@ -343,8 +343,7 @@ export default function BacktestTab({ result }: Props) {
       {wf && (
         <div>
           <div className="text-[#4a6080] text-xs font-bold mb-1">WALK-FORWARD</div>
-          <Row label="Best Entry"  value={wf.best_params?.entryThreshold} />
-          <Row label="Best Max Hold" value={`${wf.best_params?.maxHoldingDays}d`} />
+          <Row label="Best Entry" value={wf.best_params?.entryThreshold} />
           <Row label="Train Sharpe" value={wf.train_sharpe} />
           <Row label="Test Sharpe"  value={wf.test_sharpe} color={(wf.test_sharpe ?? 0) > 0 ? "text-[#00ff88]" : "text-[#ff4757]"} />
           <Row label="Efficiency"   value={`${wf.efficiency_ratio} (${wf.efficiency_quality})`}
