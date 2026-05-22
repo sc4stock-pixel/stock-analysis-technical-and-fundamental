@@ -1,11 +1,28 @@
-import { StockAnalysisResult } from "@/types";
+import { StockAnalysisResult, SepaMetadata } from "@/types";
 import { supertrend } from "@/lib/indicators";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
-export async function sendTelegramMessage(text: string): Promise<{ ok: boolean; error?: string }> {
+/** Escapes HTML special chars in dynamic string content for HTML parse_mode messages. */
+export function htmlEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Resolves the Telegram chat_id for a given logical channel.
+ *  Falls back to TELEGRAM_CHAT_ID if the segmented var is not set (backwards compat). */
+function resolveChatId(channel: "alerts" | "reports"): string {
+  if (channel === "reports") {
+    return process.env.TELEGRAM_CHAT_ID_REPORTS ?? process.env.TELEGRAM_CHAT_ID ?? "";
+  }
+  return process.env.TELEGRAM_CHAT_ID_ALERTS ?? process.env.TELEGRAM_CHAT_ID ?? "";
+}
+
+export async function sendTelegramMessage(
+  text: string,
+  channel: "alerts" | "reports" = "alerts",
+): Promise<{ ok: boolean; error?: string }> {
   const token  = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const chatId = resolveChatId(channel);
   if (!token || !chatId) return { ok: false, error: "env vars not set" };
 
   try {
@@ -79,7 +96,7 @@ export function buildTelegramMessage(results: ResultWithFlip[]): string {
     .filter(x => x.flipType !== null && x.barsSince <= 1);
 
   const fmtRow = (r: StockAnalysisResult) =>
-    `  • <b>${r.symbol}</b>  ${r.score.toFixed(1)}/10 | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)} | ${fmtRegime(r.regime)}`;
+    `  • <b>${htmlEscape(r.symbol)}</b>  ${r.score.toFixed(1)}/10 | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)} | ${htmlEscape(fmtRegime(r.regime))}`;
 
   // Exit signals: bearish flip within 2 bars — strategy says close any long
   const exitSignals = todayFlips.filter(x => x.flipType === "BEARISH");
@@ -92,7 +109,7 @@ export function buildTelegramMessage(results: ResultWithFlip[]): string {
     lines.push(`\n🚨 <b>EXIT SIGNAL${exitSignals.length > 1 ? "S" : ""} (${exitSignals.length})</b>`);
     exitSignals.forEach(({ r, barsSince }) => {
       const when = barsSince === 0 ? "TODAY" : "yesterday";
-      lines.push(`  • <b>${r.symbol}</b>: ST → BEARISH (${when}) — close long if open | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)}`);
+      lines.push(`  • <b>${htmlEscape(r.symbol)}</b>: ST → BEARISH (${when}) — close long if open | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)}`);
     });
   }
 
@@ -101,7 +118,34 @@ export function buildTelegramMessage(results: ResultWithFlip[]): string {
     otherFlips.forEach(({ r, flipType, barsSince }) => {
       const when = barsSince === 0 ? "TODAY" : "yesterday";
       const icon = flipType === "BULLISH" ? "📈" : "📉";
-      lines.push(`  • <b>${r.symbol}</b>: ${flipType} ${icon} (${when}) | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)}`);
+      lines.push(`  • <b>${htmlEscape(r.symbol)}</b>: ${flipType} ${icon} (${when}) | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)}`);
+    });
+  }
+
+  // Trend Template warnings: ST bullish but failing Minervini criteria
+  type ResultWithSepa = ResultWithFlip & { sepa_metadata?: SepaMetadata };
+  const ttWarnings = (valid as ResultWithSepa[]).filter(r => {
+    if (r.st_direction !== 1) return false;                          // only ST bullish
+    const tt = r.sepa_metadata?.trend_template_criteria;
+    if (!tt) return r.sepa_metadata?.trend_template === false;       // fallback: old boolean
+    return !tt.passes;                                               // new: fails < 5/7
+  });
+
+  if (ttWarnings.length > 0) {
+    lines.push(`\n⚠️ <b>TREND TEMPLATE WARNINGS</b> (ST ↑ but structure weak)`);
+    ttWarnings.forEach(r => {
+      const tt = (r as ResultWithSepa).sepa_metadata?.trend_template_criteria;
+      const score    = tt ? `${tt.criteria_met}/7` : "fail";
+      const failList = tt ? [
+        !tt.c1_price_above_sma150    ? "SMA150" : "",
+        !tt.c2_price_above_sma200    ? "SMA200" : "",
+        !tt.c3_sma150_above_sma200   ? "SMA150&gt;200" : "",
+        !tt.c4_sma200_trending_up    ? "SMA200↓" : "",
+        !tt.c5_price_above_sma50     ? "SMA50" : "",
+        !tt.c6_above_25pct_of_low52  ? "52wkLow" : "",
+        !tt.c7_within_25pct_of_high52 ? "52wkHigh" : "",
+      ].filter(Boolean).join(", ") : "criteria not met";
+      lines.push(`  • <b>${htmlEscape(r.symbol)}</b>: TT ${score} — fails: ${failList} | ${fmtPrice(r.current_price, r.exchange)}`);
     });
   }
 
@@ -116,11 +160,11 @@ export function buildTelegramMessage(results: ResultWithFlip[]): string {
   }
 
   if (holds.length > 0) {
-    lines.push(`\n⚪ <b>HOLD (${holds.length})</b>: ${holds.map(r => r.symbol).join(", ")}`);
+    lines.push(`\n⚪ <b>HOLD (${holds.length})</b>: ${holds.map(r => htmlEscape(r.symbol)).join(", ")}`);
   }
 
-  const stBullish = valid.filter(r => r.st_direction === 1).map(r => r.symbol);
-  const stBearish = valid.filter(r => r.st_direction === -1).map(r => r.symbol);
+  const stBullish = valid.filter(r => r.st_direction === 1).map(r => htmlEscape(r.symbol));
+  const stBearish = valid.filter(r => r.st_direction === -1).map(r => htmlEscape(r.symbol));
   if (stBullish.length > 0) lines.push(`\n📈 <b>ST ↑ Bullish</b>: ${stBullish.join(", ")}`);
   if (stBearish.length > 0) lines.push(`📉 <b>ST ↓ Bearish</b>: ${stBearish.join(", ")}`);
 

@@ -5,18 +5,18 @@ export const dynamic = "force-dynamic";
 
 // GET /api/telegram — sends a test ping to verify bot + chat ID are working
 export async function GET() {
-  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
+  if (!process.env.TELEGRAM_BOT_TOKEN || (!process.env.TELEGRAM_CHAT_ID_ALERTS && !process.env.TELEGRAM_CHAT_ID)) {
     return NextResponse.json(
       { ok: false, error: "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured" },
       { status: 503 }
     );
   }
-  const result = await sendTelegramMessage("✅ <b>TA Dashboard connected</b>\nTelegram notifications are working.");
+  const result = await sendTelegramMessage("✅ <b>TA Dashboard connected</b>\nTelegram notifications are working.", "alerts");
   return NextResponse.json(result);
 }
 
 export async function POST(req: NextRequest) {
-  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
+  if (!process.env.TELEGRAM_BOT_TOKEN || (!process.env.TELEGRAM_CHAT_ID_ALERTS && !process.env.TELEGRAM_CHAT_ID)) {
     return NextResponse.json(
       { ok: false, error: "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured" },
       { status: 503 }
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     }
 
     const message = buildTelegramMessage(results);
-    const result  = await sendTelegramMessage(message);
+    const result  = await sendTelegramMessage(message, "alerts");
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
