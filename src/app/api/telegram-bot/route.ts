@@ -29,10 +29,11 @@ async function handleCheck(token: string, chatId: number, ticker: string): Promi
     if (!paramsRes.ok) throw new Error(`st_params.json fetch failed: ${paramsRes.status}`);
     if (!portfolioRes.ok) throw new Error(`portfolio.json fetch failed: ${portfolioRes.status}`);
 
-    const params:    Record<string, { atrPeriod: number; multiplier: number; sharpe: number; numTrades: number; last_optimized?: string }> = await paramsRes.json();
+    const paramsJson: { stocks?: Record<string, { atr_period: number; multiplier: number; sharpe: number; num_trades: number; last_optimized?: string }> } & Record<string, unknown> = await paramsRes.json();
     const portfolio: { portfolio: { symbol: string; name: string; exchange: string }[] } = await portfolioRes.json();
 
-    const entry = params[sym];
+    const stocksMap = paramsJson.stocks ?? (paramsJson as Record<string, unknown>);
+    const entry = stocksMap[sym] as { atr_period: number; multiplier: number; sharpe: number; num_trades: number; last_optimized?: string } | undefined;
     const stock = portfolio.portfolio.find(s => s.symbol.toUpperCase() === sym);
     const name  = stock?.name ?? sym;
     const exch  = stock?.exchange ?? "—";
@@ -50,10 +51,10 @@ async function handleCheck(token: string, chatId: number, ticker: string): Promi
       `📊 <b>${sym}</b> — ${name} (${exch})`,
       ``,
       `<b>ST Params (cached)</b>`,
-      `  ATR Period : ${entry.atrPeriod}`,
+      `  ATR Period : ${entry.atr_period}`,
       `  Multiplier : ${entry.multiplier}`,
       `  Sharpe     : ${entry.sharpe.toFixed(2)}`,
-      `  Trades     : ${entry.numTrades}`,
+      `  Trades     : ${entry.num_trades}`,
       `  Optimized  : ${optimizedOn}`,
       ``,
       `<i>Shallow check — params only. Run analysis on dashboard for live ST direction &amp; score.</i>`,
