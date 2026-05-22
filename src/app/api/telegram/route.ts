@@ -12,8 +12,8 @@ export async function GET() {
       { status: 503 }
     );
   }
-  const ok = await sendTelegramMessage("✅ <b>TA Dashboard connected</b>\nTelegram notifications are working.");
-  return NextResponse.json({ ok });
+  const result = await sendTelegramMessage("✅ <b>TA Dashboard connected</b>\nTelegram notifications are working.");
+  return NextResponse.json(result);
 }
 
 export async function POST(req: NextRequest) {
@@ -32,9 +32,9 @@ export async function POST(req: NextRequest) {
     }
 
     const message = buildTelegramMessage(results);
-    const ok      = await sendTelegramMessage(message);
-    return NextResponse.json({ ok });
+    const result  = await sendTelegramMessage(message);
+    return NextResponse.json(result);
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }
 }

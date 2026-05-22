@@ -10,6 +10,7 @@ import dynamic from "next/dynamic";
 import AlertsPanel from "@/components/AlertsPanel";
 import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 import { fetchTimesfmForecasts } from "@/lib/timesfm";
+import { supertrend } from "@/lib/indicators";
 import type { TimesfmForecasts } from "@/types";
 
 const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
@@ -254,7 +255,7 @@ export default function Dashboard() {
       setTgMsg(`Telegram error: ${String(e)}`);
     } finally {
       setTgSending(false);
-      setTimeout(() => setTgMsg(null), 6000);
+      // Keep errors visible until dismissed; auto-dismiss success after 6s
     }
   }
 
@@ -304,9 +305,19 @@ export default function Dashboard() {
 
     fetchTimesfm();
 
-    // Auto-send Telegram when there are actionable BUY or SELL signals
-    const hasSignals = finalResults.some(r => r.signal === "BUY" || r.signal === "SELL" || r.signal === "STRONG_SELL");
-    if (hasSignals) sendTelegramNotification(finalResults);
+    // Auto-send when there are BUY/SELL signals OR a same-day ST flip
+    const hasSignals = finalResults.some(
+      r => r.signal === "BUY" || r.signal === "SELL" || r.signal === "STRONG_SELL"
+    );
+    const hasTodayFlip = finalResults.some(r => {
+      const bars = r.chart_bars;
+      if (!bars || bars.length < 2) return false;
+      const atr = r.st_opt_params?.atrPeriod ?? 10;
+      const mul = r.st_opt_params?.multiplier ?? 3.0;
+      const [, dir] = supertrend(bars.map(b => b.high), bars.map(b => b.low), bars.map(b => b.close), atr, mul);
+      return dir.length >= 2 && dir[dir.length - 1] !== dir[dir.length - 2];
+    });
+    if (hasSignals || hasTodayFlip) sendTelegramNotification(finalResults);
 
     setLastUpdated(new Date().toLocaleTimeString());
     setProgressSymbol("");
@@ -392,8 +403,9 @@ export default function Dashboard() {
         </div>
       )}
       {tgMsg && (
-        <div className={`px-4 py-1.5 text-xs border-b ${tgMsg.startsWith("Telegram error") || tgMsg.startsWith("Telegram not") ? "border-red-900/40 text-red-400 bg-red-900/10" : "border-[#1e2d4a] text-[#a78bfa] bg-[#0a0e1a]"}`}>
-          {tgMsg}
+        <div className={`px-4 py-1.5 text-xs border-b flex items-center justify-between ${tgMsg.startsWith("Telegram error") || tgMsg.startsWith("Telegram not") ? "border-red-900/40 text-red-400 bg-red-900/10" : "border-[#1e2d4a] text-[#a78bfa] bg-[#0a0e1a]"}`}>
+          <span>{tgMsg}</span>
+          <button onClick={() => setTgMsg(null)} className="ml-4 opacity-60 hover:opacity-100 text-[#6b85a0]">✕</button>
         </div>
       )}
 
