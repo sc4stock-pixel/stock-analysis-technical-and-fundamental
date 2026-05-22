@@ -81,12 +81,24 @@ export function buildTelegramMessage(results: ResultWithFlip[]): string {
   const fmtRow = (r: StockAnalysisResult) =>
     `  • <b>${r.symbol}</b>  ${r.score.toFixed(1)}/10 | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)} | ${fmtRegime(r.regime)}`;
 
+  // Exit signals: bearish flip within 2 bars — strategy says close any long
+  const exitSignals = todayFlips.filter(x => x.flipType === "BEARISH");
+  // Non-exit flips (bullish flips)
+  const otherFlips  = todayFlips.filter(x => x.flipType !== "BEARISH");
+
   const lines: string[] = [`📊 <b>TA Report — ${now}</b>`];
 
-  // ST flip alerts are highest priority — show first
-  if (todayFlips.length > 0) {
-    lines.push(`\n⚡ <b>ST FLIPS TODAY</b>`);
-    todayFlips.forEach(({ r, flipType, barsSince }) => {
+  if (exitSignals.length > 0) {
+    lines.push(`\n🚨 <b>EXIT SIGNAL${exitSignals.length > 1 ? "S" : ""} (${exitSignals.length})</b>`);
+    exitSignals.forEach(({ r, barsSince }) => {
+      const when = barsSince === 0 ? "TODAY" : "yesterday";
+      lines.push(`  • <b>${r.symbol}</b>: ST → BEARISH (${when}) — close long if open | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)}`);
+    });
+  }
+
+  if (otherFlips.length > 0) {
+    lines.push(`\n⚡ <b>ST FLIPS</b>`);
+    otherFlips.forEach(({ r, flipType, barsSince }) => {
       const when = barsSince === 0 ? "TODAY" : "yesterday";
       const icon = flipType === "BULLISH" ? "📈" : "📉";
       lines.push(`  • <b>${r.symbol}</b>: ${flipType} ${icon} (${when}) | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)}`);
