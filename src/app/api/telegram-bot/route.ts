@@ -45,7 +45,8 @@ async function handleCheck(token: string, chatId: number, ticker: string): Promi
       return;
     }
 
-    const optimizedOn = entry.last_optimized ? entry.last_optimized.slice(0, 10) : "unknown";
+    const optimizedOn = entry.last_optimized?.slice(0, 10)
+      ?? (typeof paramsJson.last_optimized === "string" ? paramsJson.last_optimized.slice(0, 10) : "unknown");
 
     const lines = [
       `📊 <b>${sym}</b> — ${name} (${exch})`,
