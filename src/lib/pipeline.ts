@@ -10,7 +10,7 @@
 //   [DEBUG] At flip: Close={c}, SMA_50={s}, Close>SMA_50={bool}
 //   [DEBUG] Last ST trade: entry={e}, exit={x}, reason={r}
 // ============================================================
-import { AppConfig, StockAnalysisResult, KellyResult, WalkForwardResult, OHLCVBar, ChartBar } from "@/types";
+import { AppConfig, StockAnalysisResult, KellyResult, WalkForwardResult, OHLCVBar, ChartBar, TrendTemplateCriteria, EpsQuarter } from "@/types";
 import { rsi, macd, adx, atr, bollingerBands, sma, ema, volumeRatio, supertrend } from "./indicators";
 import { calculateRegimePerBar, detectRegime } from "./regime";
 import { calculateScores, detectRsiDivergence } from "./scoring";
@@ -492,7 +492,7 @@ export function runPipeline(
   const sma200_20barsAgo  = lastIdx >= 20 ? (sma200Arr[lastIdx - 20] ?? 0) : 0;
   const sma200TrendingUp  = lastSMA200 > 0 && sma200_20barsAgo > 0 && lastSMA200 > sma200_20barsAgo;
 
-  const ttCriteria: import("@/types").TrendTemplateCriteria = {
+  const ttCriteria: TrendTemplateCriteria = {
     c1_price_above_sma150:     lastSMA150 > 0 && lastClose > lastSMA150,
     c2_price_above_sma200:     lastSMA200 > 0 && lastClose > lastSMA200,
     c3_sma150_above_sma200:    lastSMA150 > 0 && lastSMA200 > 0 && lastSMA150 > lastSMA200,
@@ -526,7 +526,7 @@ export function runPipeline(
     vcp_detected:             vcpResult.vcp_detected,
     current_contraction_pct:  vcpResult.current_contraction_pct,
     wave_sequence:            vcpResult.wave_sequence,
-    eps_quarters:             [] as import("@/types").EpsQuarter[],
+    eps_quarters:             [] as EpsQuarter[],
   };
   info(sym, `SEPA: TT=${trendTemplate} (${ttCount}/7), VCP=${vcpResult.vcp_detected}${vcpResult.vcp_detected ? ` (${vcpResult.wave_sequence})` : ''}, Score=${sepaMetadata.sepa_score}/3`);
 
