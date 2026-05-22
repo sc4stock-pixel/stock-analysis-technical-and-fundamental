@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 const TELEGRAM_API = "https://api.telegram.org";
 const GITHUB_RAW   = "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main";
@@ -129,11 +130,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const [rawCmd, ...argParts] = text.trim().split(/\s+/);
   const cmd = rawCmd.split("@")[0].toLowerCase();
 
+  // Await handlers — fire-and-forget is cut off by Vercel's serverless execution model
   if (cmd === "/check") {
     const ticker = argParts.join("").toUpperCase();
-    handleCheck(token, chatId, ticker).catch(() => {});   // fire-and-forget after 200
+    await handleCheck(token, chatId, ticker).catch(() => {});
   } else if (cmd === "/portfolio") {
-    handlePortfolio(token, chatId).catch(() => {});
+    await handlePortfolio(token, chatId).catch(() => {});
   }
 
   return NextResponse.json({ ok: true });
