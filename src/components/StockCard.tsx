@@ -174,7 +174,21 @@ export default function StockCard({ result, config, timesfm }: Props) {
               };
               return (
                 <span className="flex items-center gap-0.5 border border-[#1e2d4a] rounded px-1 py-0.5"
-                  title={`SEPA ${s.sepa_score}/3 · TT:${s.trend_template} · 33:${s.code_33} · VCP:${s.vcp_detected}${s.vcp_detected ? ` (${s.current_contraction_pct.toFixed(1)}%)` : ""}`}>
+                  title={(() => {
+                const tt = s.trend_template_criteria;
+                const ttStr = tt
+                  ? `TT:${tt.criteria_met}/7${!tt.passes ? ` (fails: ${[
+                      !tt.c1_price_above_sma150    && "SMA150",
+                      !tt.c2_price_above_sma200    && "SMA200",
+                      !tt.c3_sma150_above_sma200   && "SMA150>200",
+                      !tt.c4_sma200_trending_up    && "SMA200↓",
+                      !tt.c5_price_above_sma50     && "SMA50",
+                      !tt.c6_above_25pct_of_low52  && "52wkLow",
+                      !tt.c7_within_25pct_of_high52 && "52wkHigh",
+                    ].filter(Boolean).join(", ")})` : ""}`
+                  : `TT:${s.trend_template}`;
+                return `SEPA ${s.sepa_score}/3 · ${ttStr} · 33:${s.code_33} · VCP:${s.vcp_detected}${s.vcp_detected ? ` (${s.current_contraction_pct.toFixed(1)}%)` : ""}`;
+              })()}>
                   {pip(s.trend_template, "T")}
                   {pip(s.code_33, "33")}
                   {pip(s.vcp_detected, "VCP")}
