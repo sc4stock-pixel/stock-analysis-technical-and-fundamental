@@ -235,6 +235,7 @@ export default function OverviewTab({ result }: Props) {
           );
         };
         return (
+          <>
           <div className="flex items-center gap-2 px-2 py-1.5 rounded border border-[#1e2d4a] bg-[#0a0e1a] text-[0.6rem] font-mono">
             <span className="text-[#4a6080] font-bold tracking-wider">SEPA</span>
             <span className="flex gap-1">
@@ -259,6 +260,42 @@ export default function OverviewTab({ result }: Props) {
               </span>
             </span>
           </div>
+          {s.trend_template_criteria && (() => {
+            const tt = s.trend_template_criteria;
+            const criteria: Array<{ key: keyof typeof tt; label: string }> = [
+              { key: "c1_price_above_sma150",    label: "P>150" },
+              { key: "c2_price_above_sma200",    label: "P>200" },
+              { key: "c3_sma150_above_sma200",   label: "150>200" },
+              { key: "c4_sma200_trending_up",    label: "200↑" },
+              { key: "c5_price_above_sma50",     label: "P>50" },
+              { key: "c6_above_25pct_of_low52",  label: "52L+25" },
+              { key: "c7_within_25pct_of_high52", label: "52H-25" },
+            ];
+            return (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded border border-[#1e2d4a] bg-[#0a0e1a] mt-1">
+                <span className="text-[#4a6080] font-bold tracking-wider text-[0.6rem] font-mono shrink-0">TT</span>
+                <span className={`text-[0.6rem] font-mono font-bold shrink-0 ${tt.passes ? "text-[#00ff88]" : "text-[#ffa502]"}`}>
+                  {tt.criteria_met}/7
+                </span>
+                <span className="text-[#2a3d5a] text-[0.6rem]">·</span>
+                <span className="flex gap-1 flex-wrap">
+                  {criteria.map(({ key, label }) => {
+                    const pass = tt[key] as boolean;
+                    return (
+                      <span key={key}
+                        className={`text-[0.6rem] font-mono px-1 py-0.5 rounded border
+                          ${pass
+                            ? "text-[#00ff88] border-[#00ff88]/30 bg-[#00ff88]/5"
+                            : "text-[#ff4757] border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
+                        {label}
+                      </span>
+                    );
+                  })}
+                </span>
+              </div>
+            );
+          })()}
+          </>
         );
       })()}
 
