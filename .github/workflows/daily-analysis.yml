@@ -2,16 +2,21 @@ name: Daily Portfolio Analysis & Alerts
 
 on:
   schedule:
-    # 8:55am HKT Mon–Sat  (HKT = UTC+8 → 00:55 UTC)
+    # 8:55am HKT Mon–Sat  (HKT = UTC+8 → 00:55 UTC)  → US close / morning brief
     - cron: '55 0 * * 1-6'
-    # 4:30pm HKT Mon–Fri  (HKT = UTC+8 → 08:30 UTC)
+    # 4:30pm HKT Mon–Fri  (HKT = UTC+8 → 08:30 UTC)  → HK close
     - cron: '30 8 * * 1-5'
-  workflow_dispatch: {}     # manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      market:
+        description: 'Market for EOD report (us or hk)'
+        required: false
+        default: 'hk'
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
 
     steps:
       - name: Trigger analysis and send alerts
@@ -31,13 +36,46 @@ jobs:
           ok=$(echo "$response"      | jq -r '.ok // false')
 
           if [ "$skipped" = "true" ]; then
-            echo "No signals today — Telegram skipped."
-            exit 0
+            echo "No signals today — alerts skipped."
+          elif [ "$ok" = "true" ]; then
+            echo "Alert sent successfully."
+          else
+            echo "Alert failed: $(echo "$response" | jq -r '.error // "unknown"')"
           fi
 
-          if [ "$ok" = "true" ]; then
-            echo "Telegram alert sent successfully."
+      - name: Send EOD market breadth report
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          # Detect which cron slot fired: 00:55 UTC = US morning brief, 08:30 UTC = HK close
+          # workflow_dispatch uses the input value directly
+          SCHEDULE="${{ github.event.schedule }}"
+          DISPATCH_MARKET="${{ github.event.inputs.market }}"
+
+          if [ -n "$DISPATCH_MARKET" ]; then
+            MARKET="$DISPATCH_MARKET"
+          elif [ "$SCHEDULE" = "55 0 * * 1-6" ]; then
+            MARKET="us"
           else
-            echo "Telegram send failed: $(echo "$response" | jq -r '.error // "unknown"')"
+            MARKET="hk"
+          fi
+
+          echo "Sending EOD report for market: $MARKET"
+
+          response=$(curl -sf --max-time 90 \
+            -X POST "https://stock-analysis-technical-and-fundam.vercel.app/api/cron/report?market=${MARKET}" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            -d '{}' \
+            || echo '{"ok":false,"error":"curl failed"}')
+
+          echo "Response: $response"
+
+          ok=$(echo "$response" | jq -r '.ok // false')
+
+          if [ "$ok" = "true" ]; then
+            echo "EOD report sent successfully."
+          else
+            echo "EOD report failed: $(echo "$response" | jq -r '.error // "unknown"')"
             exit 1
           fi
