@@ -106,7 +106,9 @@ export function buildEodReport(
     });
   }
 
-  lines.push(`\n<i>${valid.length} stocks · HKT ${timeStr}</i>`);
+  const errorCount = results.length - valid.length;
+  const errorNote  = errorCount > 0 ? ` · ⚠️ ${errorCount} failed` : "";
+  lines.push(`\n<i>${valid.length} stocks · HKT ${timeStr}${errorNote}</i>`);
 
   return lines.join("\n");
 }
