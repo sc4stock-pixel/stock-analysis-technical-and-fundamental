@@ -62,13 +62,13 @@ function fmtChg(pct: number): string {
 // Priority order for which failing TT criterion to surface (most actionable first).
 // c2 (200SMA) is the institutional distribution check — flag first.
 const TT_FAIL_PRIORITY: Array<{ key: keyof TrendTemplateCriteria; label: string }> = [
-  { key: "c2_price_above_sma200",   label: "Price < 200SMA"   },
-  { key: "c1_price_above_sma150",   label: "Price < 150SMA"   },
-  { key: "c3_sma150_above_sma200",  label: "150SMA < 200SMA"  },
+  { key: "c2_price_above_sma200",   label: "Below 200SMA"     },
+  { key: "c1_price_above_sma150",   label: "Below 150SMA"     },
+  { key: "c3_sma150_above_sma200",  label: "150SMA below 200" },
   { key: "c4_sma200_trending_up",   label: "200SMA ↓"         },
-  { key: "c5_price_above_sma50",    label: "Price < 50SMA"    },
-  { key: "c6_above_25pct_of_low52", label: "<25% off 52wL"    },
-  { key: "c7_within_25pct_of_high52", label: ">25% from 52wH" },
+  { key: "c5_price_above_sma50",    label: "Below 50SMA"      },
+  { key: "c6_above_25pct_of_low52", label: "Below 52wL+25%"   },
+  { key: "c7_within_25pct_of_high52", label: "Off 52wH by 25%+" },
 ];
 
 function fmtTtFailure(tt: TrendTemplateCriteria | undefined): string {
