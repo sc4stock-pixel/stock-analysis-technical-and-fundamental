@@ -311,6 +311,71 @@ def fetch_hk_cashflow(ak, pd, symbol: str, periods: int = 6, is_cumulative_hint:
     return rows[:periods]
 
 
+def altman_z(p: dict, market_cap: float | None = None) -> float | None:
+    """Altman Z = 1.2·A + 1.4·B + 3.3·C + 0.6·D + 1.0·E
+       A = WC/TA, B = RE/TA, C = EBIT/TA, D = MktCap/TotalLiab, E = Sales/TA
+       Returns None if any required input is missing."""
+    ta = p.get("totalAssets")
+    if not ta:
+        return None
+    wc = p.get("workingCapital")
+    re_ = p.get("retainedEarnings")
+    ebit = p.get("ebit") or p.get("operatingIncome")
+    sales = p.get("revenue")
+    tl = p.get("totalLiab")
+    if None in (wc, re_, ebit, sales, tl) or not tl or not market_cap:
+        return None
+    return (
+        1.2 * (wc / ta)
+        + 1.4 * (re_ / ta)
+        + 3.3 * (ebit / ta)
+        + 0.6 * (market_cap / tl)
+        + 1.0 * (sales / ta)
+    )
+
+
+def piotroski_f(curr: dict, prev: dict) -> int | None:
+    """9-point Piotroski F-Score. Requires curr and prev period dicts."""
+    if not curr or not prev:
+        return None
+    score = 0
+    # Profitability (4)
+    if (curr.get("netIncome") or 0) > 0: score += 1
+    if (curr.get("cfo") or 0) > 0: score += 1
+    ta_c, ta_p = curr.get("totalAssets"), prev.get("totalAssets")
+    if ta_c and ta_p:
+        roa_c = (curr.get("netIncome") or 0) / ta_c
+        roa_p = (prev.get("netIncome") or 0) / ta_p
+        if roa_c > roa_p: score += 1
+    if (curr.get("cfo") or 0) > (curr.get("netIncome") or 0): score += 1
+    # Leverage / Liquidity (3 — issuance check skipped, sharesOutstanding unreliable for HK)
+    ltd_c, ltd_p = curr.get("longTermDebt"), prev.get("longTermDebt")
+    if ltd_c is not None and ltd_p is not None and ltd_c < ltd_p: score += 1
+    ca_c, cl_c = curr.get("currentAssets"), curr.get("currentLiab")
+    ca_p, cl_p = prev.get("currentAssets"), prev.get("currentLiab")
+    if ca_c and cl_c and ca_p and cl_p and (ca_c / cl_c) > (ca_p / cl_p): score += 1
+    # Operating Efficiency (2)
+    gp_c, gp_p = curr.get("grossProfit"), prev.get("grossProfit")
+    rev_c, rev_p = curr.get("revenue"), prev.get("revenue")
+    if gp_c and gp_p and rev_c and rev_p and (gp_c / rev_c) > (gp_p / rev_p): score += 1
+    if ta_c and ta_p and rev_c and rev_p and (rev_c / ta_c) > (rev_p / ta_p): score += 1
+    return score
+
+
+def compute_derived(periods: list[dict], market_cap: float | None) -> dict:
+    """Compute 4-period arrays of Z and F scores, newest-first."""
+    z_arr: list[float | None] = []
+    f_arr: list[int | None] = []
+    for i in range(min(4, len(periods))):
+        z_arr.append(altman_z(periods[i], market_cap))
+    step = 4 if len(periods) >= 5 else 1
+    for i in range(min(4, len(periods))):
+        prev_idx = i + step
+        prev = periods[prev_idx] if prev_idx < len(periods) else None
+        f_arr.append(piotroski_f(periods[i], prev))
+    return {"altmanZ": z_arr, "piotroskiF": f_arr}
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--only", help="Restrict to a single symbol (debug)")
@@ -343,6 +408,7 @@ def main():
             print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} periods")
             periods = merge_statements(inc, bal, cf)
             data[sym] = {"frequency": "Q", "periods": periods}
+            data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=None)
     elif us_syms and not AV_KEY:
         print("\nWARNING: AV_KEY not set — skipping US stocks")
 
@@ -365,6 +431,7 @@ def main():
                 print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} freq={freq}")
                 periods_merged = merge_statements(inc, bal, cf)
                 data[sym] = {"frequency": freq, "periods": periods_merged}
+                data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=None)
 
     out = {
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
