@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const message  = buildTelegramMessage(payload as any);
+  const message  = buildTelegramMessage(payload as any, "cron");
   const tgResult = await sendTelegramMessage(message, "alerts");
 
   return NextResponse.json({

@@ -1,5 +1,6 @@
-import { StockAnalysisResult, SepaMetadata } from "@/types";
+import { StockAnalysisResult, SepaMetadata, TrendTemplateCriteria } from "@/types";
 import { supertrend } from "@/lib/indicators";
+import { holidayStatus } from "@/lib/telegram-report";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -76,99 +77,199 @@ function detectFlip(r: ResultWithFlip): { flipType: "BULLISH" | "BEARISH" | null
   return { flipType: null, barsSince: 999 };
 }
 
-export function buildTelegramMessage(results: ResultWithFlip[]): string {
-  const valid = results.filter(r => r.signal !== "ERROR" && !r.error);
+// ---------- Trend Template failure labels (the 7 real Minervini criteria) ----------
+// Display labels use ">" which is HTML-unsafe; entire fails-list string is htmlEscape'd
+// before insertion so Telegram renders `>` as plain text.
+const TT_FAIL_LABELS: Array<{ key: keyof TrendTemplateCriteria; label: string }> = [
+  { key: "c1_price_above_sma150",     label: "Price>150SMA"   },
+  { key: "c2_price_above_sma200",     label: "Price>200SMA"   },
+  { key: "c3_sma150_above_sma200",    label: "150>200"        },
+  { key: "c4_sma200_trending_up",     label: "200SMA↓"        },
+  { key: "c5_price_above_sma50",      label: "Price>50SMA"    },
+  { key: "c6_above_25pct_of_low52",   label: "52wLow+25%"     },
+  { key: "c7_within_25pct_of_high52", label: "52wHigh-25%"    },
+];
+
+function listTtFailures(tt: TrendTemplateCriteria): string {
+  return TT_FAIL_LABELS
+    .filter(({ key }) => tt[key] === false)
+    .map(({ label }) => label)
+    .join(", ");
+}
+
+function flagFor(exchange: string): string {
+  return exchange === "HK" ? "🇭🇰" : "🇺🇸";
+}
+
+type ResultWithSepa = ResultWithFlip & { sepa_metadata?: SepaMetadata };
+
+// ============================================================
+// Main: buildTelegramMessage — execution alerts to ALERTS channel
+// ============================================================
+export function buildTelegramMessage(
+  results: ResultWithFlip[],
+  source: "manual" | "cron" = "manual",
+): string {
+  const valid = (results as ResultWithSepa[]).filter(r => r.signal !== "ERROR" && !r.error);
   if (valid.length === 0) return "📊 TA Report — no valid results.";
 
-  const now = new Date().toLocaleDateString("en-US", {
+  // Header — branded by trigger source
+  const headerLine = source === "cron"
+    ? "📅 <b>Daily Market Brief (Scheduled Scan)</b>"
+    : "⚡ <b>TA Execution Alert (On-Demand Scan)</b>";
+
+  const dateStr = new Date().toLocaleDateString("en-US", {
     weekday: "short", month: "short", day: "numeric", year: "numeric",
     timeZone: "Asia/Hong_Kong",
   });
-
-  const buys    = valid.filter(r => r.signal === "BUY");
-  const sells   = valid.filter(r => r.signal === "SELL" || r.signal === "STRONG_SELL");
-  const holds   = valid.filter(r => r.signal === "HOLD");
-  const avgScore = (valid.reduce((s, r) => s + r.score, 0) / valid.length).toFixed(1);
-
-  // ST flips within the last 1 bar (today)
-  const todayFlips = valid
-    .map(r => ({ r, ...detectFlip(r) }))
-    .filter(x => x.flipType !== null && x.barsSince <= 1);
-
-  const fmtRow = (r: StockAnalysisResult) =>
-    `  • <b>${htmlEscape(r.symbol)}</b>  ${r.score.toFixed(1)}/10 | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)} | ${htmlEscape(fmtRegime(r.regime))}`;
-
-  // Exit signals: bearish flip within 2 bars — strategy says close any long
-  const exitSignals = todayFlips.filter(x => x.flipType === "BEARISH");
-  // Non-exit flips (bullish flips)
-  const otherFlips  = todayFlips.filter(x => x.flipType !== "BEARISH");
-
-  const lines: string[] = [`📊 <b>TA Report — ${now}</b>`];
-
-  if (exitSignals.length > 0) {
-    lines.push(`\n🚨 <b>EXIT SIGNAL${exitSignals.length > 1 ? "S" : ""} (${exitSignals.length})</b>`);
-    exitSignals.forEach(({ r, barsSince }) => {
-      const when = barsSince === 0 ? "TODAY" : "yesterday";
-      lines.push(`  • <b>${htmlEscape(r.symbol)}</b>: ST → BEARISH (${when}) — close long if open | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)}`);
-    });
-  }
-
-  if (otherFlips.length > 0) {
-    lines.push(`\n⚡ <b>ST FLIPS</b>`);
-    otherFlips.forEach(({ r, flipType, barsSince }) => {
-      const when = barsSince === 0 ? "TODAY" : "yesterday";
-      const icon = flipType === "BULLISH" ? "📈" : "📉";
-      lines.push(`  • <b>${htmlEscape(r.symbol)}</b>: ${flipType} ${icon} (${when}) | ${fmtPrice(r.current_price, r.exchange)} ${fmtChg(r.change_pct)}`);
-    });
-  }
-
-  // Trend Template warnings: ST bullish but failing Minervini criteria
-  type ResultWithSepa = ResultWithFlip & { sepa_metadata?: SepaMetadata };
-  const ttWarnings = (valid as ResultWithSepa[]).filter(r => {
-    if (r.st_direction !== 1) return false;                          // only ST bullish
-    const tt = r.sepa_metadata?.trend_template_criteria;
-    if (!tt) return r.sepa_metadata?.trend_template === false;       // fallback: old boolean
-    return !tt.passes;                                               // new: fails < 5/7
+  const timeStr = new Date().toLocaleTimeString("en-US", {
+    hour: "2-digit", minute: "2-digit", timeZone: "Asia/Hong_Kong",
   });
 
-  if (ttWarnings.length > 0) {
-    lines.push(`\n⚠️ <b>TREND TEMPLATE WARNINGS</b> (ST ↑ but structure weak)`);
-    ttWarnings.forEach(r => {
-      const tt = (r as ResultWithSepa).sepa_metadata?.trend_template_criteria;
-      const score    = tt ? `${tt.criteria_met}/7` : "fail";
-      const failList = tt ? [
-        !tt.c1_price_above_sma150    ? "SMA150" : "",
-        !tt.c2_price_above_sma200    ? "SMA200" : "",
-        !tt.c3_sma150_above_sma200   ? "SMA150&gt;200" : "",
-        !tt.c4_sma200_trending_up    ? "SMA200↓" : "",
-        !tt.c5_price_above_sma50     ? "SMA50" : "",
-        !tt.c6_above_25pct_of_low52  ? "52wkLow" : "",
-        !tt.c7_within_25pct_of_high52 ? "52wkHigh" : "",
-      ].filter(Boolean).join(", ") : "criteria not met";
-      lines.push(`  • <b>${htmlEscape(r.symbol)}</b>: TT ${score} — fails: ${failList} | ${fmtPrice(r.current_price, r.exchange)}`);
+  // Data state — adds (Holiday Close) when today is a holiday
+  const holiday = holidayStatus();
+  const holidayTag = holiday ? ` (Holiday Close — ${htmlEscape(holiday.label)})` : "";
+  const dataState = `📅 <i>Data State: ${dateStr}${holidayTag}</i>`;
+
+  // ---------- ST flips (recent, ≤2 bars) ----------
+  const todayFlips = valid
+    .map(r => ({ r, ...detectFlip(r) }))
+    .filter(x => x.flipType !== null && x.barsSince <= 2);
+
+  // Actionable exits: bearish ST flips within 2 bars
+  const exitSignals = todayFlips.filter(x => x.flipType === "BEARISH");
+
+  // ---------- Tier classification ----------
+  const ttFor = (r: ResultWithSepa): TrendTemplateCriteria | undefined =>
+    r.sepa_metadata?.trend_template_criteria;
+
+  const isFreshConfluence = (r: ResultWithSepa) =>
+    r.signal === "BUY" && r.st_direction === 1 && (ttFor(r)?.criteria_met ?? 0) === 7;
+
+  const isTacticalBuy = (r: ResultWithSepa) => {
+    if (r.signal !== "BUY" || r.st_direction !== 1) return false;
+    const met = ttFor(r)?.criteria_met ?? 0;
+    return met >= 5 && met < 7;
+  };
+
+  const isConfluenceHold = (r: ResultWithSepa) =>
+    r.signal === "HOLD" && r.st_direction === 1 && (ttFor(r)?.criteria_met ?? 0) === 7;
+
+  const isStripped = (r: ResultWithSepa) =>
+    r.st_direction === 1 && (ttFor(r)?.criteria_met ?? 7) < 5;
+
+  const isWatchlist = (r: ResultWithSepa) => r.st_direction !== 1;
+
+  const freshBuys  = valid.filter(isFreshConfluence);
+  const tacticals  = valid.filter(isTacticalBuy);
+  const holdsTier  = valid.filter(isConfluenceHold);
+  const stripped   = valid.filter(isStripped);
+  const watchlist  = valid.filter(isWatchlist);
+
+  const avgScore = (valid.reduce((s, r) => s + r.score, 0) / valid.length).toFixed(1);
+
+  // ---------- Row renderers ----------
+  const fmtBuyRow = (r: ResultWithSepa): string => {
+    const sym = htmlEscape(r.symbol).padEnd(5);
+    const sc  = r.score.toFixed(1);
+    const px  = fmtPrice(r.current_price, r.exchange);
+    const chg = fmtChg(r.change_pct);
+    const reg = htmlEscape(fmtRegime(r.regime));
+    return `  • <b>${sym}</b> ${sc}/10 | ${px} [${chg}] | ${reg}`;
+  };
+
+  const fmtTacticalRow = (r: ResultWithSepa): string => {
+    const sym = htmlEscape(r.symbol).padEnd(5);
+    const sc  = r.score.toFixed(1);
+    const px  = fmtPrice(r.current_price, r.exchange);
+    const chg = fmtChg(r.change_pct);
+    const tt  = ttFor(r);
+    const fails = tt ? listTtFailures(tt) : "";
+    const ttTag = tt ? htmlEscape(`[TT: ${tt.criteria_met}/7 — Fails: ${fails}]`) : "";
+    return `  • <b>${sym}</b> ${sc}/10 | ${px} [${chg}] | ${ttTag}`;
+  };
+
+  const fmtStrippedRow = (r: ResultWithSepa): string => {
+    const flag = flagFor(r.exchange);
+    const sym  = htmlEscape(r.symbol);
+    const px   = fmtPrice(r.current_price, r.exchange);
+    const tt   = ttFor(r);
+    if (!tt) return `  • ${flag} <b>${sym}</b> [TT data missing] | ${px}`;
+    const tag = htmlEscape(`[TT ${tt.criteria_met}/7 — Fails: ${listTtFailures(tt)}]`);
+    return `  • ${flag} <b>${sym}</b> ${tag} | ${px}`;
+  };
+
+  // Watchlist: HK first then US, inline 3-per-line with " · " separator, % change in parens
+  const fmtWatchlistLines = (stocks: ResultWithSepa[], perLine = 3): string[] => {
+    const hk = stocks.filter(r => r.exchange === "HK");
+    const us = stocks.filter(r => r.exchange !== "HK");
+    const lines: string[] = [];
+    for (const group of [hk, us]) {
+      for (let i = 0; i < group.length; i += perLine) {
+        const chunk = group.slice(i, i + perLine);
+        const flag  = flagFor(chunk[0].exchange);
+        const parts = chunk.map(r => `<b>${htmlEscape(r.symbol)}</b> (${fmtChg(r.change_pct)})`);
+        lines.push(`  ${flag} ${parts.join(" · ")}`);
+      }
+    }
+    return lines;
+  };
+
+  // ---------- Compose message ----------
+  const lines: string[] = [headerLine, dataState];
+
+  // ACTIONABLE EXITS — top priority
+  if (exitSignals.length > 0) {
+    lines.push(`\n🚨 <b>ACTIONABLE EXITS (${exitSignals.length})</b>`);
+    exitSignals.forEach(({ r, barsSince }) => {
+      const when = barsSince === 0 ? "TODAY" : `${barsSince} bar${barsSince > 1 ? "s" : ""} ago`;
+      const close = fmtPrice(r.current_price, r.exchange);
+      const stLine = r.st_value > 0 ? fmtPrice(r.st_value, r.exchange) : "—";
+      // Violation %: how far close fell below ST line (negative number when below)
+      const violatedPct = r.st_value > 0
+        ? ((r.current_price - r.st_value) / r.st_value) * 100
+        : 0;
+      const violatedStr = violatedPct >= 0
+        ? `+${violatedPct.toFixed(1)}%`
+        : `${violatedPct.toFixed(1)}%`;
+      const detail = htmlEscape(`[ST Stop: ${stLine} | Violated by ${violatedStr} | Close: ${close}]`);
+      lines.push(`  • 🛑 <b>${htmlEscape(r.symbol)}</b>: ST FLIP → 📉 BEARISH (${when})`);
+      lines.push(`    ${detail}`);
     });
   }
 
-  if (buys.length > 0) {
-    lines.push(`\n🟢 <b>BUY (${buys.length})</b>`);
-    buys.forEach(r => lines.push(fmtRow(r)));
+  // FRESH CONFLUENCE BUYS — strict 7/7
+  if (freshBuys.length > 0) {
+    lines.push(`\n🟢 <b>FRESH CONFLUENCE BUYS (${freshBuys.length})</b> — ST↑ + BUY + TT 7/7`);
+    freshBuys.forEach(r => lines.push(fmtBuyRow(r)));
   }
 
-  if (sells.length > 0) {
-    lines.push(`\n🔴 <b>SELL (${sells.length})</b>`);
-    sells.forEach(r => lines.push(fmtRow(r)));
+  // TACTICAL BUYS — 5-6/7
+  if (tacticals.length > 0) {
+    lines.push(`\n🟢 <b>TACTICAL BUYS (${tacticals.length})</b> — ST↑ + BUY + TT ≥5/7`);
+    tacticals.forEach(r => lines.push(fmtTacticalRow(r)));
   }
 
-  if (holds.length > 0) {
-    lines.push(`\n⚪ <b>HOLD (${holds.length})</b>: ${holds.map(r => htmlEscape(r.symbol)).join(", ")}`);
+  // CONFLUENCE HOLDS — HOLD signal but strict 7/7
+  if (holdsTier.length > 0) {
+    lines.push(`\n🔵 <b>CONFLUENCE HOLDS (${holdsTier.length})</b> — ST↑ + HOLD + TT 7/7`);
+    holdsTier.forEach(r => lines.push(fmtBuyRow(r)));
   }
 
-  const stBullish = valid.filter(r => r.st_direction === 1).map(r => htmlEscape(r.symbol));
-  const stBearish = valid.filter(r => r.st_direction === -1).map(r => htmlEscape(r.symbol));
-  if (stBullish.length > 0) lines.push(`\n📈 <b>ST ↑ Bullish</b>: ${stBullish.join(", ")}`);
-  if (stBearish.length > 0) lines.push(`📉 <b>ST ↓ Bearish</b>: ${stBearish.join(", ")}`);
+  // STRIPPED — ST↑ but <5/7 (severe structural failure)
+  if (stripped.length > 0) {
+    lines.push(`\n⚠️ <b>STRIPPED FROM BUYS (${stripped.length})</b> — Severe Structural Failures (TT &lt; 5/7)`);
+    stripped.forEach(r => lines.push(fmtStrippedRow(r)));
+  }
 
-  lines.push(`\n<i>Avg Score ${avgScore}/10 · ${valid.length} stocks · HKT ${new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Hong_Kong" })}</i>`);
+  // PASSIVE WATCHLIST — ST↓
+  if (watchlist.length > 0) {
+    lines.push(`\n⚪ <b>PASSIVE WATCHLIST (${watchlist.length})</b> — ST↓ (No Action)`);
+    lines.push(...fmtWatchlistLines(watchlist, 3));
+  }
+
+  // Footer
+  lines.push(`\n📊 <i>Portfolio Avg Score: ${avgScore}/10 · ${valid.length} Assets · HKT ${timeStr}</i>`);
 
   return lines.join("\n");
 }

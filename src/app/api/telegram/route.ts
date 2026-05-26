@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "no results" }, { status: 400 });
     }
 
-    const message = buildTelegramMessage(results);
+    const message = buildTelegramMessage(results, "manual");
     const result  = await sendTelegramMessage(message, "alerts");
     return NextResponse.json(result);
   } catch (e) {

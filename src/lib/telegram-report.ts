@@ -49,7 +49,7 @@ function todayHkIso(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Hong_Kong" });
 }
 
-function holidayStatus(): { us: boolean; hk: boolean; label: string } | null {
+export function holidayStatus(): { us: boolean; hk: boolean; label: string } | null {
   const key = todayHkIso();
   return HOLIDAYS[key] ?? null;
 }
