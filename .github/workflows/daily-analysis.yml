@@ -1,11 +1,15 @@
 name: Daily Portfolio Analysis & Alerts
 
 on:
+  # NOTE: GitHub Actions cron is consistently delayed 2–4h on free repos.
+  # Schedules below are shifted 3h30m EARLIER than the actual target HKT times
+  # so that even with GHA's typical delay, fires land near the intended window.
+  # cron-job.org runs the real schedule; GHA is a fallback safety net.
   schedule:
-    # 8:55am HKT Mon–Sat  (HKT = UTC+8 → 00:55 UTC)  → US close / morning brief
-    - cron: '55 0 * * 1-6'
-    # 4:30pm HKT Mon–Fri  (HKT = UTC+8 → 08:30 UTC)  → HK close
-    - cron: '30 8 * * 1-5'
+    # Target 8:55am HKT Mon–Sat. Shifted: 5:25am HKT = 21:25 UTC previous day.
+    - cron: '25 21 * * 0-5'   # → US close / morning brief
+    # Target 4:30pm HKT Mon–Fri. Shifted: 1:00pm HKT = 05:00 UTC.
+    - cron: '0 5 * * 1-5'     # → HK close
   workflow_dispatch:
     inputs:
       market:
@@ -54,7 +58,7 @@ jobs:
 
           if [ -n "$DISPATCH_MARKET" ]; then
             MARKET="$DISPATCH_MARKET"
-          elif [ "$SCHEDULE" = "55 0 * * 1-6" ]; then
+          elif [ "$SCHEDULE" = "25 21 * * 0-5" ]; then
             MARKET="us"
           else
             MARKET="hk"
