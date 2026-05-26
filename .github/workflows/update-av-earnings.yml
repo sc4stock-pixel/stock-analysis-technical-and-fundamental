@@ -1,14 +1,13 @@
-name: Update Alpha Vantage Earnings Cache
+name: Update Alpha Vantage Earnings + Fundamentals Cache
 
 on:
   schedule:
-    - cron: '0 5 * * 0'   # Every Sunday 05:00 UTC (quarterly data only changes 4x/year)
-  workflow_dispatch:        # Allow manual trigger from GitHub Actions UI
+    - cron: '0 5 * * 0'   # Every Sunday 05:00 UTC
+  workflow_dispatch:
 
 jobs:
   update-cache:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -21,15 +20,20 @@ jobs:
       - name: Install dependencies
         run: pip install akshare pandas requests --quiet
 
-      - name: Fetch quarterly earnings from Alpha Vantage
+      - name: Fetch quarterly EPS (existing)
         env:
           AV_KEY: ${{ secrets.AV_KEY }}
         run: python scripts/fetch_av_earnings.py
 
-      - name: Commit and push cache file
+      - name: Fetch quarterly fundamentals (new)
+        env:
+          AV_KEY: ${{ secrets.AV_KEY }}
+        run: python scripts/fetch_fundamentals.py
+
+      - name: Commit and push cache files
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add av_earnings_cache.json
-          git diff --staged --quiet || git commit -m "chore: update Alpha Vantage earnings cache"
+          git add av_earnings_cache.json fundamentals_cache.json
+          git diff --staged --quiet || git commit -m "chore: update earnings + fundamentals caches"
           git push
