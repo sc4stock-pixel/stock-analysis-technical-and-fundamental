@@ -145,6 +145,172 @@ def merge_statements(income: list[dict], balance: list[dict], cashflow: list[dic
     return periods
 
 
+HK_INCOME_MAP = {
+    "营业额": "revenue",
+    "毛利": "grossProfit",
+    "经营溢利": "operatingIncome",
+    "本公司股东应占溢利": "netIncome",
+    "每股基本盈利": "epsBasic",
+}
+
+HK_BALANCE_MAP = {
+    "应收账款": "ar",
+    "存货": "inventory",
+    "应付账款": "ap",
+    "资产总计": "totalAssets",
+    "负债合计": "totalLiab",
+    "流动资产合计": "currentAssets",
+    "流动负债合计": "currentLiab",
+    "未分配利润": "retainedEarnings",
+    "长期借款": "longTermDebt",
+    "股本": "sharesOutstanding",
+}
+
+HK_CASHFLOW_MAP = {
+    "经营活动产生的现金流量净额": "cfo",
+    "购建固定资产、无形资产和其他长期资产支付的现金": "capex",
+}
+
+
+def _hk_code(symbol: str) -> str:
+    return symbol.replace(".HK", "").zfill(5)
+
+
+def _hk_fetch_statement(ak, code: str, statement_zh: str):
+    """statement_zh ∈ {'利润表','资产负债表','现金流量表'}"""
+    return ak.stock_financial_hk_report_em(stock=code, symbol=statement_zh, indicator="报告期")
+
+
+def _detect_cumulative_ytd(date_value_pairs: list[tuple[str, float]]) -> bool:
+    """Boundary = consecutive drop of >40%. Within each FY, check monotonic non-decrease."""
+    if len(date_value_pairs) < 4:
+        return False
+    boundaries = [0]
+    for i in range(1, len(date_value_pairs)):
+        prev = date_value_pairs[i - 1][1]
+        curr = date_value_pairs[i][1]
+        if prev > 0 and curr / prev < 0.6:
+            boundaries.append(i)
+    boundaries.append(len(date_value_pairs))
+
+    groups_pass = 0
+    groups_total = 0
+    for a, b in zip(boundaries[:-1], boundaries[1:]):
+        if b - a < 2:
+            continue
+        groups_total += 1
+        vals = [p[1] for p in date_value_pairs[a:b]]
+        ok = all(vals[i + 1] >= vals[i] * 0.95 for i in range(len(vals) - 1))
+        if ok:
+            groups_pass += 1
+    return groups_total > 0 and (groups_pass / groups_total) > 0.5
+
+
+def _convert_ytd_to_period(rows_newest_first: list[dict], fields: list[str]) -> list[dict]:
+    """Within each FY, subtract prev YTD from current to get incremental period values."""
+    asc = list(reversed(rows_newest_first))
+    if not asc:
+        return rows_newest_first
+    boundaries = [0]
+    for i in range(1, len(asc)):
+        p_prev = asc[i - 1].get("revenue")
+        p_curr = asc[i].get("revenue")
+        if p_prev and p_curr and p_curr / p_prev < 0.6:
+            boundaries.append(i)
+    boundaries.append(len(asc))
+
+    out = [dict(r) for r in asc]
+    for a, b in zip(boundaries[:-1], boundaries[1:]):
+        for j in range(a + 1, b):
+            for f in fields:
+                curr = asc[j].get(f)
+                prev = asc[j - 1].get(f)
+                if curr is not None and prev is not None:
+                    out[j][f] = max(curr - prev, 0)
+    return list(reversed(out))
+
+
+def fetch_hk_income(ak, pd, symbol: str, periods: int = 6) -> tuple[list[dict], str]:
+    """Returns (periods_list, frequency). Applies cumulative-YTD conversion when detected."""
+    code = _hk_code(symbol)
+    df = _hk_fetch_statement(ak, code, "利润表")
+    if df is None or df.empty:
+        return [], "Q"
+
+    df = df[df["STD_ITEM_NAME"].isin(HK_INCOME_MAP.keys())].copy()
+    pivot = df.pivot_table(
+        index="REPORT_DATE", columns="STD_ITEM_NAME", values="AMOUNT", aggfunc="first"
+    ).reset_index()
+    pivot = pivot.sort_values("REPORT_DATE", ascending=False)
+
+    months = {str(d)[5:7] for d in pivot["REPORT_DATE"]}
+    frequency = "H" if months <= {"06", "12"} else "Q"
+
+    is_cumulative = _detect_cumulative_ytd(
+        [(str(r["REPORT_DATE"])[:10], float(r["营业额"])) for _, r in
+         pivot.sort_values("REPORT_DATE").iterrows()
+         if r.get("营业额") is not None and not pd.isna(r["营业额"])]
+    )
+
+    rows = []
+    for _, r in pivot.iterrows():
+        row = {"endDate": str(r["REPORT_DATE"])[:10]}
+        for zh, en in HK_INCOME_MAP.items():
+            val = r.get(zh)
+            row[en] = None if val is None or pd.isna(val) else float(val)
+        rows.append(row)
+
+    if is_cumulative:
+        rows = _convert_ytd_to_period(rows, fields=list(HK_INCOME_MAP.values()))
+
+    return rows[:periods], frequency
+
+
+def fetch_hk_balance(ak, pd, symbol: str, periods: int = 6) -> list[dict]:
+    df = _hk_fetch_statement(ak, _hk_code(symbol), "资产负债表")
+    if df is None or df.empty:
+        return []
+    df = df[df["STD_ITEM_NAME"].isin(HK_BALANCE_MAP.keys())]
+    pivot = df.pivot_table(index="REPORT_DATE", columns="STD_ITEM_NAME", values="AMOUNT", aggfunc="first") \
+              .reset_index().sort_values("REPORT_DATE", ascending=False)
+    rows = []
+    for _, r in pivot.iterrows():
+        row = {"endDate": str(r["REPORT_DATE"])[:10]}
+        for zh, en in HK_BALANCE_MAP.items():
+            v = r.get(zh)
+            row[en] = None if v is None or pd.isna(v) else float(v)
+        rows.append(row)
+    return rows[:periods]
+
+
+def fetch_hk_cashflow(ak, pd, symbol: str, periods: int = 6, is_cumulative_hint: bool = False) -> list[dict]:
+    """Cash-flow lines are typically reported cumulatively — apply conversion if hinted."""
+    df = _hk_fetch_statement(ak, _hk_code(symbol), "现金流量表")
+    if df is None or df.empty:
+        return []
+    df = df[df["STD_ITEM_NAME"].isin(HK_CASHFLOW_MAP.keys())]
+    pivot = df.pivot_table(index="REPORT_DATE", columns="STD_ITEM_NAME", values="AMOUNT", aggfunc="first") \
+              .reset_index().sort_values("REPORT_DATE", ascending=False)
+    rows = []
+    for _, r in pivot.iterrows():
+        row = {"endDate": str(r["REPORT_DATE"])[:10]}
+        for zh, en in HK_CASHFLOW_MAP.items():
+            v = r.get(zh)
+            row[en] = None if v is None or pd.isna(v) else float(v)
+        rows.append(row)
+
+    if is_cumulative_hint:
+        rows = _convert_ytd_to_period(rows, fields=list(HK_CASHFLOW_MAP.values()))
+
+    for r in rows:
+        cfo, capex = r.get("cfo"), r.get("capex")
+        if cfo is not None and capex is not None:
+            r["fcf"] = cfo - capex
+        else:
+            r["fcf"] = None
+    return rows[:periods]
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--only", help="Restrict to a single symbol (debug)")
@@ -179,6 +345,26 @@ def main():
             data[sym] = {"frequency": "Q", "periods": periods}
     elif us_syms and not AV_KEY:
         print("\nWARNING: AV_KEY not set — skipping US stocks")
+
+    if hk_syms:
+        try:
+            import akshare as ak
+            import pandas as pd
+        except ImportError:
+            print("\nWARNING: akshare/pandas not installed — skipping HK stocks")
+            ak = None
+        if ak:
+            print(f"\n── Tier 2: Akshare — {len(hk_syms)} HK stocks × 3 endpoints ──")
+            for i, sym in enumerate(hk_syms):
+                if i > 0:
+                    time.sleep(2)
+                print(f"  [{i+1}/{len(hk_syms)}] {sym} ...", flush=True)
+                inc, freq = fetch_hk_income(ak, pd, sym)
+                bal = fetch_hk_balance(ak, pd, sym)
+                cf = fetch_hk_cashflow(ak, pd, sym, is_cumulative_hint=True)
+                print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} freq={freq}")
+                periods_merged = merge_statements(inc, bal, cf)
+                data[sym] = {"frequency": freq, "periods": periods_merged}
 
     out = {
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
