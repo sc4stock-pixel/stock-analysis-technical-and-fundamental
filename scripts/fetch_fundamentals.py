@@ -472,6 +472,25 @@ def main():
             except Exception as e:
                 print(f"  WARNING stock_hk_spot_em failed: {e}")
 
+            # Fallback: use yfinance for any HK tickers missing from spot data
+            missing = [s for s in hk_syms if s not in hk_spot]
+            if missing:
+                print(f"  yfinance fallback for {len(missing)} HK tickers: {missing}")
+                try:
+                    import yfinance as yf
+                    for sym in missing:
+                        try:
+                            fi = yf.Ticker(sym).fast_info
+                            mc     = getattr(fi, 'market_cap', None)
+                            shares = getattr(fi, 'shares', None)
+                            if mc or shares:
+                                hk_spot[sym] = {"marketCap": mc, "sharesOutstanding": shares}
+                                print(f"    {sym} yf: mktCap={mc:.2e if mc else None} shares={shares:.2e if shares else None}")
+                        except Exception as e2:
+                            print(f"    {sym} yf fallback failed: {e2}")
+                except ImportError:
+                    print("  yfinance not installed — HK spot data unavailable")
+
             for i, sym in enumerate(hk_syms):
                 if i > 0:
                     time.sleep(2)
