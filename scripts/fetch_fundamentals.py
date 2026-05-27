@@ -175,6 +175,84 @@ def merge_statements(income: list[dict], balance: list[dict], cashflow: list[dic
     return periods
 
 
+def fetch_hk_fundamentals_yf(symbol: str, periods: int = 6) -> tuple[list[dict], list[dict], list[dict], float | None, str]:
+    """Fetch HK quarterly/semi-annual IS/BS/CF and market cap via yfinance.
+    yfinance supports HK tickers (e.g. '0700.HK') natively and returns
+    period-incremental values (no YTD cumulative issue) in the reporting currency.
+    Returns (income, balance, cashflow, market_cap, frequency)."""
+    try:
+        import yfinance as yf
+        import math
+        ticker = yf.Ticker(symbol)
+
+        fi = ticker.fast_info
+        market_cap = getattr(fi, 'market_cap', None) or (ticker.info or {}).get('marketCap')
+
+        inc_df = ticker.quarterly_income_stmt
+        bal_df = ticker.quarterly_balance_sheet
+        cf_df  = ticker.quarterly_cash_flow
+
+        if inc_df is None or inc_df.empty:
+            print(f"    yfinance returned empty income statement for {symbol}")
+            return [], [], [], market_cap, "Q"
+
+        # Detect frequency from income statement period-ending months
+        months = {str(col)[5:7] for col in list(inc_df.columns)[:periods]}
+        frequency = "H" if months <= {"06", "12"} else "Q"
+
+        income, balance, cashflow = [], [], []
+
+        for col in list(inc_df.columns)[:periods]:
+            s = inc_df[col]
+            def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
+            income.append({
+                "endDate": str(col)[:10],
+                "revenue":         g("Total Revenue"),
+                "grossProfit":     g("Gross Profit"),
+                "operatingIncome": g("Operating Income", "EBIT"),
+                "netIncome":       g("Net Income", "Net Income Common Stockholders"),
+                "ebit":            g("EBIT", "Operating Income"),
+            })
+
+        if bal_df is not None and not bal_df.empty:
+            for col in list(bal_df.columns)[:periods]:
+                s = bal_df[col]
+                def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
+                balance.append({
+                    "endDate": str(col)[:10],
+                    "ar":               g("Accounts Receivable", "Net Receivables"),
+                    "inventory":        g("Inventory"),
+                    "ap":               g("Accounts Payable"),
+                    "totalAssets":      g("Total Assets"),
+                    "totalLiab":        g("Total Liabilities Net Minority Interest", "Total Liabilities"),
+                    "currentAssets":    g("Current Assets"),
+                    "currentLiab":      g("Current Liabilities"),
+                    "retainedEarnings": g("Retained Earnings"),
+                    "sharesOutstanding": g("Ordinary Shares Number", "Share Issued"),
+                    "longTermDebt":     g("Long Term Debt", "Long Term Debt And Capital Lease Obligation"),
+                })
+
+        if cf_df is not None and not cf_df.empty:
+            for col in list(cf_df.columns)[:periods]:
+                s = cf_df[col]
+                def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
+                cfo   = g("Operating Cash Flow")
+                capex = g("Capital Expenditure")
+                fcf = (cfo + capex) if (cfo is not None and capex is not None) else None
+                cashflow.append({
+                    "endDate": str(col)[:10],
+                    "cfo": cfo, "capex": capex, "fcf": fcf,
+                })
+
+        return income, balance, cashflow, market_cap, frequency
+
+    except Exception as e:
+        print(f"    WARNING yfinance HK {symbol}: {e}")
+        return [], [], [], None, "Q"
+
+
+# ── Legacy Akshare HK fetchers (kept for reference/fallback; not called by main) ──
+
 HK_INCOME_MAP = {
     "营业额": "revenue",
     "毛利": "grossProfit",
@@ -436,81 +514,17 @@ def main():
             data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=market_cap)
 
     if hk_syms:
-        try:
-            import akshare as ak
-            import pandas as pd
-        except ImportError:
-            print("\nWARNING: akshare/pandas not installed — skipping HK stocks")
-            ak = None
-        if ak:
-            print(f"\n── Tier 2: Akshare — {len(hk_syms)} HK stocks × 3 endpoints ──")
-
-            # One-shot: fetch HK spot data for share count (derived as 总市值 / 最新价).
-            # 总股本 unit is inconsistent across Eastmoney — derive shares from mktcap/price instead.
-            # HK Z-score stays None: CNY-reporting companies vs HKD market cap = currency mismatch.
-            hk_spot: dict[str, dict] = {}
-            try:
-                print("  Fetching HK spot data (市值 / price → share count) ...", flush=True)
-                spot_df = ak.stock_hk_spot_em()
-                for sym in hk_syms:
-                    raw_code = sym.replace(".HK", "").lstrip("0") or "0"
-                    mask = spot_df["代码"].astype(str).str.lstrip("0") == raw_code
-                    row = spot_df[mask]
-                    if not row.empty:
-                        r = row.iloc[0]
-                        mc_raw  = _to_float(str(r.get("总市值", "")))   # in 亿 HKD
-                        price   = _to_float(str(r.get("最新价", "")))   # in HKD
-                        mc      = mc_raw * 1e8 if mc_raw else None      # convert to HKD
-                        shares  = (mc / price) if (mc and price and price > 0) else None
-                        hk_spot[sym] = {"marketCap": mc, "sharesOutstanding": shares}
-                        if mc and shares:
-                            print(f"    {sym}: mktCap={mc:.2e} HKD  shares={shares:.2e}")
-                        else:
-                            print(f"    {sym}: spot data incomplete")
-                    else:
-                        print(f"    {sym}: not found in spot data")
-            except Exception as e:
-                print(f"  WARNING stock_hk_spot_em failed: {e}")
-
-            # Fallback: use yfinance for any HK tickers missing from spot data
-            missing = [s for s in hk_syms if s not in hk_spot]
-            if missing:
-                print(f"  yfinance fallback for {len(missing)} HK tickers: {missing}")
-                try:
-                    import yfinance as yf
-                    for sym in missing:
-                        try:
-                            fi = yf.Ticker(sym).fast_info
-                            mc     = getattr(fi, 'market_cap', None)
-                            shares = getattr(fi, 'shares', None)
-                            if mc or shares:
-                                hk_spot[sym] = {"marketCap": mc, "sharesOutstanding": shares}
-                                print(f"    {sym} yf: mktCap={mc:.2e if mc else None} shares={shares:.2e if shares else None}")
-                        except Exception as e2:
-                            print(f"    {sym} yf fallback failed: {e2}")
-                except ImportError:
-                    print("  yfinance not installed — HK spot data unavailable")
-
-            for i, sym in enumerate(hk_syms):
-                if i > 0:
-                    time.sleep(2)
-                print(f"  [{i+1}/{len(hk_syms)}] {sym} ...", flush=True)
-                inc, freq = fetch_hk_income(ak, pd, sym)
-                bal = fetch_hk_balance(ak, pd, sym)
-                cf = fetch_hk_cashflow(ak, pd, sym, is_cumulative_hint=True)
-                print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} freq={freq}")
-                periods_merged = merge_statements(inc, bal, cf)
-
-                # Override sharesOutstanding with derived share count from spot data
-                spot = hk_spot.get(sym, {})
-                real_shares = spot.get("sharesOutstanding")
-                market_cap_hk = spot.get("marketCap")
-                if real_shares and real_shares > 1e8:   # sanity: must be >100M shares
-                    for row in periods_merged:
-                        row["sharesOutstanding"] = real_shares
-
-                data[sym] = {"frequency": freq, "periods": periods_merged}
-                data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=market_cap_hk)
+        print(f"\n── Tier 2: yfinance — {len(hk_syms)} HK stocks (IS + BS + CF + market cap) ──")
+        print("  yfinance for HK eliminates Akshare cumulative-YTD and field-name issues.")
+        for i, sym in enumerate(hk_syms):
+            if i > 0:
+                time.sleep(2)
+            print(f"  [{i+1}/{len(hk_syms)}] {sym} ...", flush=True)
+            inc, bal, cf, market_cap, freq = fetch_hk_fundamentals_yf(sym)
+            print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} freq={freq} mktCap={'✓' if market_cap else '✗'}")
+            periods = merge_statements(inc, bal, cf)
+            data[sym] = {"frequency": freq, "periods": periods}
+            data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=market_cap)
 
     out = {
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
