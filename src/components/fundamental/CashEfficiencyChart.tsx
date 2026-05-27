@@ -41,6 +41,10 @@ export default function CashEfficiencyChart({ data }: Props) {
   const fcfDataKey = useFcfPerShare ? "fcfPerShare" : "fcfAbs";
   const fcfLabel = useFcfPerShare ? "FCF/share" : "FCF (abs)";
   const cccAvailable = rows.some(r => r.ccc != null);
+  const hasFcfData = rows.some(r => r.fcfPerShare != null || r.fcfAbs != null);
+
+  // No useful data at all — don't render a blank chart
+  if (!hasFcfData && !cccAvailable) return null;
 
   // Visual insight: FCF trend
   const insight = (() => {

@@ -222,6 +222,25 @@ def fetch_hk_fundamentals_yf(symbol: str, periods: int = 6) -> tuple[list[dict],
             if len(cf2)  > len(cf):  cf  = cf2
             freq = freq2 if freq2 else freq
 
+        # Final fallback: Akshare when both yfinance paths are sparse
+        still_sparse = (len(cf) < 2 or not (inc and inc[0].get('revenue') is not None))
+        if still_sparse:
+            print(f"    {symbol} still sparse after ADR — trying Akshare fallback")
+            try:
+                import akshare as ak
+                import pandas as pd
+                inc_ak, freq_ak = fetch_hk_income_ak(ak, pd, symbol, periods)
+                bal_ak           = fetch_hk_balance_ak(ak, pd, symbol, periods)
+                cf_ak            = fetch_hk_cashflow_ak(ak, pd, symbol, periods)
+                if len(inc_ak) > len(inc): inc = inc_ak
+                if len(bal_ak) > len(bal): bal = bal_ak
+                if len(cf_ak)  > len(cf):  cf  = cf_ak
+                if freq_ak: freq = freq_ak
+            except ImportError:
+                pass
+            except Exception as e2:
+                print(f"    Akshare fallback error: {e2}")
+
         return inc, bal, cf, market_cap, freq
 
     except Exception as e:
@@ -229,7 +248,7 @@ def fetch_hk_fundamentals_yf(symbol: str, periods: int = 6) -> tuple[list[dict],
         return [], [], [], None, "Q"
 
 
-# ── Legacy Akshare HK fetchers (kept for reference/fallback; not called by main) ──
+# ── Akshare HK fetchers — used as final fallback when yfinance is sparse ──
 
 HK_INCOME_MAP = {
     "营业额": "revenue",
@@ -316,7 +335,7 @@ def _convert_ytd_to_period(rows_newest_first: list[dict], fields: list[str]) -> 
     return list(reversed(out))
 
 
-def fetch_hk_income(ak, pd, symbol: str, periods: int = 6) -> tuple[list[dict], str]:
+def fetch_hk_income_ak(ak, pd, symbol: str, periods: int = 6) -> tuple[list[dict], str]:
     """Returns (periods_list, frequency). Applies cumulative-YTD conversion when detected."""
     code = _hk_code(symbol)
     df = _hk_fetch_statement(ak, code, "利润表")
@@ -352,7 +371,7 @@ def fetch_hk_income(ak, pd, symbol: str, periods: int = 6) -> tuple[list[dict], 
     return rows[:periods], frequency
 
 
-def fetch_hk_balance(ak, pd, symbol: str, periods: int = 6) -> list[dict]:
+def fetch_hk_balance_ak(ak, pd, symbol: str, periods: int = 6) -> list[dict]:
     df = _hk_fetch_statement(ak, _hk_code(symbol), "资产负债表")
     if df is None or df.empty:
         return []
@@ -369,31 +388,79 @@ def fetch_hk_balance(ak, pd, symbol: str, periods: int = 6) -> list[dict]:
     return rows[:periods]
 
 
-def fetch_hk_cashflow(ak, pd, symbol: str, periods: int = 6, is_cumulative_hint: bool = False) -> list[dict]:
-    """Cash-flow lines are typically reported cumulatively — apply conversion if hinted."""
-    df = _hk_fetch_statement(ak, _hk_code(symbol), "现金流量表")
-    if df is None or df.empty:
-        return []
-    df = df[df["STD_ITEM_NAME"].isin(HK_CASHFLOW_MAP.keys())]
-    pivot = df.pivot_table(index="REPORT_DATE", columns="STD_ITEM_NAME", values="AMOUNT", aggfunc="first") \
-              .reset_index().sort_values("REPORT_DATE", ascending=False)
-    rows = []
-    for _, r in pivot.iterrows():
-        row = {"endDate": str(r["REPORT_DATE"])[:10]}
-        for zh, en in HK_CASHFLOW_MAP.items():
-            v = r.get(zh)
-            row[en] = None if v is None or pd.isna(v) else float(v)
-        rows.append(row)
+def fetch_hk_cashflow_ak(ak, pd, symbol: str, periods: int = 6) -> list[dict]:
+    """Akshare HK cash flow with broad keyword matching + 每股经营现金流 per-share fallback.
+    HK IFRS reporters use different Chinese labels than mainland GAAP — exact match fails.
+    Approach:
+      1. Broad substring search for CFO row (contains '经营' + '现金'/'净额')
+      2. Broad substring search for capex row (contains '购建'/'购置' + '资产'/'物业')
+      3. Per-share fallback: 每股经营现金流(元) × sharesOutstanding from income statement
+    """
+    df_cf = _hk_fetch_statement(ak, _hk_code(symbol), "现金流量表")
+    df_is = _hk_fetch_statement(ak, _hk_code(symbol), "利润表")
 
-    if is_cumulative_hint:
-        rows = _convert_ytd_to_period(rows, fields=list(HK_CASHFLOW_MAP.values()))
+    if df_cf is None or df_cf.empty:
+        return []
+
+    all_names = df_cf["STD_ITEM_NAME"].dropna().unique().tolist()
+
+    # Broad keyword search for CFO (total operating cash flow)
+    cfo_kws = [("经营活动", "现金"), ("经营活动", "净额"), ("经营业务", "现金"), ("营业活动", "现金")]
+    cfo_name = next((n for n in all_names
+                     if any(a in str(n) and b in str(n) for a, b in cfo_kws)), None)
+
+    # Broad keyword search for capex
+    capex_kws = [("购建", "固定"), ("购建", "资产"), ("购置", "物业"), ("购置", "资产")]
+    capex_name = next((n for n in all_names
+                       if any(a in str(n) and b in str(n) for a, b in capex_kws)), None)
+
+    rows_dict: dict[str, dict] = {}
+
+    if cfo_name:
+        for _, r in df_cf[df_cf["STD_ITEM_NAME"] == cfo_name].iterrows():
+            dt = str(r["REPORT_DATE"])[:10]
+            v = _to_float(str(r.get("AMOUNT", "")))
+            rows_dict.setdefault(dt, {"endDate": dt})["cfo"] = v
+
+    if capex_name:
+        for _, r in df_cf[df_cf["STD_ITEM_NAME"] == capex_name].iterrows():
+            dt = str(r["REPORT_DATE"])[:10]
+            v = _to_float(str(r.get("AMOUNT", "")))
+            rows_dict.setdefault(dt, {"endDate": dt})["capex"] = v
+
+    # Per-share CFO fallback: 每股经营现金流(元) from income statement
+    if not cfo_name and df_is is not None and not df_is.empty:
+        ps_cfo_df = df_is[df_is["STD_ITEM_NAME"].astype(str).str.contains("每股经营现金流", na=False)]
+        if not ps_cfo_df.empty:
+            # Get shares from income statement (每股基本盈利 row gives us a scaling reference)
+            # Use shares from balance sheet if available; otherwise use net_income / EPS ratio
+            eps_df = df_is[df_is["STD_ITEM_NAME"] == "每股基本盈利"]
+            for _, r in ps_cfo_df.iterrows():
+                dt = str(r["REPORT_DATE"])[:10]
+                ps_cfo = _to_float(str(r.get("AMOUNT", "")))
+                if ps_cfo is None:
+                    continue
+                # Try to compute shares from NI / EPS if both available for this date
+                ni_df = df_is[df_is["STD_ITEM_NAME"] == "本公司股东应占溢利"]
+                ni_row = ni_df[ni_df["REPORT_DATE"].astype(str).str[:10] == dt]
+                eps_row = eps_df[eps_df["REPORT_DATE"].astype(str).str[:10] == dt]
+                if not ni_row.empty and not eps_row.empty:
+                    ni = _to_float(str(ni_row.iloc[0].get("AMOUNT", "")))
+                    eps = _to_float(str(eps_row.iloc[0].get("AMOUNT", "")))
+                    if ni and eps and abs(eps) > 0:
+                        shares = ni / eps
+                        cfo_total = ps_cfo * shares
+                        rows_dict.setdefault(dt, {"endDate": dt})["cfo"] = cfo_total
+
+    rows = sorted(rows_dict.values(), key=lambda r: r["endDate"], reverse=True)
+
+    # Apply YTD conversion (cumulative → incremental)
+    rows = _convert_ytd_to_period(rows, fields=["cfo", "capex"])
 
     for r in rows:
         cfo, capex = r.get("cfo"), r.get("capex")
-        if cfo is not None and capex is not None:
-            r["fcf"] = cfo - capex
-        else:
-            r["fcf"] = None
+        r["fcf"] = (cfo - capex) if (cfo is not None and capex is not None) else None
+
     return rows[:periods]
 
 
