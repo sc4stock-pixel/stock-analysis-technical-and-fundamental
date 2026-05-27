@@ -1,5 +1,5 @@
 {
-  "updated": "2026-05-27T04:20:00Z",
+  "updated": "2026-05-27T04:26:03Z",
   "data": {
     "AAPL": {
       "frequency": "Q",
@@ -1059,7 +1059,7 @@
           "currentLiab": 476398000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 1000000.0,
+          "sharesOutstanding": 19193071958,
           "workingCapital": 134371000000.0
         },
         {
@@ -1078,7 +1078,7 @@
           "currentLiab": 459811000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 1000000.0,
+          "sharesOutstanding": 19193071958,
           "workingCapital": 152405000000.0
         },
         {
@@ -1097,7 +1097,7 @@
           "currentLiab": 444137000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 1000000.0,
+          "sharesOutstanding": 19193071958,
           "workingCapital": 202482000000.0
         },
         {
@@ -1116,7 +1116,7 @@
           "currentLiab": 473627000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 1000000.0,
+          "sharesOutstanding": 19193071958,
           "workingCapital": 212444000000.0
         },
         {
@@ -1135,7 +1135,7 @@
           "currentLiab": 435346000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 1000000.0,
+          "sharesOutstanding": 19193071958,
           "workingCapital": 238703000000.0
         },
         {
@@ -1154,7 +1154,7 @@
           "currentLiab": 457359000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 1000000.0,
+          "sharesOutstanding": 19193071958,
           "workingCapital": 220483000000.0
         }
       ],
@@ -1192,7 +1192,7 @@
           "currentLiab": 453872000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": null,
+          "sharesOutstanding": 9031380993,
           "workingCapital": 193064000000.0
         },
         {
@@ -1211,7 +1211,7 @@
           "currentLiab": 412751000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": null,
+          "sharesOutstanding": 9031380993,
           "workingCapital": 182709000000.0
         },
         {
@@ -1230,7 +1230,7 @@
           "currentLiab": 429234000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": null,
+          "sharesOutstanding": 9031380993,
           "workingCapital": 152919000000.0
         },
         {
@@ -1249,7 +1249,7 @@
           "currentLiab": 435111000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": null,
+          "sharesOutstanding": 9031380993,
           "workingCapital": 110386000000.0
         },
         {
@@ -1268,7 +1268,7 @@
           "currentLiab": 408742000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": null,
+          "sharesOutstanding": 9031380993,
           "workingCapital": 124493000000.0
         },
         {
@@ -1287,7 +1287,7 @@
           "currentLiab": 396909000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": null,
+          "sharesOutstanding": 9031380993,
           "workingCapital": 99271000000.0
         }
       ],
@@ -1325,7 +1325,7 @@
           "currentLiab": 485362254000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 9117198000.0,
+          "sharesOutstanding": 9117197565,
           "workingCapital": -89597324000.0
         },
         {
@@ -1344,7 +1344,7 @@
           "currentLiab": 468451357000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 9117198000.0,
+          "sharesOutstanding": 9117197565,
           "workingCapital": -96983799000.0
         },
         {
@@ -1363,7 +1363,7 @@
           "currentLiab": 494292438000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 9117198000.0,
+          "sharesOutstanding": 9117197565,
           "workingCapital": -64098731000.0
         },
         {
@@ -1382,7 +1382,7 @@
           "currentLiab": 513355792000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 3039066000.0,
+          "sharesOutstanding": 9117197565,
           "workingCapital": -122720332000.0
         },
         {
@@ -1401,7 +1401,7 @@
           "currentLiab": 505797075000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 3039066000.0,
+          "sharesOutstanding": 9117197565,
           "workingCapital": -95802846000.0
         },
         {
@@ -1420,7 +1420,7 @@
           "currentLiab": 495985176000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 2909266000.0,
+          "sharesOutstanding": 9117197565,
           "workingCapital": -125412932000.0
         }
       ],
@@ -1458,7 +1458,7 @@
           "currentLiab": 175689678000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 424000.0,
+          "sharesOutstanding": 25805501894,
           "workingCapital": 64402395000.0
         },
         {
@@ -1477,7 +1477,7 @@
           "currentLiab": 192405477000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 426000.0,
+          "sharesOutstanding": 25805501894,
           "workingCapital": 62405312000.0
         },
         {
@@ -1496,7 +1496,7 @@
           "currentLiab": 194219347000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 426000.0,
+          "sharesOutstanding": 25805501894,
           "workingCapital": 61545703000.0
         },
         {
@@ -1515,7 +1515,7 @@
           "currentLiab": 188328993000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 425000.0,
+          "sharesOutstanding": 25805501894,
           "workingCapital": 55290969000.0
         },
         {
@@ -1534,7 +1534,7 @@
           "currentLiab": 170196744000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 424000.0,
+          "sharesOutstanding": 25805501894,
           "workingCapital": 85700422000.0
         },
         {
@@ -1553,7 +1553,7 @@
           "currentLiab": 175384990000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 407000.0,
+          "sharesOutstanding": 25805501894,
           "workingCapital": 50323776000.0
         }
       ],
@@ -1591,7 +1591,7 @@
           "currentLiab": 179460000000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 199000000.0,
+          "sharesOutstanding": 10784180097,
           "workingCapital": -20047000000.0
         },
         {
@@ -1610,7 +1610,7 @@
           "currentLiab": 162204145000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 184192000.0,
+          "sharesOutstanding": 10784180097,
           "workingCapital": -8372448000.0
         },
         {
@@ -1629,7 +1629,7 @@
           "currentLiab": 162918752000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 184020000.0,
+          "sharesOutstanding": 10784180097,
           "workingCapital": -10791077000.0
         },
         {
@@ -1648,7 +1648,7 @@
           "currentLiab": 90168209000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 183807000.0,
+          "sharesOutstanding": 10784180097,
           "workingCapital": 4929066000.0
         },
         {
@@ -1667,7 +1667,7 @@
           "currentLiab": 96823927000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 183807000.0,
+          "sharesOutstanding": 10784180097,
           "workingCapital": 16810973000.0
         },
         {
@@ -1686,7 +1686,7 @@
           "currentLiab": 74258420000.0,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 183686000.0,
+          "sharesOutstanding": 10784180097,
           "workingCapital": 2341521000.0
         }
       ],
@@ -1724,7 +1724,7 @@
           "currentLiab": null,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 261600000000.0,
+          "sharesOutstanding": 261600381459,
           "workingCapital": null
         },
         {
@@ -1743,7 +1743,7 @@
           "currentLiab": null,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 261600000000.0,
+          "sharesOutstanding": 261600381459,
           "workingCapital": null
         },
         {
@@ -1762,7 +1762,7 @@
           "currentLiab": null,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 261600000000.0,
+          "sharesOutstanding": 261600381459,
           "workingCapital": null
         },
         {
@@ -1781,7 +1781,7 @@
           "currentLiab": null,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 261600000000.0,
+          "sharesOutstanding": 261600381459,
           "workingCapital": null
         },
         {
@@ -1800,7 +1800,7 @@
           "currentLiab": null,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 250011000000.0,
+          "sharesOutstanding": 261600381459,
           "workingCapital": null
         },
         {
@@ -1819,7 +1819,7 @@
           "currentLiab": null,
           "retainedEarnings": null,
           "longTermDebt": null,
-          "sharesOutstanding": 250011000000.0,
+          "sharesOutstanding": 261600381459,
           "workingCapital": null
         }
       ],
