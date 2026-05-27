@@ -1,5 +1,5 @@
 {
-  "updated": "2026-05-27T06:27:51Z",
+  "updated": "2026-05-27T07:02:32Z",
   "data": {
     "AAPL": {
       "frequency": "Q",
@@ -962,7 +962,7 @@
           "endDate": "2025-06-30",
           "revenue": 933791869000.0,
           "grossProfit": 547369238000.0,
-          "operatingIncome": 463440498000.0,
+          "operatingIncome": 463423000000.0,
           "netIncome": 398273102000.0,
           "ebit": 496726299000.0,
           "ar": 233407179000.0,
@@ -976,8 +976,8 @@
           "sharesOutstanding": 25932615521.0,
           "longTermDebt": 883671102000.0,
           "cfo": 497064085000.0,
-          "capex": -299562606000.0,
-          "fcf": 197501479000.0,
+          "capex": null,
+          "fcf": null,
           "workingCapital": 1887603141000.0
         },
         {
@@ -1020,7 +1020,7 @@
           "sharesOutstanding": null,
           "longTermDebt": null,
           "cfo": null,
-          "capex": null,
+          "capex": -365008324000.0,
           "fcf": null,
           "workingCapital": null
         }
@@ -1456,10 +1456,10 @@
       ],
       "derived": {
         "altmanZ": [
-          1.0317013579174958,
-          1.1609848042689992,
-          1.090234133975288,
-          1.1284929338287901
+          1.028282163614387,
+          1.1574848549421082,
+          1.0865968945800686,
+          1.1248114693626887
         ],
         "piotroskiF": [
           3,
