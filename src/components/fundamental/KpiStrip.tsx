@@ -82,21 +82,21 @@ export default function KpiStrip({ data }: Props) {
       <Tile
         label="Revenue YoY"
         value={fmtPct(revYoY)}
-        sparkValues={revYoYSeries}
+        sparkValues={[...revYoYSeries].reverse()}
         dotColor={(revYoY ?? 0) >= 0 ? "emerald" : "rose"}
         sparkColor="#3b82f6"
       />
       <Tile
         label="Gross Margin Δ"
         value={fmtBps(gmDelta)}
-        sparkValues={gmSeries}
+        sparkValues={[...gmSeries].reverse()}
         dotColor={(gmDelta ?? 0) >= 0 ? "emerald" : "rose"}
         sparkColor="#d97706"
       />
       <Tile
         label="FCF/share TTM"
         value={fmtMoney(fcfTtm)}
-        sparkValues={fcfSeries}
+        sparkValues={[...fcfSeries].reverse()}
         dotColor={(fcfTtm ?? 0) >= 0 ? "emerald" : "rose"}
         sparkColor="#10b981"
       />

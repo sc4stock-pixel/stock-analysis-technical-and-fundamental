@@ -55,22 +55,35 @@ export default function QualityScorecards({ data }: Props) {
   const zLabel = z === null || z === undefined ? "—" : z > 2.99 ? "SAFE" : z >= 1.81 ? "GRAY" : "DISTRESS";
   const fLabel = f === null || f === undefined ? "—" : f >= 7 ? "ELITE" : f >= 4 ? "MID" : "WEAK";
 
+  const insight = (() => {
+    if (f != null && f >= 7 && z != null && z > 2.99)
+      return { text: "📈 VISUAL INSIGHT: Elite quality score + safe Z-score — strong structural confirmation 🟢", color: "text-emerald-400" };
+    if (f != null && f >= 7)
+      return { text: "📊 VISUAL INSIGHT: Elite Piotroski score — high operational quality 🟢", color: "text-emerald-400" };
+    if (f != null && f <= 3)
+      return { text: "⚠️ VISUAL INSIGHT: Low Piotroski score — fundamental weakness detected 🔴", color: "text-rose-400" };
+    return null;
+  })();
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      <Scorecard
-        title="Altman Z-Score"
-        value={z != null ? z.toFixed(2) : "—"}
-        label={zLabel}
-        sparkValues={data.derived.altmanZ}
-        color={zColor}
-      />
-      <Scorecard
-        title="Piotroski F-Score"
-        value={f != null ? `${f}/9` : "—"}
-        label={fLabel}
-        sparkValues={data.derived.piotroskiF}
-        color={fColor}
-      />
+    <div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Scorecard
+          title="Altman Z-Score"
+          value={z != null ? z.toFixed(2) : "—"}
+          label={zLabel}
+          sparkValues={data.derived.altmanZ}
+          color={zColor}
+        />
+        <Scorecard
+          title="Piotroski F-Score"
+          value={f != null ? `${f}/9` : "—"}
+          label={fLabel}
+          sparkValues={data.derived.piotroskiF}
+          color={fColor}
+        />
+      </div>
+      {insight && <p className={`mt-2 text-[10px] font-mono ${insight.color}`}>{insight.text}</p>}
     </div>
   );
 }

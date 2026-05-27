@@ -17,17 +17,43 @@ function cccDays(p: { ar?: number | null; inventory?: number | null; ap?: number
   return dso + dio - dpo;
 }
 
+function fmtFcfAbs(v: number): string {
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (abs >= 1e12) return `${sign}$${(abs / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9)  return `${sign}$${(abs / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6)  return `${sign}$${(abs / 1e6).toFixed(0)}M`;
+  return `${sign}$${abs.toFixed(0)}`;
+}
+
 export default function CashEfficiencyChart({ data }: Props) {
   const rows = data.periods.slice(0, 4).map(p => {
     const shares = p.sharesOutstanding && p.sharesOutstanding > 1e6 ? p.sharesOutstanding : null;
     return {
       label: fmtPeriodLabel(p.endDate, data.frequency),
       fcfPerShare: (p.fcf != null && shares) ? p.fcf / shares : null,
+      fcfAbs: p.fcf ?? null,
       ccc: cccDays(p),
     };
   }).reverse();
 
+  const useFcfPerShare = rows.some(r => r.fcfPerShare != null);
+  const fcfDataKey = useFcfPerShare ? "fcfPerShare" : "fcfAbs";
+  const fcfLabel = useFcfPerShare ? "FCF/share" : "FCF (abs)";
   const cccAvailable = rows.some(r => r.ccc != null);
+
+  // Visual insight: FCF trend
+  const insight = (() => {
+    const fcfVals = data.periods.slice(0, 4).map(p => p.fcf).filter((v): v is number => v != null);
+    if (fcfVals.length < 2) return null;
+    const allPos = fcfVals.every(v => v > 0);
+    const trending = fcfVals[0] > fcfVals[fcfVals.length - 1];
+    if (allPos && trending)
+      return { text: "📈 VISUAL INSIGHT: FCF consistently positive and in uptrend — strong cash generation 🟢", color: "text-emerald-400" };
+    if (fcfVals[0] < 0)
+      return { text: "⚠️ VISUAL INSIGHT: Negative FCF this period — monitor cash burn 🔴", color: "text-rose-400" };
+    return null;
+  })();
 
   return (
     <div className="rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
@@ -40,10 +66,14 @@ export default function CashEfficiencyChart({ data }: Props) {
         )}
       </div>
       <ResponsiveContainer width="100%" height={280}>
-        <ComposedChart data={rows} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+        <ComposedChart data={rows} margin={{ top: 10, right: 40, left: 10, bottom: 0 }}>
           <CartesianGrid stroke="#262626" strokeDasharray="2 2" />
           <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#a3a3a3" }} />
-          <YAxis yAxisId="left" tick={{ fontSize: 10, fill: "#a3a3a3" }} tickFormatter={(v: number) => `$${v?.toFixed(2)}`} />
+          <YAxis
+            yAxisId="left"
+            tick={{ fontSize: 10, fill: "#a3a3a3" }}
+            tickFormatter={(v: number) => useFcfPerShare ? `$${v?.toFixed(2)}` : fmtFcfAbs(v)}
+          />
           <YAxis yAxisId="right" orientation="right" reversed
                  tick={{ fontSize: 10, fill: "#a3a3a3" }}
                  label={{ value: "↓ days = better", angle: 90, position: "insideRight", fill: "#a3a3a3", fontSize: 9 }} />
@@ -51,13 +81,14 @@ export default function CashEfficiencyChart({ data }: Props) {
             contentStyle={{ background: "#171717", border: "1px solid #404040", fontSize: 11 }}
             formatter={(value: unknown, name: string) => {
               const n = value as number;
-              return name === "CCC Days" ? [`${n?.toFixed(0)} d`, name] : [`$${n?.toFixed(2)}`, name];
+              if (name === "CCC Days") return [`${n?.toFixed(0)} d`, name];
+              return useFcfPerShare ? [`$${n?.toFixed(2)}`, name] : [fmtFcfAbs(n), name];
             }}
           />
           <Legend wrapperStyle={{ fontSize: 10 }} />
-          <Bar yAxisId="left" dataKey="fcfPerShare" name="FCF/share">
+          <Bar yAxisId="left" dataKey={fcfDataKey} name={fcfLabel}>
             {rows.map((r, i) => (
-              <Cell key={i} fill={(r.fcfPerShare ?? 0) >= 0 ? "#10b981" : "#f43f5e"} />
+              <Cell key={i} fill={((useFcfPerShare ? r.fcfPerShare : r.fcfAbs) ?? 0) >= 0 ? "#10b981" : "#f43f5e"} />
             ))}
           </Bar>
           {cccAvailable && (
@@ -66,6 +97,7 @@ export default function CashEfficiencyChart({ data }: Props) {
           )}
         </ComposedChart>
       </ResponsiveContainer>
+      {insight && <p className={`mt-2 text-[10px] font-mono ${insight.color}`}>{insight.text}</p>}
     </div>
   );
 }

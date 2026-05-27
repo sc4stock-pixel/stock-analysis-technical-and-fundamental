@@ -123,6 +123,18 @@ def fetch_us_cashflow(symbol: str, periods: int = 6) -> list[dict]:
     return out
 
 
+def fetch_us_overview(symbol: str) -> dict:
+    """Fetches market cap and reliable shares outstanding from AV COMPANY_OVERVIEW.
+    Called once per US ticker (4th endpoint). Market cap is required for Altman Z."""
+    payload = _av_get("OVERVIEW", symbol)
+    if not payload:
+        return {"marketCap": None, "sharesOutstanding": None}
+    return {
+        "marketCap": _to_float(payload.get("MarketCapitalization")),
+        "sharesOutstanding": _to_float(payload.get("SharesOutstanding")),
+    }
+
+
 def merge_statements(income: list[dict], balance: list[dict], cashflow: list[dict]) -> list[dict]:
     """Join the three statement arrays on endDate.
     Returns periods[] newest-first per the cache schema.
@@ -393,7 +405,7 @@ def main():
     data = {}
 
     if us_syms and AV_KEY:
-        print(f"\n── Tier 1: Alpha Vantage — {len(us_syms)} US stocks × 3 endpoints ──")
+        print(f"\n── Tier 1: Alpha Vantage — {len(us_syms)} US stocks × 4 endpoints ──")
         for i, sym in enumerate(us_syms):
             if i > 0:
                 time.sleep(AV_SLEEP_SEC)
@@ -405,10 +417,18 @@ def main():
             time.sleep(AV_SLEEP_SEC)
             print(f"    {sym} CF ...", flush=True)
             cf  = fetch_us_cashflow(sym)
-            print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} periods")
+            time.sleep(AV_SLEEP_SEC)
+            print(f"    {sym} OV ...", flush=True)
+            ov  = fetch_us_overview(sym)
+            market_cap = ov.get("marketCap")
+            real_shares = ov.get("sharesOutstanding")
+            if real_shares:
+                for row in bal:
+                    row["sharesOutstanding"] = real_shares
+            print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} mktCap={'✓' if market_cap else '✗'}")
             periods = merge_statements(inc, bal, cf)
             data[sym] = {"frequency": "Q", "periods": periods}
-            data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=None)
+            data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=market_cap)
     elif us_syms and not AV_KEY:
         print("\nWARNING: AV_KEY not set — skipping US stocks")
 
@@ -421,6 +441,27 @@ def main():
             ak = None
         if ak:
             print(f"\n── Tier 2: Akshare — {len(hk_syms)} HK stocks × 3 endpoints ──")
+
+            # One-shot: fetch HK spot data for market cap + real total share count (总股本)
+            hk_spot: dict[str, dict] = {}
+            try:
+                print("  Fetching HK spot data (市值 + 总股本) ...", flush=True)
+                spot_df = ak.stock_hk_spot_em()
+                for sym in hk_syms:
+                    raw_code = sym.replace(".HK", "").lstrip("0") or "0"
+                    mask = spot_df["代码"].astype(str).str.lstrip("0") == raw_code
+                    row = spot_df[mask]
+                    if not row.empty:
+                        r = row.iloc[0]
+                        mc     = _to_float(str(r.get("总市值", "")))
+                        shares = _to_float(str(r.get("总股本", "")))
+                        hk_spot[sym] = {"marketCap": mc, "sharesOutstanding": shares}
+                        print(f"    {sym}: mktCap={mc} shares={shares}")
+                    else:
+                        print(f"    {sym}: not found in spot data")
+            except Exception as e:
+                print(f"  WARNING stock_hk_spot_em failed: {e}")
+
             for i, sym in enumerate(hk_syms):
                 if i > 0:
                     time.sleep(2)
@@ -430,8 +471,17 @@ def main():
                 cf = fetch_hk_cashflow(ak, pd, sym, is_cumulative_hint=True)
                 print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} freq={freq}")
                 periods_merged = merge_statements(inc, bal, cf)
+
+                # Override sharesOutstanding with real total share count from spot data
+                spot = hk_spot.get(sym, {})
+                real_shares = spot.get("sharesOutstanding")
+                market_cap_hk = spot.get("marketCap")
+                if real_shares:
+                    for row in periods_merged:
+                        row["sharesOutstanding"] = real_shares
+
                 data[sym] = {"frequency": freq, "periods": periods_merged}
-                data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=None)
+                data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=market_cap_hk)
 
     out = {
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
