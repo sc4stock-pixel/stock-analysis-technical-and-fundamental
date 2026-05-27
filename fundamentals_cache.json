@@ -1,5 +1,5 @@
 {
-  "updated": "2026-05-27T07:02:32Z",
+  "updated": "2026-05-27T07:09:56Z",
   "data": {
     "AAPL": {
       "frequency": "Q",
@@ -962,7 +962,7 @@
           "endDate": "2025-06-30",
           "revenue": 933791869000.0,
           "grossProfit": 547369238000.0,
-          "operatingIncome": 463423000000.0,
+          "operatingIncome": 463440498000.0,
           "netIncome": 398273102000.0,
           "ebit": 496726299000.0,
           "ar": 233407179000.0,
@@ -976,8 +976,8 @@
           "sharesOutstanding": 25932615521.0,
           "longTermDebt": 883671102000.0,
           "cfo": 497064085000.0,
-          "capex": null,
-          "fcf": null,
+          "capex": -299562606000.0,
+          "fcf": 197501479000.0,
           "workingCapital": 1887603141000.0
         },
         {
@@ -1020,7 +1020,7 @@
           "sharesOutstanding": null,
           "longTermDebt": null,
           "cfo": null,
-          "capex": -365008324000.0,
+          "capex": null,
           "fcf": null,
           "workingCapital": null
         }
@@ -1179,10 +1179,10 @@
       ],
       "derived": {
         "altmanZ": [
-          2.610846031470054,
-          2.651722446199963,
-          2.6503181319791853,
-          2.749985868804163
+          2.6123161792368075,
+          2.6532133964631113,
+          2.6518096152107797,
+          2.7515136197848356
         ],
         "piotroskiF": [
           3,
@@ -1212,7 +1212,7 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": null,
-          "cfo": 0,
+          "cfo": 101351000000.0,
           "fcf": null,
           "workingCapital": 193064000000.0
         },
@@ -1233,9 +1233,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": null,
-          "cfo": 66475000000.0,
+          "cfo": 303052000000.0,
           "capex": 87482000000.0,
-          "fcf": -21007000000.0,
+          "fcf": 215570000000.0,
           "workingCapital": 182709000000.0
         },
         {
@@ -1255,7 +1255,7 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": null,
-          "cfo": 85312000000.0,
+          "cfo": 236577000000.0,
           "fcf": null,
           "workingCapital": 152919000000.0
         },
@@ -1276,9 +1276,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": null,
-          "cfo": 74376000000.0,
+          "cfo": 151265000000.0,
           "capex": 45558000000.0,
-          "fcf": 28818000000.0,
+          "fcf": 105707000000.0,
           "workingCapital": 110386000000.0
         },
         {
@@ -1298,7 +1298,7 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": null,
-          "cfo": 0,
+          "cfo": 76889000000.0,
           "fcf": null,
           "workingCapital": 124493000000.0
         },
@@ -1319,9 +1319,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": null,
-          "cfo": 54046000000.0,
+          "cfo": 258521000000.0,
           "capex": 62927000000.0,
-          "fcf": -8881000000.0,
+          "fcf": 195594000000.0,
           "workingCapital": 99271000000.0
         }
       ],
@@ -1333,7 +1333,7 @@
           null
         ],
         "piotroskiF": [
-          2,
+          4,
           4,
           null,
           null
@@ -1456,10 +1456,10 @@
       ],
       "derived": {
         "altmanZ": [
-          1.028282163614387,
-          1.1574848549421082,
-          1.0865968945800686,
-          1.1248114693626887
+          1.026572599070686,
+          1.155734913656653,
+          1.0847783095697445,
+          1.1229707722386852
         ],
         "piotroskiF": [
           3,
@@ -1489,7 +1489,7 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 424000.0,
-          "cfo": 0,
+          "cfo": -1792006000.0,
           "fcf": null,
           "workingCapital": 64402395000.0
         },
@@ -1510,9 +1510,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 426000.0,
-          "cfo": 614017000.0,
+          "cfo": 34142377000.0,
           "capex": 12769155000.0,
-          "fcf": -12155138000.0,
+          "fcf": 21373222000.0,
           "workingCapital": 62405312000.0
         },
         {
@@ -1532,7 +1532,7 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 426000.0,
-          "cfo": 5473620000.0,
+          "cfo": 33528360000.0,
           "fcf": null,
           "workingCapital": 61545703000.0
         },
@@ -1553,9 +1553,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 425000.0,
-          "cfo": 23545243000.0,
+          "cfo": 28054740000.0,
           "capex": 5085940000.0,
-          "fcf": 18459303000.0,
+          "fcf": 22968800000.0,
           "workingCapital": 55290969000.0
         },
         {
@@ -1575,7 +1575,7 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 424000.0,
-          "cfo": 0,
+          "cfo": 4509497000.0,
           "fcf": null,
           "workingCapital": 85700422000.0
         },
@@ -1596,9 +1596,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 407000.0,
-          "cfo": 23906814000.0,
+          "cfo": 39295499000.0,
           "capex": 7297307000.0,
-          "fcf": 16609507000.0,
+          "fcf": 31998192000.0,
           "workingCapital": 50323776000.0
         }
       ],
@@ -1637,9 +1637,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 199000000.0,
-          "cfo": 32239768000.0,
-          "capex": 2622639000.0,
-          "fcf": 29617129000.0,
+          "cfo": 47274244000.0,
+          "capex": 4127869000.0,
+          "fcf": 43146375000.0,
           "workingCapital": -20047000000.0
         },
         {
@@ -1659,9 +1659,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 184192000.0,
-          "cfo": 0,
-          "capex": 0,
-          "fcf": 0,
+          "cfo": 15034476000.0,
+          "capex": 1505230000.0,
+          "fcf": 13529246000.0,
           "workingCapital": -8372448000.0
         },
         {
@@ -1681,9 +1681,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 184020000.0,
-          "cfo": 17911412000.0,
-          "capex": 1551571000.0,
-          "fcf": 16359841000.0,
+          "cfo": 36866834000.0,
+          "capex": 4194036000.0,
+          "fcf": 32672798000.0,
           "workingCapital": -10791077000.0
         },
         {
@@ -1703,9 +1703,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 183807000.0,
-          "cfo": 0,
-          "capex": 0,
-          "fcf": 0,
+          "cfo": 18955422000.0,
+          "capex": 2642465000.0,
+          "fcf": 16312957000.0,
           "workingCapital": 4929066000.0
         },
         {
@@ -1725,9 +1725,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 183807000.0,
-          "cfo": 11643397000.0,
-          "capex": 3449823000.0,
-          "fcf": 8193574000.0,
+          "cfo": 22342369000.0,
+          "capex": 5711295000.0,
+          "fcf": 16631074000.0,
           "workingCapital": 16810973000.0
         },
         {
@@ -1747,9 +1747,9 @@
           "retainedEarnings": null,
           "longTermDebt": null,
           "sharesOutstanding": 183686000.0,
-          "cfo": 0,
-          "capex": 0,
-          "fcf": 0,
+          "cfo": 10698972000.0,
+          "capex": 2261472000.0,
+          "fcf": 8437500000.0,
           "workingCapital": 2341521000.0
         }
       ],
@@ -1762,7 +1762,7 @@
         ],
         "piotroskiF": [
           3,
-          1,
+          3,
           null,
           null
         ]
