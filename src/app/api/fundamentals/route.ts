@@ -5,7 +5,10 @@ export const maxDuration = 30;
 
 const FUND_CACHE_URL =
   "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/fundamentals_cache.json";
-const TTL_MS = 6 * 60 * 60 * 1000; // 6h
+// 10 min TTL — bounds per-instance staleness after GHA cache updates.
+// 6h previously caused an instance to keep serving pre-update data for hours
+// even though the GitHub raw cache had refreshed (2026-05-27 Z'' rollout).
+const TTL_MS = 10 * 60 * 1000;
 
 interface PeriodRow {
   endDate: string;
