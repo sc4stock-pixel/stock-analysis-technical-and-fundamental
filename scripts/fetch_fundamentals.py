@@ -463,8 +463,9 @@ def fetch_hk_cashflow_ak(ak, pd, symbol: str, periods: int = 6) -> list[dict]:
 
     rows = sorted(rows_dict.values(), key=lambda r: r["endDate"], reverse=True)
 
-    # Apply YTD conversion (cumulative → incremental)
-    rows = _convert_ytd_to_period(rows, fields=["cfo", "capex"])
+    # NOTE: Do NOT call _convert_ytd_to_period here.
+    # HK GAAP Eastmoney data ('经营业务现金净额') is already period-specific, not cumulative YTD.
+    # Applying conversion without revenue-based FY detection zeros out negative diffs.
 
     for r in rows:
         cfo, capex = r.get("cfo"), r.get("capex")
