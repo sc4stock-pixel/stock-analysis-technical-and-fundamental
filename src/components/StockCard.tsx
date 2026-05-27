@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, TimesfmPriceTargets } from "@/types";
 import { regimeColor } from "@/lib/regime";
 import OverviewTab    from "./tabs/OverviewTab";
@@ -13,11 +13,12 @@ interface Props {
   result: StockAnalysisResult;
   config: AppConfig;
   timesfm?: TimesfmPriceTargets;
+  forcedTab?: Tab;
 }
 
 type Strategy = "score" | "supertrend";
-const TABS = ["OVERVIEW", "CHART", "BACKTEST", "MONTE CARLO", "PLAN", "FUNDAMENTAL"] as const;
-type Tab = (typeof TABS)[number];
+export const TABS = ["OVERVIEW", "CHART", "BACKTEST", "MONTE CARLO", "PLAN", "FUNDAMENTAL"] as const;
+export type Tab = (typeof TABS)[number];
 
 function signalBadge(signal: string) {
   if (signal === "BUY")  return "badge-buy";
@@ -118,9 +119,15 @@ function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
   return { ...result, backtest: stBt };
 }
 
-export default function StockCard({ result, config, timesfm }: Props) {
+export default function StockCard({ result, config, timesfm, forcedTab }: Props) {
   const [tab, setTab] = useState<Tab>("OVERVIEW");
   const [strategy, setStrategy] = useState<Strategy>("score");
+
+  // When a global tab override is broadcast, snap all cards to that tab.
+  // The user can still click any individual tab afterward to navigate freely.
+  useEffect(() => {
+    if (forcedTab) setTab(forcedTab);
+  }, [forcedTab]);
 
   const bt = result.backtest;
   const isError = result.signal === "ERROR";

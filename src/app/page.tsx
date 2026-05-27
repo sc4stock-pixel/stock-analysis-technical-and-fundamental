@@ -5,7 +5,7 @@ import { MacroData, HKMacroData, mbsScoreAdjustment } from "@/lib/macro-types";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import ConfigPanel from "@/components/ConfigPanel";
 import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
-import StockCard from "@/components/StockCard";
+import StockCard, { TABS, Tab } from "@/components/StockCard";
 import dynamic from "next/dynamic";
 import AlertsPanel from "@/components/AlertsPanel";
 import OpenPositionsPanel from "@/components/OpenPositionsPanel";
@@ -55,6 +55,8 @@ export default function Dashboard() {
   const [timesfmLoading, setTimesfmLoading] = useState(false);
 
   const [stOptimizing, setStOptimizing] = useState(false);
+  // Global tab broadcast — null means each card uses its own state
+  const [globalTab, setGlobalTab] = useState<Tab | null>(null);
   const [stOptMsg, setStOptMsg]         = useState<string | null>(null);
 
   const [tgSending, setTgSending]   = useState(false);
@@ -420,6 +422,33 @@ export default function Dashboard() {
             className="px-3 py-1.5 text-xs border border-[#1e2d4a] text-[#6b85a0] hover:border-[#7c3aed] hover:text-[#a78bfa] disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
             {tgSending ? "SENDING…" : "📱 NOTIFY"}
           </button>
+          {results.length > 0 && (
+            <div className="flex items-center gap-1 border border-[#1e2d4a] rounded px-1.5 py-0.5"
+                 title="Broadcast a tab to all cards — click again to release">
+              <span className="text-[#4a6080] text-[0.6rem] font-mono pr-1 select-none">ALL:</span>
+              {(["OVERVIEW","CHART","BACKTEST","MONTE CARLO","PLAN","FUNDAMENTAL"] as Tab[]).map(t => {
+                const labels: Record<Tab, string> = {
+                  OVERVIEW: "OVR", CHART: "CHT", BACKTEST: "BKT",
+                  "MONTE CARLO": "MC", PLAN: "PLN", FUNDAMENTAL: "FND",
+                };
+                const active = globalTab === t;
+                return (
+                  <button
+                    key={t}
+                    onClick={() => setGlobalTab(g => g === t ? null : t)}
+                    title={active ? `Click to release — cards return to their own tabs` : `Show ${t} on all cards`}
+                    className={`px-1.5 py-0.5 text-[0.6rem] font-mono rounded transition-all ${
+                      active
+                        ? "bg-[#f59e0b]/20 text-[#f59e0b] font-bold"
+                        : "text-[#4a6080] hover:text-[#c8d8f0]"
+                    }`}
+                  >
+                    {labels[t]}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <button onClick={runAnalysis} disabled={loading}
             className="px-4 py-1.5 text-xs font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
             {loading ? `SCANNING… ${progress}%` : "▶ RUN ANALYSIS"}
@@ -526,6 +555,7 @@ export default function Dashboard() {
                     result={result}
                     config={config}
                     timesfm={timesfmData?.[result.symbol]}
+                    forcedTab={globalTab ?? undefined}
                   />
                 </div>
               );
