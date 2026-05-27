@@ -7,7 +7,22 @@ export interface FundamentalPrompts {
   peerComparisonPrompt: string;
   bearCasePrompt: string;
   riskValuationPrompt: string;
+  earningsAnalysisPrompt: string;
   fetchedAt: string;
+}
+
+/** Most recently reported quarter, assuming earnings land ~6 weeks after quarter-end. */
+function latestReportedQuarter(): string {
+  const d = new Date();
+  const m = d.getMonth() + 1; // 1-12
+  const y = d.getFullYear();
+  // Jan-Mar: Q4 of prev year is the latest reported (Q4 earnings out Feb-Mar);
+  //   for very early Jan use Q3 of prev year.
+  if (m === 1)               return `Q3 ${y - 1}`;
+  if (m >= 2 && m <= 4)      return `Q4 ${y - 1}`;
+  if (m >= 5 && m <= 7)      return `Q1 ${y}`;
+  if (m >= 8 && m <= 10)     return `Q2 ${y}`;
+  /* m === 11 || m === 12 */ return `Q3 ${y}`;
 }
 
 export async function generateFundamentalPrompts(ticker: string): Promise<FundamentalPrompts> {
@@ -119,12 +134,51 @@ Use any available data from the following snapshot, but supplement with real-tim
 - Margin trend: ${JSON.stringify(marginData?.margins)}
 `;
 
+  // ── Earnings Analysis prompt (5th) ────────────────────────
+  const quarter = latestReportedQuarter();
+  const earningsAnalysisPrompt = `Act as an institutional equity research analyst specializing in quantitative fundamental analysis.
+
+Your FIRST priority is to use your live web-browsing capabilities to locate, access, and download the primary source materials for ${ticker}'s latest ${quarter} earnings results. Specifically, look for:
+1. The official Earnings Press Release (or HKEX Announcement if an HK stock).
+2. The complete Earnings Call Transcript / Webcast Replay Transcript.
+
+Search reliable financial repositories, including the company's official Investor Relations page, Seeking Alpha, Yahoo Finance, or exchange filing systems to retrieve this text. Once retrieved, confirm the sources you are using by printing their titles at the top of your response.
+
+Using the exact data from those downloaded documents, conduct a rigorous, critical teardown of the results. Avoid generic management platitudes and analyze the structural realities using the following 6 sections:
+
+1. The Headline vs. Internal Reality
+- Top and Bottom Line: Contrast actual Revenue, Operating Income, and EPS against both consensus Wall Street expectations and management's own prior guidance. State the exact beat/miss margins.
+- Organic Growth: Strip out any impact from foreign exchange (FX) fluctuations or recent acquisitions to identify the true organic growth rate of the core business.
+
+2. Margin Degradation or Expansion (Efficiency Check)
+- Component Breakdown: Calculate and analyze the sequential (QoQ) and year-over-year (YoY) changes in Gross Margin, Operating Margin, and Net Margin.
+- Operational Leverage: Did operating expenses (S&M, R&D, G&A) grow faster or slower than revenue? Pinpoint exactly where the company is gaining efficiency or losing control of costs.
+
+3. Balance Sheet Signals & Cash Quality
+- Earnings Quality: Compare Net Income to Free Cash Flow (FCF). If FCF significantly lags Net Income, identify the working capital drag (e.g., uncollected accounts receivable or rising inventory).
+- Asset Velocity: Analyze changes in Inventory levels and Days Sales Outstanding (DSO). Is inventory piling up faster than sales growth?
+- Liquidity & Leverage: Note any material changes in cash balances, net debt, or short-term borrowings this quarter.
+
+4. Segment Performance & KPI Deep Dive
+- Disaggregate the results by primary business segments and geographies. Which specific segment acted as the growth engine, and which underperformed?
+- Analyze the trajectory of the company's core non-financial operational KPIs (e.g., Average Revenue Per User (ARPU), Cloud Remaining Performance Obligations (RPO), units shipped, or production run-rates).
+
+5. Forward Guidance & Management Tone
+- Guidance Vector: Detail the explicit guidance provided for the upcoming quarter and full year (Revenue, margins, Capex). Is management guiding up, down, or holding steady compared to current consensus?
+- Conference Call Tone & Reassurance: Highlight the top 2-3 toughest questions asked by analysts during the Q&A session. How effectively did management address concerns regarding competition, pricing pressure, or macro headwinds?
+
+6. Long-Thesis Alignment (The "So What?")
+- Evaluate how this single quarter alters the structural long-term investment thesis. Does this report confirm the stock is an efficient compounder, signal a temporary speed bump, or expose structural deterioration (value trap) for a long-only portfolio?
+
+Provide a final, concise "Earnings Quality Score" from 1 to 10 (with 10 being flawless execution and pristine cash flow) along with a 2-sentence justification. Do not include standard financial disclaimers; focus purely on the structural data.`;
+
   return {
     ticker,
     deepDivePrompt,
     peerComparisonPrompt,
     bearCasePrompt,
     riskValuationPrompt,
+    earningsAnalysisPrompt,
     fetchedAt: new Date().toISOString(),
   };
 }

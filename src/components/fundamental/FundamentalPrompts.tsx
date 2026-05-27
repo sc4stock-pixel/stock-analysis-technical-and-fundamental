@@ -7,6 +7,7 @@ interface PromptsData {
   peerComparisonPrompt: string;
   bearCasePrompt: string;
   riskValuationPrompt: string;
+  earningsAnalysisPrompt: string;
   fetchedAt: string;
 }
 
@@ -53,7 +54,7 @@ export default function FundamentalPrompts({ ticker }: { ticker: string }) {
   };
 
   const combinedPrompt = prompts
-    ? `You are a fundamental analyst. Generate the following four reports for ${prompts.ticker}:
+    ? `You are a fundamental analyst. Generate the following five reports for ${prompts.ticker}:
 
 --- DEEP DIVE ---
 ${prompts.deepDivePrompt}
@@ -67,7 +68,10 @@ ${prompts.bearCasePrompt}
 --- RISK & VALUATION ---
 ${prompts.riskValuationPrompt}
 
-Produce all four reports in order, separated by clear headings.`
+--- EARNINGS ANALYSIS ---
+${prompts.earningsAnalysisPrompt}
+
+Produce all five reports in order, separated by clear headings.`
     : '';
 
   return (
@@ -117,7 +121,7 @@ Produce all four reports in order, separated by clear headings.`
                   : 'border-[#00d4ff] text-[#00d4ff] bg-[#00d4ff]/10 hover:bg-[#00d4ff]/20'
               }`}
             >
-              {copied === 'combined' ? '✅ Copied!' : '📋 Copy Combined Prompt (All 4 Reports)'}
+              {copied === 'combined' ? '✅ Copied!' : '📋 Copy Combined Prompt (All 5 Reports)'}
             </button>
             <span className="text-[#4a6080] text-xs">
               ({combinedPrompt.length.toLocaleString()} chars)
@@ -157,6 +161,13 @@ Produce all four reports in order, separated by clear headings.`
                 copied={copied}
                 onCopy={copyToClipboard}
                 index={4}
+              />
+              <PromptBlock
+                title="📰 Earnings Analysis"
+                prompt={prompts.earningsAnalysisPrompt}
+                copied={copied}
+                onCopy={copyToClipboard}
+                index={5}
               />
             </div>
           </details>
