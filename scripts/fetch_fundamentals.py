@@ -2,9 +2,12 @@
 """
 Fetch quarterly IS/BS/CF for all portfolio stocks and write fundamentals_cache.json.
 
-  Tier 1 — US stocks  : Alpha Vantage INCOME_STATEMENT + BALANCE_SHEET + CASH_FLOW
+  Tier 1 — US stocks  : yfinance (Yahoo Finance) — no rate limits, handles auth automatically
   Tier 2 — HK stocks  : Akshare stock_financial_hk_report_em (利润表/资产负债表/现金流量表)
   Skip   — ETFs       : No fundamentals; entry omitted from cache
+
+AV is NOT used here (25 calls/day free limit is shared with fetch_av_earnings.py).
+yfinance replaces AV for US financial statements and market cap.
 
 For HK cumulative-YTD reporters (Tencent, BYD, Xiaomi, Alibaba),
 FY-reset detection + within-FY differencing is applied to every flow field.
@@ -61,81 +64,93 @@ def _to_float(v) -> float | None:
         return None
 
 
-def fetch_us_income(symbol: str, periods: int = 6) -> list[dict]:
-    """Returns last `periods` quarterly income statements, newest first.
-    Each row keeps only fields needed downstream."""
-    payload = _av_get("INCOME_STATEMENT", symbol)
-    if not payload:
-        return []
-    quarters = payload.get("quarterlyReports", [])[:periods]
-    out = []
-    for q in quarters:
-        out.append({
-            "endDate": q.get("fiscalDateEnding"),
-            "revenue": _to_float(q.get("totalRevenue")),
-            "grossProfit": _to_float(q.get("grossProfit")),
-            "operatingIncome": _to_float(q.get("operatingIncome")),
-            "netIncome": _to_float(q.get("netIncome")),
-            "ebit": _to_float(q.get("ebit")) or _to_float(q.get("operatingIncome")),
-        })
-    return out
-
-
-def fetch_us_balance(symbol: str, periods: int = 6) -> list[dict]:
-    payload = _av_get("BALANCE_SHEET", symbol)
-    if not payload:
-        return []
-    quarters = payload.get("quarterlyReports", [])[:periods]
-    out = []
-    for q in quarters:
-        out.append({
-            "endDate": q.get("fiscalDateEnding"),
-            "ar": _to_float(q.get("currentNetReceivables")),
-            "inventory": _to_float(q.get("inventory")),
-            "ap": _to_float(q.get("currentAccountsPayable")),
-            "totalAssets": _to_float(q.get("totalAssets")),
-            "totalLiab": _to_float(q.get("totalLiabilities")),
-            "currentAssets": _to_float(q.get("totalCurrentAssets")),
-            "currentLiab": _to_float(q.get("totalCurrentLiabilities")),
-            "retainedEarnings": _to_float(q.get("retainedEarnings")),
-            "sharesOutstanding": _to_float(q.get("commonStockSharesOutstanding")),
-            "longTermDebt": _to_float(q.get("longTermDebt")),
-        })
-    return out
-
-
-def fetch_us_cashflow(symbol: str, periods: int = 6) -> list[dict]:
-    payload = _av_get("CASH_FLOW", symbol)
-    if not payload:
-        return []
-    quarters = payload.get("quarterlyReports", [])[:periods]
-    out = []
-    for q in quarters:
-        cfo = _to_float(q.get("operatingCashflow"))
-        capex = _to_float(q.get("capitalExpenditures"))
-        fcf = (cfo - capex) if (cfo is not None and capex is not None) else None
-        out.append({
-            "endDate": q.get("fiscalDateEnding"),
-            "cfo": cfo,
-            "capex": capex,
-            "fcf": fcf,
-        })
-    return out
-
-
-def fetch_market_cap_yahoo(symbol: str) -> float | None:
-    """Fetch market cap from Yahoo Finance price module — free, no AV quota consumed.
-    AV free tier is 25 calls/day; this avoids burning a 4th call per US ticker."""
-    url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules=price"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        raw = data["quoteSummary"]["result"][0]["price"]["marketCap"].get("raw")
-        return _to_float(str(raw)) if raw is not None else None
-    except Exception as e:
-        print(f"    WARNING yahoo mktcap {symbol}: {e}")
+def _to_float_yf(v) -> float | None:
+    """Convert yfinance value (may be NaN, None, or numeric) to float or None."""
+    import math
+    if v is None:
         return None
+    try:
+        f = float(v)
+        return None if math.isnan(f) else f
+    except (TypeError, ValueError):
+        return None
+
+
+def _yf_row(df, *names) -> float | None:
+    """Extract the first available row name from a yfinance DataFrame column."""
+    for name in names:
+        if name in df.index:
+            val = df.loc[name]
+            if hasattr(val, 'iloc'):
+                return _to_float_yf(val.iloc[0])
+            return _to_float_yf(val)
+    return None
+
+
+def fetch_us_fundamentals_yf(symbol: str, periods: int = 6) -> tuple[list[dict], list[dict], list[dict], float | None]:
+    """Fetch US quarterly IS/BS/CF and market cap via yfinance.
+    yfinance handles Yahoo Finance auth (crumb/cookies) automatically.
+    No rate limits — replaces all AV calls for fundamentals data."""
+    try:
+        import yfinance as yf
+        import math
+        ticker = yf.Ticker(symbol)
+
+        info = ticker.fast_info or {}
+        market_cap = getattr(info, 'market_cap', None) or (ticker.info or {}).get("marketCap")
+
+        inc_df = ticker.quarterly_income_stmt   # rows=metrics, cols=dates newest-first
+        bal_df = ticker.quarterly_balance_sheet
+        cf_df  = ticker.quarterly_cash_flow
+
+        income, balance, cashflow = [], [], []
+
+        for col in list(inc_df.columns)[:periods]:
+            s = inc_df[col]
+            def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
+            income.append({
+                "endDate": str(col)[:10],
+                "revenue":         g("Total Revenue"),
+                "grossProfit":     g("Gross Profit"),
+                "operatingIncome": g("Operating Income", "EBIT"),
+                "netIncome":       g("Net Income", "Net Income Common Stockholders"),
+                "ebit":            g("EBIT", "Operating Income"),
+            })
+
+        for col in list(bal_df.columns)[:periods]:
+            s = bal_df[col]
+            def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
+            balance.append({
+                "endDate": str(col)[:10],
+                "ar":               g("Accounts Receivable", "Net Receivables"),
+                "inventory":        g("Inventory"),
+                "ap":               g("Accounts Payable"),
+                "totalAssets":      g("Total Assets"),
+                "totalLiab":        g("Total Liabilities Net Minority Interest", "Total Liabilities"),
+                "currentAssets":    g("Current Assets"),
+                "currentLiab":      g("Current Liabilities"),
+                "retainedEarnings": g("Retained Earnings"),
+                "sharesOutstanding": g("Ordinary Shares Number", "Share Issued"),
+                "longTermDebt":     g("Long Term Debt", "Long Term Debt And Capital Lease Obligation"),
+            })
+
+        for col in list(cf_df.columns)[:periods]:
+            s = cf_df[col]
+            def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
+            cfo   = g("Operating Cash Flow")
+            capex = g("Capital Expenditure")
+            # yfinance capex is negative (cash outflow); FCF = cfo + capex
+            fcf = (cfo + capex) if (cfo is not None and capex is not None) else None
+            cashflow.append({
+                "endDate": str(col)[:10],
+                "cfo": cfo, "capex": capex, "fcf": fcf,
+            })
+
+        return income, balance, cashflow, market_cap
+
+    except Exception as e:
+        print(f"    WARNING yfinance {symbol}: {e}")
+        return [], [], [], None
 
 
 def merge_statements(income: list[dict], balance: list[dict], cashflow: list[dict]) -> list[dict]:
@@ -407,28 +422,18 @@ def main():
 
     data = {}
 
-    if us_syms and AV_KEY:
-        print(f"\n── Tier 1: Alpha Vantage — {len(us_syms)} US stocks × 3 endpoints (IS/BS/CF) ──")
-        print("  Market cap fetched from Yahoo Finance (free) to stay within AV 25 req/day limit.")
+    if us_syms:
+        print(f"\n── Tier 1: yfinance — {len(us_syms)} US stocks (IS + BS + CF + market cap) ──")
+        print("  Using yfinance instead of AV to preserve the 25 req/day AV limit for EPS.")
         for i, sym in enumerate(us_syms):
             if i > 0:
-                time.sleep(AV_SLEEP_SEC)
-            print(f"  [{i+1}/{len(us_syms)}] {sym} IS ...", flush=True)
-            inc = fetch_us_income(sym)
-            time.sleep(AV_SLEEP_SEC)
-            print(f"    {sym} BS ...", flush=True)
-            bal = fetch_us_balance(sym)
-            time.sleep(AV_SLEEP_SEC)
-            print(f"    {sym} CF ...", flush=True)
-            cf  = fetch_us_cashflow(sym)
-            print(f"    {sym} mktcap (Yahoo) ...", flush=True)
-            market_cap = fetch_market_cap_yahoo(sym)
+                time.sleep(2)  # brief pause; yfinance has no strict rate limit
+            print(f"  [{i+1}/{len(us_syms)}] {sym} ...", flush=True)
+            inc, bal, cf, market_cap = fetch_us_fundamentals_yf(sym)
             print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} mktCap={'✓' if market_cap else '✗'}")
             periods = merge_statements(inc, bal, cf)
             data[sym] = {"frequency": "Q", "periods": periods}
             data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=market_cap)
-    elif us_syms and not AV_KEY:
-        print("\nWARNING: AV_KEY not set — skipping US stocks")
 
     if hk_syms:
         try:

@@ -18,7 +18,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install akshare pandas requests --quiet
+        run: pip install akshare pandas requests yfinance --quiet
 
       - name: Fetch quarterly EPS (existing)
         env:
