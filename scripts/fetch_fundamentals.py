@@ -123,16 +123,19 @@ def fetch_us_cashflow(symbol: str, periods: int = 6) -> list[dict]:
     return out
 
 
-def fetch_us_overview(symbol: str) -> dict:
-    """Fetches market cap and reliable shares outstanding from AV COMPANY_OVERVIEW.
-    Called once per US ticker (4th endpoint). Market cap is required for Altman Z."""
-    payload = _av_get("OVERVIEW", symbol)
-    if not payload:
-        return {"marketCap": None, "sharesOutstanding": None}
-    return {
-        "marketCap": _to_float(payload.get("MarketCapitalization")),
-        "sharesOutstanding": _to_float(payload.get("SharesOutstanding")),
-    }
+def fetch_market_cap_yahoo(symbol: str) -> float | None:
+    """Fetch market cap from Yahoo Finance price module — free, no AV quota consumed.
+    AV free tier is 25 calls/day; this avoids burning a 4th call per US ticker."""
+    url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules=price"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        raw = data["quoteSummary"]["result"][0]["price"]["marketCap"].get("raw")
+        return _to_float(str(raw)) if raw is not None else None
+    except Exception as e:
+        print(f"    WARNING yahoo mktcap {symbol}: {e}")
+        return None
 
 
 def merge_statements(income: list[dict], balance: list[dict], cashflow: list[dict]) -> list[dict]:
@@ -405,7 +408,8 @@ def main():
     data = {}
 
     if us_syms and AV_KEY:
-        print(f"\n── Tier 1: Alpha Vantage — {len(us_syms)} US stocks × 4 endpoints ──")
+        print(f"\n── Tier 1: Alpha Vantage — {len(us_syms)} US stocks × 3 endpoints (IS/BS/CF) ──")
+        print("  Market cap fetched from Yahoo Finance (free) to stay within AV 25 req/day limit.")
         for i, sym in enumerate(us_syms):
             if i > 0:
                 time.sleep(AV_SLEEP_SEC)
@@ -417,14 +421,8 @@ def main():
             time.sleep(AV_SLEEP_SEC)
             print(f"    {sym} CF ...", flush=True)
             cf  = fetch_us_cashflow(sym)
-            time.sleep(AV_SLEEP_SEC)
-            print(f"    {sym} OV ...", flush=True)
-            ov  = fetch_us_overview(sym)
-            market_cap = ov.get("marketCap")
-            real_shares = ov.get("sharesOutstanding")
-            if real_shares:
-                for row in bal:
-                    row["sharesOutstanding"] = real_shares
+            print(f"    {sym} mktcap (Yahoo) ...", flush=True)
+            market_cap = fetch_market_cap_yahoo(sym)
             print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} mktCap={'✓' if market_cap else '✗'}")
             periods = merge_statements(inc, bal, cf)
             data[sym] = {"frequency": "Q", "periods": periods}
@@ -442,10 +440,12 @@ def main():
         if ak:
             print(f"\n── Tier 2: Akshare — {len(hk_syms)} HK stocks × 3 endpoints ──")
 
-            # One-shot: fetch HK spot data for market cap + real total share count (总股本)
+            # One-shot: fetch HK spot data for share count (derived as 总市值 / 最新价).
+            # 总股本 unit is inconsistent across Eastmoney — derive shares from mktcap/price instead.
+            # HK Z-score stays None: CNY-reporting companies vs HKD market cap = currency mismatch.
             hk_spot: dict[str, dict] = {}
             try:
-                print("  Fetching HK spot data (市值 + 总股本) ...", flush=True)
+                print("  Fetching HK spot data (市值 / price → share count) ...", flush=True)
                 spot_df = ak.stock_hk_spot_em()
                 for sym in hk_syms:
                     raw_code = sym.replace(".HK", "").lstrip("0") or "0"
@@ -453,10 +453,15 @@ def main():
                     row = spot_df[mask]
                     if not row.empty:
                         r = row.iloc[0]
-                        mc     = _to_float(str(r.get("总市值", "")))
-                        shares = _to_float(str(r.get("总股本", "")))
+                        mc_raw  = _to_float(str(r.get("总市值", "")))   # in 亿 HKD
+                        price   = _to_float(str(r.get("最新价", "")))   # in HKD
+                        mc      = mc_raw * 1e8 if mc_raw else None      # convert to HKD
+                        shares  = (mc / price) if (mc and price and price > 0) else None
                         hk_spot[sym] = {"marketCap": mc, "sharesOutstanding": shares}
-                        print(f"    {sym}: mktCap={mc} shares={shares}")
+                        if mc and shares:
+                            print(f"    {sym}: mktCap={mc:.2e} HKD  shares={shares:.2e}")
+                        else:
+                            print(f"    {sym}: spot data incomplete")
                     else:
                         print(f"    {sym}: not found in spot data")
             except Exception as e:
@@ -472,11 +477,11 @@ def main():
                 print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} freq={freq}")
                 periods_merged = merge_statements(inc, bal, cf)
 
-                # Override sharesOutstanding with real total share count from spot data
+                # Override sharesOutstanding with derived share count from spot data
                 spot = hk_spot.get(sym, {})
                 real_shares = spot.get("sharesOutstanding")
                 market_cap_hk = spot.get("marketCap")
-                if real_shares:
+                if real_shares and real_shares > 1e8:   # sanity: must be >100M shares
                     for row in periods_merged:
                         row["sharesOutstanding"] = real_shares
 
