@@ -1,7 +1,7 @@
 // src/components/fundamental/QualityScorecards.tsx
 'use client';
 import type { FundamentalsPayload } from '../../app/api/fundamentals/route';
-import { thresholdColor, tailwindBand } from './format';
+import { thresholdColor, tailwindBand, zLabel, Z_BANDS } from './format';
 
 interface Props { data: FundamentalsPayload; }
 
@@ -50,13 +50,16 @@ function Scorecard({ title, value, label, sparkValues, color }: {
 export default function QualityScorecards({ data }: Props) {
   const z = data.derived.altmanZ[0];
   const f = data.derived.piotroskiF[0];
-  const zColor = thresholdColor("Z", z ?? null);
+  const zVariant = data.derived.zVariant ?? "Z";
+  const zSafeThreshold = Z_BANDS[zVariant].safe;
+  const zColor = thresholdColor("Z", z ?? null, zVariant);
   const fColor = thresholdColor("F", f ?? null);
-  const zLabel = z === null || z === undefined ? "—" : z > 2.99 ? "SAFE" : z >= 1.81 ? "GRAY" : "DISTRESS";
+  const zLabelText = zLabel(z, zVariant);
   const fLabel = f === null || f === undefined ? "—" : f >= 7 ? "ELITE" : f >= 4 ? "MID" : "WEAK";
+  const zTitle = zVariant === "Zpp" ? "Altman Z″-Score (EM)" : "Altman Z-Score";
 
   const insight = (() => {
-    if (f != null && f >= 7 && z != null && z > 2.99)
+    if (f != null && f >= 7 && z != null && z > zSafeThreshold)
       return { text: "📈 VISUAL INSIGHT: Elite quality score + safe Z-score — strong structural confirmation 🟢", color: "text-emerald-400" };
     if (f != null && f >= 7)
       return { text: "📊 VISUAL INSIGHT: Elite Piotroski score — high operational quality 🟢", color: "text-emerald-400" };
@@ -69,9 +72,9 @@ export default function QualityScorecards({ data }: Props) {
     <div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Scorecard
-          title="Altman Z-Score"
+          title={zTitle}
           value={z != null ? z.toFixed(2) : "—"}
-          label={zLabel}
+          label={zLabelText}
           sparkValues={data.derived.altmanZ}
           color={zColor}
         />

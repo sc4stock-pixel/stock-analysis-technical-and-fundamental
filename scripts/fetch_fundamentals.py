@@ -250,25 +250,37 @@ def fetch_hk_fundamentals_yf(symbol: str, periods: int = 6) -> tuple[list[dict],
 
 # ── Akshare HK fetchers — used as final fallback when yfinance is sparse ──
 
-HK_INCOME_MAP = {
-    "营业额": "revenue",
-    "毛利": "grossProfit",
-    "经营溢利": "operatingIncome",
-    "本公司股东应占溢利": "netIncome",
-    "每股基本盈利": "epsBasic",
+# Candidate lists — HK IFRS labels first (Tencent/Xiaomi/BYD/Geely/Alibaba format),
+# mainland GAAP variants as fallbacks. Proven via multi-ticker probe 2026-05-27.
+# Resolver picks the first candidate that appears in Eastmoney's STD_ITEM_NAME column.
+HK_INCOME_CANDS = {
+    "revenue":         ["营业额", "营业总收入", "营业收入"],
+    "grossProfit":     ["毛利"],
+    "operatingIncome": ["经营溢利", "营业利润"],
+    "netIncome":       ["股东应占溢利", "本公司股东应占溢利",
+                        "本公司拥有人应占溢利", "归属于母公司股东的净利润"],
+    "epsBasic":        ["每股基本盈利"],
 }
 
-HK_BALANCE_MAP = {
-    "应收账款": "ar",
-    "存货": "inventory",
-    "应付账款": "ap",
-    "资产总计": "totalAssets",
-    "负债合计": "totalLiab",
-    "流动资产合计": "currentAssets",
-    "流动负债合计": "currentLiab",
-    "未分配利润": "retainedEarnings",
-    "长期借款": "longTermDebt",
-    "股本": "sharesOutstanding",
+HK_BALANCE_CANDS = {
+    "totalAssets":      ["总资产", "资产总计"],
+    "totalLiab":        ["总负债", "负债合计"],
+    "currentAssets":    ["流动资产合计", "流动资产"],
+    "currentLiab":      ["流动负债合计", "流动负债"],
+    "ar":               ["应收帐款", "应收账款"],
+    "inventory":        ["存货"],
+    "ap":               ["应付帐款", "应付账款"],
+    # 储备 (Reserves) is broader than pure RE — includes share premium + other reserves.
+    # Used as last-resort fallback for HK reporters (Xiaomi, Geely) that either lack
+    # a 保留溢利 row or serve it with all-NaN values. Inflates Altman B coefficient
+    # slightly; documented trade-off chosen over no Z at all for those names.
+    "retainedEarnings": ["保留溢利(累计亏损)", "保留溢利", "未分配利润", "储备"],
+    "longTermDebt":     ["长期贷款", "长期借款", "长期负债合计"],
+    # Book equity — used by Altman Z'' (Emerging Markets variant) as X4 numerator
+    # in place of market cap. Eliminates HKD↔RMB↔USD FX mismatch entirely.
+    "bookEquity":       ["股东权益", "净资产", "总权益"],
+    # sharesOutstanding intentionally omitted — 股本 is share capital (HKD value),
+    # not share count. HK Piotroski stays 8-point (issuance check skipped).
 }
 
 HK_CASHFLOW_MAP = {
@@ -335,14 +347,38 @@ def _convert_ytd_to_period(rows_newest_first: list[dict], fields: list[str]) -> 
     return list(reversed(out))
 
 
+def _resolve_labels(df, pd, cands: dict, recent_periods: int = 6) -> dict:
+    """For each output field, pick the first candidate whose AMOUNT series has at
+    least one non-NaN value *within the most recent N report periods*. Scoping to
+    recent periods matters — Eastmoney sometimes serves a label that was populated
+    historically but has gone all-NaN in recent filings (e.g. Geely's
+    保留溢利(累计亏损) — populated in old annuals, NaN since 2022). Without this
+    scope the resolver would pick the stale label and the pivot for recent periods
+    would surface only None."""
+    recent_dates = sorted(df["REPORT_DATE"].dropna().unique(), reverse=True)[:recent_periods]
+    df_recent = df[df["REPORT_DATE"].isin(recent_dates)]
+    populated_labels: set = set()
+    for label, series in df_recent.groupby("STD_ITEM_NAME")["AMOUNT"]:
+        if series.notna().any():
+            populated_labels.add(label)
+    return {field: next((c for c in choices if c in populated_labels), None)
+            for field, choices in cands.items()
+            if next((c for c in choices if c in populated_labels), None) is not None}
+
+
 def fetch_hk_income_ak(ak, pd, symbol: str, periods: int = 6) -> tuple[list[dict], str]:
-    """Returns (periods_list, frequency). Applies cumulative-YTD conversion when detected."""
+    """Returns (periods_list, frequency). Applies cumulative-YTD conversion when detected.
+    Uses HK_INCOME_CANDS resolver to handle HK IFRS vs mainland GAAP label variants."""
     code = _hk_code(symbol)
     df = _hk_fetch_statement(ak, code, "利润表")
     if df is None or df.empty:
         return [], "Q"
 
-    df = df[df["STD_ITEM_NAME"].isin(HK_INCOME_MAP.keys())].copy()
+    resolved = _resolve_labels(df, pd, HK_INCOME_CANDS)  # {field: zh_label}
+    if not resolved:
+        return [], "Q"
+
+    df = df[df["STD_ITEM_NAME"].isin(resolved.values())].copy()
     pivot = df.pivot_table(
         index="REPORT_DATE", columns="STD_ITEM_NAME", values="AMOUNT", aggfunc="first"
     ).reset_index()
@@ -351,39 +387,53 @@ def fetch_hk_income_ak(ak, pd, symbol: str, periods: int = 6) -> tuple[list[dict
     months = {str(d)[5:7] for d in pivot["REPORT_DATE"]}
     frequency = "H" if months <= {"06", "12"} else "Q"
 
-    is_cumulative = _detect_cumulative_ytd(
-        [(str(r["REPORT_DATE"])[:10], float(r["营业额"])) for _, r in
-         pivot.sort_values("REPORT_DATE").iterrows()
-         if r.get("营业额") is not None and not pd.isna(r["营业额"])]
-    )
+    # YTD detection runs on revenue series (or first available field if no revenue)
+    rev_label = resolved.get("revenue")
+    if rev_label and rev_label in pivot.columns:
+        is_cumulative = _detect_cumulative_ytd(
+            [(str(r["REPORT_DATE"])[:10], float(r[rev_label])) for _, r in
+             pivot.sort_values("REPORT_DATE").iterrows()
+             if r.get(rev_label) is not None and not pd.isna(r[rev_label])]
+        )
+    else:
+        is_cumulative = False
 
     rows = []
     for _, r in pivot.iterrows():
         row = {"endDate": str(r["REPORT_DATE"])[:10]}
-        for zh, en in HK_INCOME_MAP.items():
+        for field, zh in resolved.items():
             val = r.get(zh)
-            row[en] = None if val is None or pd.isna(val) else float(val)
+            row[field] = None if val is None or pd.isna(val) else float(val)
+        # Fields that didn't resolve stay absent (merge_statements treats absent as None)
         rows.append(row)
 
     if is_cumulative:
-        rows = _convert_ytd_to_period(rows, fields=list(HK_INCOME_MAP.values()))
+        rows = _convert_ytd_to_period(rows, fields=list(resolved.keys()))
 
     return rows[:periods], frequency
 
 
 def fetch_hk_balance_ak(ak, pd, symbol: str, periods: int = 6) -> list[dict]:
+    """Returns balance-sheet periods newest-first.
+    Uses HK_BALANCE_CANDS resolver. Balance sheet is point-in-time, no YTD conversion."""
     df = _hk_fetch_statement(ak, _hk_code(symbol), "资产负债表")
     if df is None or df.empty:
         return []
-    df = df[df["STD_ITEM_NAME"].isin(HK_BALANCE_MAP.keys())]
-    pivot = df.pivot_table(index="REPORT_DATE", columns="STD_ITEM_NAME", values="AMOUNT", aggfunc="first") \
+
+    resolved = _resolve_labels(df, pd, HK_BALANCE_CANDS)
+    if not resolved:
+        return []
+
+    df = df[df["STD_ITEM_NAME"].isin(resolved.values())]
+    pivot = df.pivot_table(index="REPORT_DATE", columns="STD_ITEM_NAME",
+                           values="AMOUNT", aggfunc="first") \
               .reset_index().sort_values("REPORT_DATE", ascending=False)
     rows = []
     for _, r in pivot.iterrows():
         row = {"endDate": str(r["REPORT_DATE"])[:10]}
-        for zh, en in HK_BALANCE_MAP.items():
+        for field, zh in resolved.items():
             v = r.get(zh)
-            row[en] = None if v is None or pd.isna(v) else float(v)
+            row[field] = None if v is None or pd.isna(v) else float(v)
         rows.append(row)
     return rows[:periods]
 
@@ -487,9 +537,37 @@ def fetch_hk_cashflow_ak(ak, pd, symbol: str, periods: int = 6) -> list[dict]:
     return rows[:periods]
 
 
+def altman_z_em(p: dict) -> float | None:
+    """Altman Z'' (Emerging Markets / Non-Manufacturers).
+       Z'' = 3.25 + 6.56·X1 + 3.26·X2 + 6.72·X3 + 1.05·X4
+         X1 = WC/TA, X2 = RE/TA, X3 = EBIT/TA, X4 = BookEquity/TotalLiab
+       Bands: >2.60 SAFE · 1.10–2.60 GRAY · <1.10 DISTRESS.
+       Uses book equity instead of market cap → no FX dependency.
+       Drops Sales/TA term → fairer to non-manufacturers (tech, services)."""
+    ta = p.get("totalAssets")
+    if not ta:
+        return None
+    wc   = p.get("workingCapital")
+    re_  = p.get("retainedEarnings")
+    ebit = p.get("ebit") or p.get("operatingIncome")
+    tl   = p.get("totalLiab")
+    be   = p.get("bookEquity")
+    if None in (wc, re_, ebit, tl, be) or not tl:
+        return None
+    return (
+        3.25
+        + 6.56 * (wc / ta)
+        + 3.26 * (re_ / ta)
+        + 6.72 * (ebit / ta)
+        + 1.05 * (be / tl)
+    )
+
+
 def altman_z(p: dict, market_cap: float | None = None) -> float | None:
-    """Altman Z = 1.2·A + 1.4·B + 3.3·C + 0.6·D + 1.0·E
+    """Altman Z (standard, US public manufacturers).
+       Z = 1.2·A + 1.4·B + 3.3·C + 0.6·D + 1.0·E
        A = WC/TA, B = RE/TA, C = EBIT/TA, D = MktCap/TotalLiab, E = Sales/TA
+       Bands: >2.99 SAFE · 1.81–2.99 GRAY · <1.81 DISTRESS.
        Returns None if any required input is missing."""
     ta = p.get("totalAssets")
     if not ta:
@@ -538,18 +616,46 @@ def piotroski_f(curr: dict, prev: dict) -> int | None:
     return score
 
 
-def compute_derived(periods: list[dict], market_cap: float | None) -> dict:
-    """Compute 4-period arrays of Z and F scores, newest-first."""
+# Altman-Z and Piotroski-F assume non-financial industrial balance sheets.
+# Banks have negative working capital by design and use loans/deposits structure
+# that breaks the model — skip Z/F entirely for these names.
+_HK_BANKS = {
+    "0939.HK",  # CCB
+    "1398.HK",  # ICBC
+    "3988.HK",  # BOC
+    "0005.HK",  # HSBC
+    "2388.HK",  # BOC HK
+    "0011.HK",  # Hang Seng Bank
+    "2888.HK",  # Standard Chartered
+    "1288.HK",  # ABC
+}
+
+
+def compute_derived(periods: list[dict], market_cap: float | None,
+                    symbol: str | None = None) -> dict:
+    """Compute 4-period arrays of Z and F scores, newest-first.
+    Dispatches Altman variant by exchange:
+      - HK names → Z'' Emerging Markets (no market cap, uses book equity)
+      - US names → standard Z (uses market cap)
+    Banks → all-None (Z/F inapplicable to financial-sector balance sheets).
+    The `zVariant` field tells the frontend which threshold bands to apply."""
+    if symbol in _HK_BANKS:
+        return {"altmanZ": [None] * 4, "piotroskiF": [None] * 4, "zVariant": "Zpp"}
+    is_hk = bool(symbol and symbol.endswith(".HK"))
     z_arr: list[float | None] = []
     f_arr: list[int | None] = []
     for i in range(min(4, len(periods))):
-        z_arr.append(altman_z(periods[i], market_cap))
+        if is_hk:
+            z_arr.append(altman_z_em(periods[i]))
+        else:
+            z_arr.append(altman_z(periods[i], market_cap))
     step = 4 if len(periods) >= 5 else 1
     for i in range(min(4, len(periods))):
         prev_idx = i + step
         prev = periods[prev_idx] if prev_idx < len(periods) else None
         f_arr.append(piotroski_f(periods[i], prev))
-    return {"altmanZ": z_arr, "piotroskiF": f_arr}
+    return {"altmanZ": z_arr, "piotroskiF": f_arr,
+            "zVariant": "Zpp" if is_hk else "Z"}
 
 
 def main():
@@ -579,7 +685,7 @@ def main():
             print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} mktCap={'✓' if market_cap else '✗'}")
             periods = merge_statements(inc, bal, cf)
             data[sym] = {"frequency": "Q", "periods": periods}
-            data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=market_cap)
+            data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=market_cap, symbol=sym)
 
     if hk_syms:
         print(f"\n── Tier 2: yfinance — {len(hk_syms)} HK stocks (IS + BS + CF + market cap) ──")
@@ -592,7 +698,7 @@ def main():
             print(f"    IS={len(inc)} BS={len(bal)} CF={len(cf)} freq={freq} mktCap={'✓' if market_cap else '✗'}")
             periods = merge_statements(inc, bal, cf)
             data[sym] = {"frequency": freq, "periods": periods}
-            data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=market_cap)
+            data[sym]["derived"] = compute_derived(data[sym]["periods"], market_cap=market_cap, symbol=sym)
 
     out = {
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),

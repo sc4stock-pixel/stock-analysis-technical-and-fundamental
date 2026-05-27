@@ -76,6 +76,8 @@ export default function KpiStrip({ data }: Props) {
 
   const z = data.derived.altmanZ[0];
   const f = data.derived.piotroskiF[0];
+  const zVariant = data.derived.zVariant ?? "Z";
+  const zLabelPrefix = zVariant === "Zpp" ? "Z″" : "Z";
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
@@ -100,10 +102,10 @@ export default function KpiStrip({ data }: Props) {
         dotColor={(fcfTtm ?? 0) >= 0 ? "emerald" : "rose"}
         sparkColor="#10b981"
       />
-      <div className={`flex items-center gap-2 px-3 py-2 border rounded-md ${tailwindBand(thresholdColor("Z", z ?? null))}`}>
+      <div className={`flex items-center gap-2 px-3 py-2 border rounded-md ${tailwindBand(thresholdColor("Z", z ?? null, zVariant))}`}>
         <div className="text-[10px] uppercase tracking-wider opacity-70">Quality</div>
         <div className="flex items-center gap-2 text-sm font-mono">
-          <span>Z {z?.toFixed(2) ?? "—"}</span>
+          <span>{zLabelPrefix} {z?.toFixed(2) ?? "—"}</span>
           <span className="opacity-40">·</span>
           <span>F {f ?? "—"}/9</span>
         </div>

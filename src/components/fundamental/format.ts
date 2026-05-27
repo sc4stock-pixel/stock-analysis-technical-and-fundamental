@@ -28,9 +28,33 @@ export function fmtPeriodLabel(endDate: string, frequency: "Q" | "H"): string {
   return `Q${q}'${yy}`;
 }
 
-export function thresholdColor(metric: "Z" | "F", value: number | null): "emerald" | "amber" | "rose" {
+export type ZVariant = "Z" | "Zpp";
+
+/** Threshold bands per Altman variant.
+ * Z   (standard, US public manufacturers): SAFE > 2.99 · GRAY 1.81-2.99 · DISTRESS < 1.81
+ * Zpp (Z'' Emerging Markets, HK non-mfg): SAFE > 2.60 · GRAY 1.10-2.60 · DISTRESS < 1.10
+ */
+export const Z_BANDS: Record<ZVariant, { safe: number; gray: number }> = {
+  Z:   { safe: 2.99, gray: 1.81 },
+  Zpp: { safe: 2.60, gray: 1.10 },
+};
+
+export function zLabel(value: number | null | undefined, variant: ZVariant = "Z"): string {
+  if (value === null || value === undefined) return "—";
+  const b = Z_BANDS[variant];
+  return value > b.safe ? "SAFE" : value >= b.gray ? "GRAY" : "DISTRESS";
+}
+
+export function thresholdColor(
+  metric: "Z" | "F",
+  value: number | null,
+  variant: ZVariant = "Z",
+): "emerald" | "amber" | "rose" {
   if (value === null) return "amber";
-  if (metric === "Z") return value > 2.99 ? "emerald" : value >= 1.81 ? "amber" : "rose";
+  if (metric === "Z") {
+    const b = Z_BANDS[variant];
+    return value > b.safe ? "emerald" : value >= b.gray ? "amber" : "rose";
+  }
   return value >= 7 ? "emerald" : value >= 4 ? "amber" : "rose";
 }
 

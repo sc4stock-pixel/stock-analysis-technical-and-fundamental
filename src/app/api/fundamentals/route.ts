@@ -22,7 +22,12 @@ interface PeriodRow {
 export interface FundamentalsPayload {
   frequency: "Q" | "H";
   periods: PeriodRow[];
-  derived: { altmanZ: (number | null)[]; piotroskiF: (number | null)[] };
+  derived: {
+    altmanZ: (number | null)[];
+    piotroskiF: (number | null)[];
+    /** "Z" = standard Altman (US); "Zpp" = Z'' Emerging Markets (HK). Picks threshold bands. */
+    zVariant?: "Z" | "Zpp";
+  };
 }
 
 let cache: Record<string, FundamentalsPayload> | null = null;
