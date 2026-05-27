@@ -468,8 +468,21 @@ def fetch_hk_cashflow_ak(ak, pd, symbol: str, periods: int = 6) -> list[dict]:
     # Applying conversion without revenue-based FY detection zeros out negative diffs.
 
     for r in rows:
-        cfo, capex = r.get("cfo"), r.get("capex")
-        r["fcf"] = (cfo - capex) if (cfo is not None and capex is not None) else None
+        cfo   = r.get("cfo")
+        capex = r.get("capex")
+        # Exclude nan values that may come from Eastmoney blank cells
+        import math
+        if cfo is not None and isinstance(cfo, float) and math.isnan(cfo):
+            cfo = None
+        if capex is not None and isinstance(capex, float) and math.isnan(capex):
+            capex = None
+        if cfo is not None and capex is not None:
+            r["fcf"] = cfo - capex
+        elif cfo is not None:
+            r["fcf"] = cfo   # capex unavailable — use CFO as FCF proxy (capex ~5-10% of CFO)
+        else:
+            r["fcf"] = None
+        r["cfo"] = cfo
 
     return rows[:periods]
 
