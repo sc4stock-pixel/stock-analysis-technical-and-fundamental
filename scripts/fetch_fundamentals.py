@@ -404,15 +404,24 @@ def fetch_hk_cashflow_ak(ak, pd, symbol: str, periods: int = 6) -> list[dict]:
 
     all_names = df_cf["STD_ITEM_NAME"].dropna().unique().tolist()
 
-    # Broad keyword search for CFO (total operating cash flow)
-    cfo_kws = [("经营活动", "现金"), ("经营活动", "净额"), ("经营业务", "现金"), ("营业活动", "现金")]
-    cfo_name = next((n for n in all_names
-                     if any(a in str(n) and b in str(n) for a, b in cfo_kws)), None)
+    # CFO candidates — ordered by specificity.
+    # Probed actual Tencent/HK Eastmoney data: top-level subtotals are:
+    #   '经营业务现金净额'  (HK GAAP/IFRS — confirmed for Tencent, Xiaomi, Geely)
+    #   '经营活动产生的现金流量净额'  (mainland GAAP — different companies)
+    CFO_CANDIDATES = [
+        "经营业务现金净额",           # HK GAAP (Tencent, Xiaomi, Geely)
+        "经营活动产生的现金流量净额",  # Mainland GAAP
+        "经营产生现金",               # sub-total before tax (fallback)
+    ]
+    cfo_name = next((n for n in CFO_CANDIDATES if n in all_names), None)
 
-    # Broad keyword search for capex
-    capex_kws = [("购建", "固定"), ("购建", "资产"), ("购置", "物业"), ("购置", "资产")]
-    capex_name = next((n for n in all_names
-                       if any(a in str(n) and b in str(n) for a, b in capex_kws)), None)
+    # Capex candidates
+    CAPEX_CANDIDATES = [
+        "购建固定资产",                        # HK GAAP confirmed
+        "购建固定资产、无形资产和其他长期资产支付的现金",  # Mainland GAAP
+        "购建无形资产及其他资产",              # partial capex fallback
+    ]
+    capex_name = next((n for n in CAPEX_CANDIDATES if n in all_names), None)
 
     rows_dict: dict[str, dict] = {}
 
