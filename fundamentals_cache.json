@@ -1,5 +1,5 @@
 {
-  "updated": "2026-05-27T07:09:56Z",
+  "updated": "2026-05-27T07:15:59Z",
   "data": {
     "AAPL": {
       "frequency": "Q",
@@ -962,7 +962,7 @@
           "endDate": "2025-06-30",
           "revenue": 933791869000.0,
           "grossProfit": 547369238000.0,
-          "operatingIncome": 463440498000.0,
+          "operatingIncome": 463423000000.0,
           "netIncome": 398273102000.0,
           "ebit": 496726299000.0,
           "ar": 233407179000.0,
@@ -976,8 +976,8 @@
           "sharesOutstanding": 25932615521.0,
           "longTermDebt": 883671102000.0,
           "cfo": 497064085000.0,
-          "capex": -299562606000.0,
-          "fcf": 197501479000.0,
+          "capex": null,
+          "fcf": null,
           "workingCapital": 1887603141000.0
         },
         {
@@ -1020,7 +1020,7 @@
           "sharesOutstanding": null,
           "longTermDebt": null,
           "cfo": null,
-          "capex": null,
+          "capex": -365008324000.0,
           "fcf": null,
           "workingCapital": null
         }
@@ -1213,7 +1213,7 @@
           "longTermDebt": null,
           "sharesOutstanding": null,
           "cfo": 101351000000.0,
-          "fcf": null,
+          "fcf": 101351000000.0,
           "workingCapital": 193064000000.0
         },
         {
@@ -1256,7 +1256,7 @@
           "longTermDebt": null,
           "sharesOutstanding": null,
           "cfo": 236577000000.0,
-          "fcf": null,
+          "fcf": 236577000000.0,
           "workingCapital": 152919000000.0
         },
         {
@@ -1299,7 +1299,7 @@
           "longTermDebt": null,
           "sharesOutstanding": null,
           "cfo": 76889000000.0,
-          "fcf": null,
+          "fcf": 76889000000.0,
           "workingCapital": 124493000000.0
         },
         {
@@ -1456,10 +1456,10 @@
       ],
       "derived": {
         "altmanZ": [
-          1.026572599070686,
-          1.155734913656653,
-          1.0847783095697445,
-          1.1229707722386852
+          1.0278547398706082,
+          1.157047336242754,
+          1.086142213640202,
+          1.1243512599726406
         ],
         "piotroskiF": [
           3,
@@ -1490,7 +1490,7 @@
           "longTermDebt": null,
           "sharesOutstanding": 424000.0,
           "cfo": -1792006000.0,
-          "fcf": null,
+          "fcf": -1792006000.0,
           "workingCapital": 64402395000.0
         },
         {
@@ -1533,7 +1533,7 @@
           "longTermDebt": null,
           "sharesOutstanding": 426000.0,
           "cfo": 33528360000.0,
-          "fcf": null,
+          "fcf": 33528360000.0,
           "workingCapital": 61545703000.0
         },
         {
@@ -1576,7 +1576,7 @@
           "longTermDebt": null,
           "sharesOutstanding": 424000.0,
           "cfo": 4509497000.0,
-          "fcf": null,
+          "fcf": 4509497000.0,
           "workingCapital": 85700422000.0
         },
         {
