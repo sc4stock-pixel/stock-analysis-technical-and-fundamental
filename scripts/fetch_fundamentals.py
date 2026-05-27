@@ -88,66 +88,14 @@ def _yf_row(df, *names) -> float | None:
 
 
 def fetch_us_fundamentals_yf(symbol: str, periods: int = 6) -> tuple[list[dict], list[dict], list[dict], float | None]:
-    """Fetch US quarterly IS/BS/CF and market cap via yfinance.
-    yfinance handles Yahoo Finance auth (crumb/cookies) automatically.
-    No rate limits — replaces all AV calls for fundamentals data."""
+    """Fetch US quarterly IS/BS/CF and market cap via yfinance. No AV calls consumed."""
     try:
         import yfinance as yf
-        import math
         ticker = yf.Ticker(symbol)
-
-        info = ticker.fast_info or {}
-        market_cap = getattr(info, 'market_cap', None) or (ticker.info or {}).get("marketCap")
-
-        inc_df = ticker.quarterly_income_stmt   # rows=metrics, cols=dates newest-first
-        bal_df = ticker.quarterly_balance_sheet
-        cf_df  = ticker.quarterly_cash_flow
-
-        income, balance, cashflow = [], [], []
-
-        for col in list(inc_df.columns)[:periods]:
-            s = inc_df[col]
-            def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
-            income.append({
-                "endDate": str(col)[:10],
-                "revenue":         g("Total Revenue"),
-                "grossProfit":     g("Gross Profit"),
-                "operatingIncome": g("Operating Income", "EBIT"),
-                "netIncome":       g("Net Income", "Net Income Common Stockholders"),
-                "ebit":            g("EBIT", "Operating Income"),
-            })
-
-        for col in list(bal_df.columns)[:periods]:
-            s = bal_df[col]
-            def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
-            balance.append({
-                "endDate": str(col)[:10],
-                "ar":               g("Accounts Receivable", "Net Receivables"),
-                "inventory":        g("Inventory"),
-                "ap":               g("Accounts Payable"),
-                "totalAssets":      g("Total Assets"),
-                "totalLiab":        g("Total Liabilities Net Minority Interest", "Total Liabilities"),
-                "currentAssets":    g("Current Assets"),
-                "currentLiab":      g("Current Liabilities"),
-                "retainedEarnings": g("Retained Earnings"),
-                "sharesOutstanding": g("Ordinary Shares Number", "Share Issued"),
-                "longTermDebt":     g("Long Term Debt", "Long Term Debt And Capital Lease Obligation"),
-            })
-
-        for col in list(cf_df.columns)[:periods]:
-            s = cf_df[col]
-            def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
-            cfo   = g("Operating Cash Flow")
-            capex = g("Capital Expenditure")
-            # yfinance capex is negative (cash outflow); FCF = cfo + capex
-            fcf = (cfo + capex) if (cfo is not None and capex is not None) else None
-            cashflow.append({
-                "endDate": str(col)[:10],
-                "cfo": cfo, "capex": capex, "fcf": fcf,
-            })
-
-        return income, balance, cashflow, market_cap
-
+        fi = ticker.fast_info
+        market_cap = getattr(fi, 'market_cap', None) or (ticker.info or {}).get('marketCap')
+        inc, bal, cf, _ = _yf_extract_statements(ticker, periods)
+        return inc, bal, cf, market_cap
     except Exception as e:
         print(f"    WARNING yfinance {symbol}: {e}")
         return [], [], [], None
@@ -175,33 +123,30 @@ def merge_statements(income: list[dict], balance: list[dict], cashflow: list[dic
     return periods
 
 
-def fetch_hk_fundamentals_yf(symbol: str, periods: int = 6) -> tuple[list[dict], list[dict], list[dict], float | None, str]:
-    """Fetch HK quarterly/semi-annual IS/BS/CF and market cap via yfinance.
-    yfinance supports HK tickers (e.g. '0700.HK') natively and returns
-    period-incremental values (no YTD cumulative issue) in the reporting currency.
-    Returns (income, balance, cashflow, market_cap, frequency)."""
-    try:
-        import yfinance as yf
-        import math
-        ticker = yf.Ticker(symbol)
+# Map sparse-yfinance-HK tickers to their US ADRs (same financials, fuller Yahoo coverage).
+# Keep original HK market cap — only fall back to ADR for IS/BS/CF data.
+HK_ADR_MAP = {
+    "0700.HK": "TCEHY",   # Tencent
+    "9988.HK": "BABA",    # Alibaba
+    "1810.HK": "XIACY",   # Xiaomi
+    "1211.HK": "BYDDY",   # BYD
+    "0175.HK": "GELYY",   # Geely
+    "0939.HK": "CICHY",   # CCB
+}
 
-        fi = ticker.fast_info
-        market_cap = getattr(fi, 'market_cap', None) or (ticker.info or {}).get('marketCap')
 
-        inc_df = ticker.quarterly_income_stmt
-        bal_df = ticker.quarterly_balance_sheet
-        cf_df  = ticker.quarterly_cash_flow
+def _yf_extract_statements(ticker, periods: int = 6) -> tuple[list[dict], list[dict], list[dict], str]:
+    """Pull IS/BS/CF arrays from a yfinance Ticker object. Returns (income, balance, cashflow, frequency)."""
+    inc_df = ticker.quarterly_income_stmt
+    bal_df = ticker.quarterly_balance_sheet
+    cf_df  = ticker.quarterly_cash_flow
 
-        if inc_df is None or inc_df.empty:
-            print(f"    yfinance returned empty income statement for {symbol}")
-            return [], [], [], market_cap, "Q"
+    income, balance, cashflow = [], [], []
+    frequency = "Q"
 
-        # Detect frequency from income statement period-ending months
+    if inc_df is not None and not inc_df.empty:
         months = {str(col)[5:7] for col in list(inc_df.columns)[:periods]}
         frequency = "H" if months <= {"06", "12"} else "Q"
-
-        income, balance, cashflow = [], [], []
-
         for col in list(inc_df.columns)[:periods]:
             s = inc_df[col]
             def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
@@ -214,37 +159,70 @@ def fetch_hk_fundamentals_yf(symbol: str, periods: int = 6) -> tuple[list[dict],
                 "ebit":            g("EBIT", "Operating Income"),
             })
 
-        if bal_df is not None and not bal_df.empty:
-            for col in list(bal_df.columns)[:periods]:
-                s = bal_df[col]
-                def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
-                balance.append({
-                    "endDate": str(col)[:10],
-                    "ar":               g("Accounts Receivable", "Net Receivables"),
-                    "inventory":        g("Inventory"),
-                    "ap":               g("Accounts Payable"),
-                    "totalAssets":      g("Total Assets"),
-                    "totalLiab":        g("Total Liabilities Net Minority Interest", "Total Liabilities"),
-                    "currentAssets":    g("Current Assets"),
-                    "currentLiab":      g("Current Liabilities"),
-                    "retainedEarnings": g("Retained Earnings"),
-                    "sharesOutstanding": g("Ordinary Shares Number", "Share Issued"),
-                    "longTermDebt":     g("Long Term Debt", "Long Term Debt And Capital Lease Obligation"),
-                })
+    if bal_df is not None and not bal_df.empty:
+        for col in list(bal_df.columns)[:periods]:
+            s = bal_df[col]
+            def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
+            balance.append({
+                "endDate": str(col)[:10],
+                "ar":               g("Accounts Receivable", "Net Receivables"),
+                "inventory":        g("Inventory"),
+                "ap":               g("Accounts Payable"),
+                "totalAssets":      g("Total Assets"),
+                "totalLiab":        g("Total Liabilities Net Minority Interest", "Total Liabilities"),
+                "currentAssets":    g("Current Assets"),
+                "currentLiab":      g("Current Liabilities"),
+                "retainedEarnings": g("Retained Earnings"),
+                "sharesOutstanding": g("Ordinary Shares Number", "Share Issued"),
+                "longTermDebt":     g("Long Term Debt", "Long Term Debt And Capital Lease Obligation"),
+            })
 
-        if cf_df is not None and not cf_df.empty:
-            for col in list(cf_df.columns)[:periods]:
-                s = cf_df[col]
-                def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
-                cfo   = g("Operating Cash Flow")
-                capex = g("Capital Expenditure")
-                fcf = (cfo + capex) if (cfo is not None and capex is not None) else None
-                cashflow.append({
-                    "endDate": str(col)[:10],
-                    "cfo": cfo, "capex": capex, "fcf": fcf,
-                })
+    if cf_df is not None and not cf_df.empty:
+        for col in list(cf_df.columns)[:periods]:
+            s = cf_df[col]
+            def g(*names): return _to_float_yf(next((s.get(n) for n in names if n in s.index), None))
+            cfo   = g("Operating Cash Flow")
+            capex = g("Capital Expenditure")
+            fcf = (cfo + capex) if (cfo is not None and capex is not None) else None
+            cashflow.append({
+                "endDate": str(col)[:10],
+                "cfo": cfo, "capex": capex, "fcf": fcf,
+            })
 
-        return income, balance, cashflow, market_cap, frequency
+    return income, balance, cashflow, frequency
+
+
+def fetch_hk_fundamentals_yf(symbol: str, periods: int = 6) -> tuple[list[dict], list[dict], list[dict], float | None, str]:
+    """Fetch HK quarterly/semi-annual IS/BS/CF + market cap via yfinance.
+    Yahoo's HK ticker financial coverage is patchy for some names (Tencent, Xiaomi, Geely).
+    For sparse cases, fall back to the US ADR ticker which has fuller statement coverage.
+    Market cap is always pulled from the HK ticker (avoids currency mismatch).
+    Returns (income, balance, cashflow, market_cap, frequency)."""
+    try:
+        import yfinance as yf
+        hk_ticker = yf.Ticker(symbol)
+
+        fi = hk_ticker.fast_info
+        market_cap = getattr(fi, 'market_cap', None) or (hk_ticker.info or {}).get('marketCap')
+
+        inc, bal, cf, freq = _yf_extract_statements(hk_ticker, periods)
+
+        # Fall back to ADR if HK ticker has sparse data
+        sparse = (len(cf) < 2 or len(bal) < 2 or
+                  not (inc and inc[0].get('revenue') is not None))
+        if sparse and symbol in HK_ADR_MAP:
+            adr = HK_ADR_MAP[symbol]
+            print(f"    {symbol} sparse — fetching ADR {adr} for statements")
+            adr_ticker = yf.Ticker(adr)
+            inc2, bal2, cf2, freq2 = _yf_extract_statements(adr_ticker, periods)
+            # Adopt ADR data where richer
+            if len(inc2) > len(inc) or (inc2 and inc2[0].get('revenue') is not None and not (inc and inc[0].get('revenue'))):
+                inc = inc2
+            if len(bal2) > len(bal): bal = bal2
+            if len(cf2)  > len(cf):  cf  = cf2
+            freq = freq2 if freq2 else freq
+
+        return inc, bal, cf, market_cap, freq
 
     except Exception as e:
         print(f"    WARNING yfinance HK {symbol}: {e}")
