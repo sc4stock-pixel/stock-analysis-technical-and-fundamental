@@ -175,6 +175,9 @@ def _yf_extract_statements(ticker, periods: int = 6) -> tuple[list[dict], list[d
                 "retainedEarnings": g("Retained Earnings"),
                 "sharesOutstanding": g("Ordinary Shares Number", "Share Issued"),
                 "longTermDebt":     g("Long Term Debt", "Long Term Debt And Capital Lease Obligation"),
+                # bookEquity — yfinance equivalents of 股东权益. Used by Z''.
+                "bookEquity":       g("Stockholders Equity", "Common Stock Equity",
+                                      "Total Equity Gross Minority Interest"),
             })
 
     if cf_df is not None and not cf_df.empty:
