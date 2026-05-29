@@ -12,6 +12,7 @@ import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import { supertrend } from "@/lib/indicators";
 import type { TimesfmForecasts } from "@/types";
+import type { WorkerState } from "@/types/worker-state";
 
 const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
 const MacroPanelHK = dynamic(() => import("@/components/MacroPanelHK"), { ssr: false });
@@ -66,6 +67,8 @@ export default function Dashboard() {
   const [savePortfolioMsg, setSavePortfolioMsg]         = useState<string | null>(null);
   const [backtestLoading, setBacktestLoading]           = useState(false);
 
+  const [workerState, setWorkerState] = useState<WorkerState | null>(null);
+
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load portfolio.json from GitHub on mount — restores any previously saved portfolio
@@ -80,6 +83,15 @@ export default function Dashboard() {
           setConfig(prev => ({ ...prev, stocks: { PORTFOLIO: data.portfolio } }));
         }
       })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Load worker KV state on mount — overlay for Autopilot signals + freshness badge
+  useEffect(() => {
+    fetch("/api/state")
+      .then(r => r.ok ? r.json() : null)
+      .then((data: WorkerState | null) => { if (data?.version != null) setWorkerState(data); })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -378,9 +390,18 @@ export default function Dashboard() {
       {/* TOP BAR */}
       <header className="border-b border-[#1e2d4a] bg-[#0f1629] px-4 py-2.5 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-3">
-          <span className="text-[#00d4ff] font-bold text-sm tracking-widest">▶ TA DASHBOARD</span>
-          <span className="text-[#4a6080] text-xs">V17</span>
+          <span className="text-[#00d4ff] font-bold text-sm tracking-widest">▶ AUTOPILOT</span>
+          <span className="text-[#4a6080] text-xs">v17.0</span>
           {lastUpdated && <span className="text-[#4a6080] text-xs">· Updated {lastUpdated}</span>}
+          {workerState?.updatedAt && (() => {
+            const ageMs = Date.now() - new Date(workerState.updatedAt!).getTime();
+            const ageH  = ageMs / 3_600_000;
+            const label = ageH < 1
+              ? `${Math.round(ageMs / 60_000)}m ago`
+              : `${ageH.toFixed(1)}h ago`;
+            const cls = ageH < 2 ? "text-[#00ff88]" : ageH < 8 ? "text-[#ffa502]" : "text-[#ff4757]";
+            return <span className={`text-xs font-mono ${cls}`}>· Worker {label}</span>;
+          })()}
           {loading && (
             <span className="text-[#ffa502] text-xs blink">
               · {progressSymbol ? `Scanning ${progressSymbol}…` : "Scanning…"} {progress}%
@@ -501,9 +522,9 @@ export default function Dashboard() {
       )}
 
       {/* ALERTS PANEL — above portfolio summary for immediate visibility */}
-      {results.length > 0 && (
+      {(results.length > 0 || (workerState?.events?.length ?? 0) > 0) && (
         <div className="mx-4">
-          <AlertsPanel results={results} />
+          <AlertsPanel results={results} workerState={workerState} />
         </div>
       )}
 

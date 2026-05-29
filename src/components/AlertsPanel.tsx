@@ -2,9 +2,11 @@
 import { useState, useMemo } from "react";
 import { StockAnalysisResult } from "@/types";
 import { supertrend, ema, sma } from "@/lib/indicators";
+import type { WorkerState, WorkerEvent } from "@/types/worker-state";
 
 interface Props {
   results: StockAnalysisResult[];
+  workerState?: WorkerState | null;
 }
 
 interface Alert {
@@ -19,6 +21,32 @@ interface Alert {
 }
 
 const FLIP_ALERT_DAYS = 3;
+
+const EVENT_META: Record<string, { icon: string; label: string; cls: string }> = {
+  flip_buy:    { icon: "⬆", label: "SuperTrend FLIP BUY",  cls: "border-[#00ff88]/25 bg-[#00ff88]/5" },
+  flip_exit:   { icon: "⬇", label: "SuperTrend FLIP EXIT", cls: "border-[#ff4757]/25 bg-[#ff4757]/5" },
+  tt_stripped: { icon: "⚠", label: "TT 5→4 STRIPPED",     cls: "border-[#ffa502]/25 bg-[#ffa502]/5" },
+  tt_regained: { icon: "✅", label: "TT 4→5 REGAINED",     cls: "border-[#00ff88]/25 bg-[#00ff88]/5" },
+};
+
+function workerEventRow(ev: WorkerEvent, idx: number) {
+  const meta = EVENT_META[ev.type] ?? { icon: "·", label: ev.type, cls: "" };
+  const status = ev.confirmed ? "CONFIRMED" : "PROVISIONAL";
+  return (
+    <div
+      key={`worker-${idx}`}
+      className={`flex items-start gap-2 text-xs p-1.5 rounded border mb-1 ${meta.cls}`}
+    >
+      <span className="shrink-0">{meta.icon}</span>
+      <span className="flex-1">
+        <strong>{ev.ticker}</strong> {meta.label}
+        <span className="text-[#4a6080] ml-1">
+          [{ev.barDate} · {ev.session.toUpperCase()} · {status}]
+        </span>
+      </span>
+    </div>
+  );
+}
 
 function computeOptimizedFlip(
   result: StockAnalysisResult
@@ -318,15 +346,16 @@ function renderText(text: string) {
   );
 }
 
-export default function AlertsPanel({ results }: Props) {
+export default function AlertsPanel({ results, workerState }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const alerts = useMemo(() => generateAlerts(results), [results]);
 
   // Split into action alerts (flip/reentry) and informational
   const actionAlerts = alerts.filter(a => a.alertType === "flip" || a.alertType === "reentry");
   const infoAlerts   = alerts.filter(a => a.alertType !== "flip" && a.alertType !== "reentry");
+  const workerEvents = workerState?.events ?? [];
 
-  if (alerts.length === 0) return null;
+  if (alerts.length === 0 && workerEvents.length === 0) return null;
 
   return (
     <div className="bg-[#0f1629] border border-[#1e2d4a] rounded p-3 my-3">
@@ -336,10 +365,10 @@ export default function AlertsPanel({ results }: Props) {
       >
         <div className="flex items-center gap-2">
           <span className="text-[#f59e0b] text-sm font-bold">⚡ ALERTS</span>
-          <span className="text-[#4a6080] text-xs">({alerts.length})</span>
-          {actionAlerts.length > 0 && (
+          <span className="text-[#4a6080] text-xs">({alerts.length + workerEvents.length})</span>
+          {(actionAlerts.length + workerEvents.length) > 0 && (
             <span className="text-[0.6rem] font-mono font-bold px-1.5 py-0.5 rounded bg-[#f59e0b]/15 border border-[#f59e0b]/30 text-[#f59e0b]">
-              {actionAlerts.length} SIGNAL{actionAlerts.length > 1 ? "S" : ""}
+              {actionAlerts.length + workerEvents.length} SIGNAL{(actionAlerts.length + workerEvents.length) > 1 ? "S" : ""}
             </span>
           )}
         </div>
@@ -348,6 +377,16 @@ export default function AlertsPanel({ results }: Props) {
 
       {!collapsed && (
         <div className="mt-2">
+          {/* ── Autopilot worker signals — overlay from KV state ── */}
+          {workerEvents.length > 0 && (
+            <div className="mb-3">
+              <div className="text-[0.6rem] font-mono text-[#00d4ff] tracking-widest mb-1.5">
+                AUTOPILOT SIGNALS
+              </div>
+              {workerEvents.map((ev, i) => workerEventRow(ev, i))}
+            </div>
+          )}
+
           {/* ── Action alerts: flip + reentry — prominent section ── */}
           {actionAlerts.length > 0 && (
             <div className="mb-3">
