@@ -22,9 +22,9 @@ const FLIP_ALERT_DAYS = 3;
 
 function computeOptimizedFlip(
   result: StockAnalysisResult
-): { flipType: "BULLISH" | "BEARISH" | null; barsSince: number } {
+): { flipType: "BULLISH" | "BEARISH" | null; barsSince: number; stopAtFlip: number | null; closeAtFlip: number | null } {
   const bars = result.chart_bars;
-  if (!bars || bars.length < 2) return { flipType: null, barsSince: 999 };
+  if (!bars || bars.length < 2) return { flipType: null, barsSince: 999, stopAtFlip: null, closeAtFlip: null };
 
   const optAtr = result.st_opt_params?.atrPeriod ?? 10;
   const optMul = result.st_opt_params?.multiplier ?? 3.0;
@@ -33,17 +33,19 @@ function computeOptimizedFlip(
   const lows   = bars.map(b => b.low);
   const closes = bars.map(b => b.close);
 
-  const [, dir] = supertrend(highs, lows, closes, optAtr, optMul);
-  if (dir.length < 2) return { flipType: null, barsSince: 999 };
+  const [stArr, dir] = supertrend(highs, lows, closes, optAtr, optMul);
+  if (dir.length < 2) return { flipType: null, barsSince: 999, stopAtFlip: null, closeAtFlip: null };
 
   for (let i = dir.length - 1; i >= 1; i--) {
     if (dir[i] !== dir[i - 1]) {
-      const barsSince = dir.length - 1 - i;
-      if (dir[i] === 1) return { flipType: "BULLISH", barsSince };
-      if (dir[i] === -1) return { flipType: "BEARISH", barsSince };
+      const barsSince   = dir.length - 1 - i;
+      const stopAtFlip  = stArr[i - 1] ?? null;  // bullish stop from bar before flip
+      const closeAtFlip = bars[i].close;          // close on the flip bar
+      if (dir[i] === 1)  return { flipType: "BULLISH", barsSince, stopAtFlip, closeAtFlip };
+      if (dir[i] === -1) return { flipType: "BEARISH", barsSince, stopAtFlip, closeAtFlip };
     }
   }
-  return { flipType: null, barsSince: 999 };
+  return { flipType: null, barsSince: 999, stopAtFlip: null, closeAtFlip: null };
 }
 
 function computeSMA50Reentry(
@@ -155,7 +157,7 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
     }
 
     // 4. SuperTrend flip alerts (optimized)
-    const { flipType, barsSince } = computeOptimizedFlip(r);
+    const { flipType, barsSince, stopAtFlip, closeAtFlip } = computeOptimizedFlip(r);
 
     if (flipType === "BULLISH" && barsSince <= FLIP_ALERT_DAYS) {
       const daysText = barsSince === 0 ? "TODAY" : `${barsSince}d ago`;
@@ -193,12 +195,22 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
       const stOut500 = stReturn500 > scoreReturn500;
       const stOut250 = stReturn250 > scoreReturn250;
 
+      // Stop/violation detail — same data as Telegram exit block
+      const isHK = r.exchange === "HK";
+      const fmtPx = (n: number) => n.toFixed(2);
+      let stopDetail = "";
+      if (stopAtFlip !== null && stopAtFlip > 0 && closeAtFlip !== null) {
+        const violated = ((closeAtFlip - stopAtFlip) / stopAtFlip) * 100;
+        const violatedStr = violated >= 0 ? `+${violated.toFixed(1)}%` : `${violated.toFixed(1)}%`;
+        stopDetail = ` | ST Stop: ${fmtPx(stopAtFlip)}${isHK ? "" : ""} | Violated by ${violatedStr} | Close: ${fmtPx(closeAtFlip)}`;
+      }
+
       if (stOut500 || stOut250) {
         const period = stOut500 ? "500d" : "250d";
         const stRet  = stOut500 ? stReturn500 : stReturn250;
         alerts.push({
           icon: "🔴",
-          text: `<strong>${r.symbol}</strong>: ST FLIPPED BEARISH 📉 (${daysText}) - ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% outperforms`,
+          text: `<strong>${r.symbol}</strong>: ST FLIPPED BEARISH 📉 (${daysText}) - ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% outperforms${stopDetail}`,
           priority: 2,
           alertType: "flip",
           symbol: r.symbol,
@@ -208,7 +220,7 @@ function generateAlerts(results: StockAnalysisResult[]): Alert[] {
       } else {
         alerts.push({
           icon: "🔴",
-          text: `<strong>${r.symbol}</strong>: SuperTrend FLIPPED BEARISH 📉 (${daysText})`,
+          text: `<strong>${r.symbol}</strong>: ST FLIPPED BEARISH 📉 (${daysText})${stopDetail}`,
           priority: 2,
           alertType: "flip",
           symbol: r.symbol,
