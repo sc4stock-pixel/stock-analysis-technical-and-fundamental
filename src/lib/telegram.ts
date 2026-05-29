@@ -56,7 +56,12 @@ function fmtRegime(regime: string): string {
 }
 
 type ResultWithFlip = StockAnalysisResult & {
-  _flip?: { flipType: "BULLISH" | "BEARISH" | null; barsSince: number };
+  _flip?: {
+    flipType:    "BULLISH" | "BEARISH" | null;
+    barsSince:   number;
+    stopAtFlip:  number | null;   // prev-bar ST stop (the level that was breached)
+    closeAtFlip: number | null;   // close on the actual flip bar
+  };
 };
 
 // Returns flipType and barsSince — uses precomputed _flip if chart_bars was stripped.
@@ -223,16 +228,24 @@ export function buildTelegramMessage(
     lines.push(`\n🚨 <b>ACTIONABLE EXITS (${exitSignals.length})</b>`);
     exitSignals.forEach(({ r, barsSince }) => {
       const when = barsSince === 0 ? "TODAY" : `${barsSince} bar${barsSince > 1 ? "s" : ""} ago`;
-      const close = fmtPrice(r.current_price, r.exchange);
-      const stLine = r.st_value > 0 ? fmtPrice(r.st_value, r.exchange) : "—";
-      // Violation %: how far close fell below ST line (negative number when below)
-      const violatedPct = r.st_value > 0
-        ? ((r.current_price - r.st_value) / r.st_value) * 100
-        : 0;
-      const violatedStr = violatedPct >= 0
-        ? `+${violatedPct.toFixed(1)}%`
-        : `${violatedPct.toFixed(1)}%`;
-      const detail = htmlEscape(`[ST Stop: ${stLine} | Violated by ${violatedStr} | Close: ${close}]`);
+
+      // Use the bullish stop from the bar BEFORE the flip (the level that was
+      // actually breached), not r.st_value (which is the post-flip bearish line).
+      const stop  = r._flip?.stopAtFlip  ?? null;
+      const close = r._flip?.closeAtFlip ?? r.current_price;  // flip-bar close if available
+
+      const stopStr = stop !== null && stop > 0 ? fmtPrice(stop, r.exchange) : "—";
+      const closeStr = fmtPrice(close, r.exchange);
+
+      // Violation = how far the flip-bar close fell below the prior bullish stop
+      const violatedPct = stop !== null && stop > 0
+        ? ((close - stop) / stop) * 100
+        : null;
+      const violatedStr = violatedPct !== null
+        ? (violatedPct >= 0 ? `+${violatedPct.toFixed(1)}%` : `${violatedPct.toFixed(1)}%`)
+        : "—";
+
+      const detail = htmlEscape(`[ST Stop: ${stopStr} | Violated by ${violatedStr} | Close: ${closeStr}]`);
       lines.push(`  • 🛑 <b>${htmlEscape(r.symbol)}</b>: ST FLIP → 📉 BEARISH (${when})`);
       lines.push(`    ${detail}`);
     });

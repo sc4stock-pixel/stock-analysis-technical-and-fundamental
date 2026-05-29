@@ -48,17 +48,21 @@ export async function POST(req: NextRequest) {
       const stParams = (slim.st_opt_params as { atrPeriod?: number; multiplier?: number } | undefined);
       const atr = stParams?.atrPeriod ?? 10;
       const mul = stParams?.multiplier ?? 3.0;
-      const [, dir] = supertrend(bars.map(b => b.high), bars.map(b => b.low), bars.map(b => b.close), atr, mul);
+      const [stArr, dir] = supertrend(bars.map(b => b.high), bars.map(b => b.low), bars.map(b => b.close), atr, mul);
       let flipType: "BULLISH" | "BEARISH" | null = null;
       let barsSince = 999;
+      let stopAtFlip: number | null = null;   // previous bar's ST stop (the line that was breached)
+      let closeAtFlip: number | null = null;  // close on the actual flip bar
       for (let i = dir.length - 1; i >= 1; i--) {
         if (dir[i] !== dir[i - 1]) {
-          barsSince = dir.length - 1 - i;
-          flipType  = dir[i] === 1 ? "BULLISH" : "BEARISH";
+          barsSince   = dir.length - 1 - i;
+          flipType    = dir[i] === 1 ? "BULLISH" : "BEARISH";
+          stopAtFlip  = stArr[i - 1] ?? null;   // bullish stop from the bar before flip
+          closeAtFlip = bars[i].close;           // close that violated/cleared the stop
           break;
         }
       }
-      return { ...slim, _flip: { flipType, barsSince } };
+      return { ...slim, _flip: { flipType, barsSince, stopAtFlip, closeAtFlip } };
     }
     return slim;
   });

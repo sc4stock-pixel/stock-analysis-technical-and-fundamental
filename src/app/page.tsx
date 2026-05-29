@@ -249,7 +249,7 @@ export default function Dashboard() {
         if (chart_bars && chart_bars.length >= 2) {
           const atr = r.st_opt_params?.atrPeriod ?? 10;
           const mul = r.st_opt_params?.multiplier ?? 3.0;
-          const [, dir] = supertrend(
+          const [stArr, dir] = supertrend(
             chart_bars.map(b => b.high),
             chart_bars.map(b => b.low),
             chart_bars.map(b => b.close),
@@ -257,14 +257,18 @@ export default function Dashboard() {
           );
           let flipType: "BULLISH" | "BEARISH" | null = null;
           let barsSince = 999;
+          let stopAtFlip: number | null = null;
+          let closeAtFlip: number | null = null;
           for (let i = dir.length - 1; i >= 1; i--) {
             if (dir[i] !== dir[i - 1]) {
-              barsSince = dir.length - 1 - i;
-              flipType = dir[i] === 1 ? "BULLISH" : "BEARISH";
+              barsSince   = dir.length - 1 - i;
+              flipType    = dir[i] === 1 ? "BULLISH" : "BEARISH";
+              stopAtFlip  = stArr[i - 1] ?? null;
+              closeAtFlip = chart_bars[i].close;
               break;
             }
           }
-          return { ...slim, _flip: { flipType, barsSince } };
+          return { ...slim, _flip: { flipType, barsSince, stopAtFlip, closeAtFlip } };
         }
         return slim;
       });
