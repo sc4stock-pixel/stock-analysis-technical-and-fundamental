@@ -1,5 +1,5 @@
 {
-  "updated": "2026-05-27T14:10:17Z",
+  "updated": "2026-05-31T08:14:17Z",
   "stocks": [
     "AAPL",
     "MSFT",
@@ -244,11 +244,11 @@
         },
         {
           "fiscalDateEnding": "2025-09-30",
-          "reportedEPS": "0.75"
+          "reportedEPS": "1.2"
         },
         {
           "fiscalDateEnding": "2025-06-30",
-          "reportedEPS": "0.48"
+          "reportedEPS": "0.54"
         },
         {
           "fiscalDateEnding": "2025-03-31",
