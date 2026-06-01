@@ -123,6 +123,23 @@ for symbol in stocks:
             }
         }
 
+        # ── Historical track record (point-in-time, 20 bars ago) ──
+        try:
+            from forecast_metrics import dir_hits as _dh, mae as _mae
+            if len(closes) > 20 + 50:
+                hist_ctx = closes[:-20]
+                _, q_hist = model.forecast(horizon=20, inputs=[hist_ctx])
+                hist_pred = [round(float(v), 2) for v in q_hist[0, :, 0]]  # p50
+                actual = [round(float(v), 2) for v in closes[-20:]]
+                anchor = round(float(closes[-21]), 2)
+                output[symbol]["historical"] = {
+                    "anchor": anchor, "pred": hist_pred, "actual": actual,
+                    "dir_hits": _dh(anchor, hist_pred, actual),
+                    "mae": _mae(hist_pred, actual),
+                }
+        except Exception as _he:
+            print(f"  -> historical pass failed: {_he}")
+
         # ── Application 2: SuperTrend Persistence ───────────────
         def compute_supertrend(highs, lows, closes, period=10, multiplier=3.0):
             n = len(closes)
