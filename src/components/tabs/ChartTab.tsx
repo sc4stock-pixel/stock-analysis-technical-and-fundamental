@@ -22,6 +22,7 @@ interface TimesfmPriceTargets {
   p50: number[];
   p90: number[];
   st_persistence?: TimesfmStPersistence;
+  historical?: import("@/types").ForecastHistorical;
 }
 
 interface Props {
@@ -85,6 +86,10 @@ interface ChartDataPoint {
   TunnelLo: number | null;
   TunnelHi: number | null;
   TunnelBand: [number, number] | null;
+  KronosFwd?: number | null;
+  KronosPred?: number | null;
+  TfmPred?: number | null;
+  Actual?: number | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -206,6 +211,7 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
   const [showMACD, setShowMACD]       = useState(false);
   const [showTrades, setShowTrades]   = useState(true);
   const [showForecast, setShowForecast] = useState(true);
+  const [forecastMode, setForecastMode] = useState<"forward" | "track">("forward");
 
   // ── Early returns after hooks ─────────────────────────────────
   if (!result) return <div className="p-4 text-[#4a6080] text-xs">No result data.</div>;
@@ -277,35 +283,76 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
   const lastClose = sliced.length > 0 ? (sliced[sliced.length - 1].close ?? result.current_price) : result.current_price;
   const lastDateShort = sliced.length > 0 ? (sliced[sliced.length - 1].date ?? "").slice(5) : "";
 
-  const hasForecast =
+  const hasTimesfm =
     showForecast &&
+    forecastMode === "forward" &&
     timesfm != null &&
     Array.isArray(timesfm.p50) && timesfm.p50.length > 0 &&
     Array.isArray(timesfm.p10) && timesfm.p10.length > 0 &&
     Array.isArray(timesfm.p90) && timesfm.p90.length > 0;
 
-  const forecastPoints: ChartDataPoint[] = hasForecast ? [
+  const hasKronosFwd =
+    showForecast && forecastMode === "forward" && !!kronos?.forward?.p50?.length;
+
+  // Either model contributes a forward projection
+  const hasForecast = hasTimesfm;
+  const buildForecast = hasTimesfm || hasKronosFwd;
+
+  const forecastLen = (timesfm?.p50?.length ?? kronos?.forward?.p50?.length ?? 0);
+
+  const forecastPoints: ChartDataPoint[] = buildForecast ? [
     // Bridge point — connects history to forecast seamlessly
     {
       date: "bridge", dateShort: lastDateShort,
       Close: null, SMA20: null, SMA50: null, EMA20: null, EMA50: null,
       BBU: null, BBL: null, ST_Bull: null, ST_Bear: null,
       Volume: null, RSI: null, "MACD H": null, Entry: null, Exit: null,
-      P50: lastClose, TunnelLo: lastClose, TunnelHi: lastClose, TunnelBand: [lastClose, lastClose] as [number,number],
+      P50: hasTimesfm ? lastClose : null,
+      TunnelLo: hasTimesfm ? lastClose : null,
+      TunnelHi: hasTimesfm ? lastClose : null,
+      TunnelBand: hasTimesfm ? ([lastClose, lastClose] as [number, number]) : null,
+      KronosFwd: hasKronosFwd ? lastClose : null,
     },
-    ...timesfm!.p50.map((v, i) => ({
-      date: `F+${i + 1}`, dateShort: `+${i + 1}d`,
-      Close: null, SMA20: null, SMA50: null, EMA20: null, EMA50: null,
-      BBU: null, BBL: null, ST_Bull: null, ST_Bear: null,
-      Volume: null, RSI: null, "MACD H": null, Entry: null, Exit: null,
-      P50: v,
-      TunnelLo: timesfm!.p10[i] ?? v,
-      TunnelHi: timesfm!.p90[i] ?? v,
-      TunnelBand: [timesfm!.p10[i] ?? v, timesfm!.p90[i] ?? v] as [number, number],
-    })),
+    ...Array.from({ length: forecastLen }).map((_, i) => {
+      const tv = timesfm?.p50?.[i];
+      return {
+        date: `F+${i + 1}`, dateShort: `+${i + 1}d`,
+        Close: null, SMA20: null, SMA50: null, EMA20: null, EMA50: null,
+        BBU: null, BBL: null, ST_Bull: null, ST_Bear: null,
+        Volume: null, RSI: null, "MACD H": null, Entry: null, Exit: null,
+        P50: hasTimesfm ? (tv ?? null) : null,
+        TunnelLo: hasTimesfm ? (timesfm!.p10[i] ?? tv ?? null) : null,
+        TunnelHi: hasTimesfm ? (timesfm!.p90[i] ?? tv ?? null) : null,
+        TunnelBand: hasTimesfm
+          ? ([timesfm!.p10[i] ?? tv ?? 0, timesfm!.p90[i] ?? tv ?? 0] as [number, number])
+          : null,
+        KronosFwd: hasKronosFwd ? (kronos?.forward?.p50?.[i] ?? null) : null,
+      } as ChartDataPoint;
+    }),
   ] : [];
 
   const allData: ChartDataPoint[] = [...histData, ...forecastPoints];
+
+  // ── Track-record dataset (historical prediction overlay) ─────
+  const trackMode =
+    showForecast && forecastMode === "track" &&
+    (!!kronos?.historical || !!timesfm?.historical);
+  const trackData: ChartDataPoint[] = trackMode ? (() => {
+    const k = kronos?.historical, t = timesfm?.historical;
+    const n = Math.max(
+      k?.pred.length ?? 0, t?.pred.length ?? 0,
+      k?.actual.length ?? 0, t?.actual.length ?? 0,
+    );
+    const tailHist = histData.slice(0, Math.max(0, histData.length - n));
+    const window: ChartDataPoint[] = Array.from({ length: n }).map((_, i) => ({
+      dateShort: `-${n - i}d`,
+      Actual: k?.actual[i] ?? t?.actual[i] ?? null,
+      KronosPred: k?.pred[i] ?? null,
+      TfmPred: t?.pred[i] ?? null,
+    } as ChartDataPoint));
+    return [...tailHist, ...window];
+  })() : [];
+  const chartData = trackMode ? trackData : allData;
 
   // ── Y-axis domain ─────────────────────────────────────────────
   const prices = histData.map(d => d.Close).filter((v): v is number => v != null);
@@ -327,9 +374,9 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
   const yMax = allY.length > 0 ? Math.max(...allY) + yPad : 100;
 
   // ── X-axis ticks ──────────────────────────────────────────────
-  const tickStep   = Math.max(1, Math.floor(allData.length / Math.min(8, allData.length)));
-  const sparseTicks = allData
-    .filter((_, i) => i === 0 || i === allData.length - 1 || i % tickStep === 0)
+  const tickStep   = Math.max(1, Math.floor(chartData.length / Math.min(8, chartData.length)));
+  const sparseTicks = chartData
+    .filter((_, i) => i === 0 || i === chartData.length - 1 || i % tickStep === 0)
     .map(d => d.dateShort);
 
   // ── Trade lists ───────────────────────────────────────────────
@@ -377,9 +424,19 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
         <Tog label="EMA50"  active={showEMA50}  onClick={() => setShowEMA50(v=>!v)}  activeClass="border-[#f59e0b]/70 text-[#f59e0b] bg-[#f59e0b]/10" />
         <Tog label="BB"     active={showBB}     onClick={() => setShowBB(v=>!v)}     activeClass="border-[#00d4ff]/50 text-[#00d4ff] bg-[#00d4ff]/08" />
         <Tog label="ST"     active={showST}     onClick={() => setShowST(v=>!v)}     activeClass="border-[#f97316]/60 text-[#f97316] bg-[#f97316]/10" />
-        {timesfm && (
+        {(timesfm || kronos) && (
           <Tog label="🔮 Forecast" active={showForecast} onClick={() => setShowForecast(v=>!v)}
             activeClass="border-[#a78bfa]/60 text-[#a78bfa] bg-[#a78bfa]/10" />
+        )}
+        {(timesfm || kronos) && showForecast && (
+          <>
+            <Tog label="Forward" active={forecastMode === "forward"}
+              onClick={() => setForecastMode("forward")}
+              activeClass="border-[#ff8c42]/60 text-[#ff8c42] bg-[#ff8c42]/10" />
+            <Tog label="Track Record" active={forecastMode === "track"}
+              onClick={() => setForecastMode("track")}
+              activeClass="border-[#ff8c42]/60 text-[#ff8c42] bg-[#ff8c42]/10" />
+          </>
         )}
         <div className="h-3 w-px bg-[#1e2d4a]" />
         <Tog label="Vol"  active={showVol}  onClick={() => setShowVol(v=>!v)}  activeClass="border-[#6b85a0]/60 text-[#6b85a0] bg-[#6b85a0]/10" />
@@ -395,7 +452,7 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
       {/* ── Main price chart (Phase 1: confidence tunnel overlay) ── */}
       <div style={{ height: priceH }}>
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={allData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="tunnelGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.25} />
@@ -445,6 +502,22 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
               />
             </>}
 
+            {/* Kronos forward median line */}
+            {hasKronosFwd && (
+              <Line type="monotone" dataKey="KronosFwd" stroke="#ff8c42" strokeWidth={2}
+                dot={false} isAnimationActive={false} name="Kronos" connectNulls />
+            )}
+
+            {/* Track-record overlay */}
+            {trackMode && (<>
+              <Line type="monotone" dataKey="Actual" stroke="#e8edf6" strokeWidth={2.2}
+                dot={false} isAnimationActive={false} name="Actual" connectNulls />
+              <Line type="monotone" dataKey="KronosPred" stroke="#ff8c42" strokeWidth={1.8}
+                strokeDasharray="5 4" dot={false} isAnimationActive={false} name="Kronos pred" connectNulls />
+              <Line type="monotone" dataKey="TfmPred" stroke="#a78bfa" strokeWidth={1.8}
+                strokeDasharray="5 4" dot={false} isAnimationActive={false} name="TimesFM pred" connectNulls />
+            </>)}
+
             {/* BB */}
             {showBB && <>
               <Line dataKey="BBU" stroke="#00d4ff" strokeWidth={1} dot={false} strokeOpacity={0.35} strokeDasharray="3 3" legendType="none" name="BB Upper" />
@@ -480,6 +553,19 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+
+      {/* Track-record accuracy scorecard */}
+      {trackMode && (
+        <div className="flex flex-wrap gap-3 text-[0.72rem] px-1 pt-1">
+          {kronos?.historical && (
+            <span className="text-[#ff8c42]">Kronos: {kronos.historical.dir_hits}/20 dir · MAE {kronos.historical.mae}</span>
+          )}
+          {timesfm?.historical && (
+            <span className="text-[#a78bfa]">TimesFM: {timesfm.historical.dir_hits}/20 dir · MAE {timesfm.historical.mae}</span>
+          )}
+          <span className="text-[#4a6080] italic">Prediction made 20 sessions ago vs actual.</span>
+        </div>
+      )}
 
       {/* Phase 1: Forecast target strip */}
       {hasForecast && timesfm && (
