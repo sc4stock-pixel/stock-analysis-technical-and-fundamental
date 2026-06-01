@@ -1,4 +1,4 @@
-import { SepaMetadata, TrendTemplateCriteria } from "@/types";
+import { SepaMetadata, TrendTemplateCriteria, KronosForecasts, TimesfmForecasts } from "@/types";
 import { htmlEscape } from "@/lib/telegram";
 
 type Flip = { flipType: "BULLISH" | "BEARISH" | null; barsSince: number };
@@ -131,11 +131,33 @@ function detectProximity(valid: SlimResult[]): ProximityHit[] {
 }
 
 // ============================================================
+// Kronos vs TimesFM one-line forecast summary
+// ============================================================
+function kronosForecastLine(
+  symbol: string,
+  tfm: TimesfmForecasts[string] | undefined,
+  kro: KronosForecasts[string] | undefined,
+): string | null {
+  if (!kro && !tfm) return null;
+  const last = kro?.last_price ?? null;
+  const kPct = (kro && last && Array.isArray(kro.forward.p50) && kro.forward.p50.length >= 20)
+    ? ((kro.forward.p50[19] - last) / last) * 100 : null;
+  const tPct = (tfm && last && Array.isArray(tfm.p50) && tfm.p50.length >= 20)
+    ? ((tfm.p50[19] - last) / last) * 100 : null;
+  const kDir = kro?.historical ? `K ${kro.historical.dir_hits}/20` : "";
+  const tDir = tfm?.historical ? `T ${tfm.historical.dir_hits}/20` : "";
+  const fmt = (v: number | null) => v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+  return `📈 ${symbol} · Kronos ${fmt(kPct)} / TimesFM ${fmt(tPct)} (20d dir: ${kDir}, ${tDir})`;
+}
+
+// ============================================================
 // Main: buildEodReport
 // ============================================================
 export function buildEodReport(
   results: SlimResult[],
   market: "us" | "hk",
+  kronosData?: KronosForecasts | null,
+  timesfmData?: TimesfmForecasts | null,
 ): string {
   const valid = results.filter(r => !r.error && r.current_price > 0);
 
@@ -241,6 +263,19 @@ export function buildEodReport(
   if (bearish.length > 0) {
     lines.push(`\n🔴 <b>ST BEARISH (${bearish.length})</b>`);
     lines.push(...groupedInline(bearish, 3));
+  }
+
+  // FORECASTS — Kronos vs TimesFM 20-day outlook per symbol
+  if (kronosData || timesfmData) {
+    const forecastLines: string[] = [];
+    for (const r of ordered) {
+      const fl = kronosForecastLine(r.symbol, timesfmData?.[r.symbol], kronosData?.[r.symbol]);
+      if (fl) forecastLines.push(`  ${fl}`);
+    }
+    if (forecastLines.length > 0) {
+      lines.push(`\n📊 <b>FORECASTS (20d)</b>`);
+      lines.push(...forecastLines);
+    }
   }
 
   const errorCount = results.length - valid.length;
