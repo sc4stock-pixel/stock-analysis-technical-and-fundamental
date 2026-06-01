@@ -13,6 +13,7 @@ interface Props {
   result: StockAnalysisResult;
   config: AppConfig;
   timesfm?: TimesfmPriceTargets;
+  kronos?: import("@/types").KronosForecast;
   forcedTab?: Tab;
 }
 
@@ -119,7 +120,7 @@ function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
   return { ...result, backtest: stBt };
 }
 
-export default function StockCard({ result, config, timesfm, forcedTab }: Props) {
+export default function StockCard({ result, config, timesfm, kronos, forcedTab }: Props) {
   const [tab, setTab] = useState<Tab>("OVERVIEW");
   const [strategy, setStrategy] = useState<Strategy>("score");
 
@@ -310,7 +311,7 @@ export default function StockCard({ result, config, timesfm, forcedTab }: Props)
           <div className="p-4 text-[#ff4757] text-xs">{result.error ?? "Error fetching data"}</div>
         ) : (
           <>
-            {tab === "CHART"       && <ChartTab       result={result} config={config} timesfm={timesfm} />}
+            {tab === "CHART"       && <ChartTab       result={result} config={config} timesfm={timesfm} kronos={kronos} />}
             {tab === "OVERVIEW"    && <OverviewTab    result={activeResult} />}
             {tab === "BACKTEST"    && <BacktestTab    result={activeResult} />}
             {tab === "MONTE CARLO" && <MonteCarloTab  result={

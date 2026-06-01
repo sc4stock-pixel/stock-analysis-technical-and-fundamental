@@ -28,6 +28,7 @@ interface Props {
   result: StockAnalysisResult;
   config: AppConfig;
   timesfm?: TimesfmPriceTargets;
+  kronos?: import("@/types").KronosForecast;
 }
 
 type Range = "1M" | "3M" | "6M" | "1Y" | "2Y";
@@ -192,7 +193,7 @@ function PersistenceHistogram({ persistence, stDir }: {
   );
 }
 
-export default function ChartTab({ result, config, timesfm }: Props) {
+export default function ChartTab({ result, config, timesfm, kronos }: Props) {
   // ── All hooks first ───────────────────────────────────────────
   const [range, setRange]             = useState<Range>("1Y");
   const [showSMA, setShowSMA]         = useState(true);
