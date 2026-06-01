@@ -457,8 +457,28 @@ export interface TimesfmPriceTargets {
   p10: number[];
   p50: number[];
   p90: number[];
+  historical?: ForecastHistorical;
 }
 
 export interface TimesfmForecasts {
   [symbol: string]: TimesfmPriceTargets;
+}
+
+export interface ForecastHistorical {
+  anchor: number;
+  pred: number[];
+  actual: number[];
+  dir_hits: number;
+  mae: number;
+}
+
+export interface KronosForecast {
+  last_price: number;
+  last_date: string;
+  forward: { p50: number[] };
+  historical: ForecastHistorical;
+}
+
+export interface KronosForecasts {
+  [symbol: string]: KronosForecast;
 }
