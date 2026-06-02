@@ -29,7 +29,13 @@ from forecast_metrics import dir_hits, mae  # noqa: E402
 
 PRED_LEN = 20
 SAMPLE_COUNT = 5
-LOOKBACK = 400  # context bars fed to the model (<= 512 cap)
+# Context bars fed to the model. Kronos normalizes each input to zero-mean/unit-std
+# over this window and mean-reverts toward it. A long window (e.g. 400) puts a
+# strongly-trending stock's current price many sigma above the window mean, causing
+# the forecast to "teleport" toward the stale mean on bar 1 (e.g. AMD 510 -> 243).
+# 128 keeps the window anchored to recent price action so forecasts start continuously
+# (AMD bar-1 +1% vs -52% at 400). Validated empirically 2026-06-02.
+LOOKBACK = 128  # context bars fed to the model (<= 512 cap)
 
 _STOCKS_FALLBACK = [
     "9988.HK", "0700.HK", "1211.HK", "1810.HK", "0175.HK", "3033.HK",
