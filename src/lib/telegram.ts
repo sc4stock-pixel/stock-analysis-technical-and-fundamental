@@ -51,8 +51,32 @@ function fmtChg(pct: number): string {
   return pct >= 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`;
 }
 
-function fmtRegime(regime: string): string {
-  return regime.replace(/_/g, " ");
+/** Display symbol: strip ".HK" so Telegram doesn't auto-linkify e.g. "0700.HK" as a URL. */
+function dispSym(symbol: string): string {
+  return symbol.replace(".HK", "");
+}
+
+/** Compact regime code so each alert row fits one phone line (monospace <pre>). */
+function regimeAbbr(regime: string): string {
+  const r = regime.toUpperCase().replace(/_/g, " ");
+  const hv = r.includes("HIGH VOL") ? "HV-" : "";
+  let core: string;
+  if (r.includes("WEAK") && r.includes("STRENGTHEN")) core = "WK→STR";
+  else if (r.includes("STRENGTHENING"))               core = "STR'ng";
+  else if (r.includes("EXHAUST"))                     core = "EXH↑";
+  else if (r.includes("STRONG UPTREND"))              core = "STR↑";
+  else if (r.includes("WEAK UPTREND"))                core = "WK↑";
+  else if (r.includes("UPTREND"))                     core = "UP↑";
+  else if (r.includes("DOWNTREND"))                   core = "DN↓";
+  else if (r.includes("RANGING") || r.includes("RANGE")) core = "RNG";
+  else core = r.slice(0, 6);
+  return hv + core;
+}
+
+/** Wrap monospace rows in a full-width <pre> block; htmlEscape so literal `>`/`<`
+ *  (e.g. TT fails "150>200") don't break Telegram's HTML parser inside <pre>. */
+function preBlock(rows: string[]): string {
+  return `<pre>${htmlEscape(rows.join("\n"))}</pre>`;
 }
 
 type ResultWithFlip = StockAnalysisResult & {
@@ -100,10 +124,6 @@ function listTtFailures(tt: TrendTemplateCriteria): string {
     .filter(({ key }) => tt[key] === false)
     .map(({ label }) => label)
     .join(", ");
-}
-
-function flagFor(exchange: string): string {
-  return exchange === "HK" ? "🇭🇰" : "🇺🇸";
 }
 
 type ResultWithSepa = ResultWithFlip & { sepa_metadata?: SepaMetadata };
@@ -190,47 +210,43 @@ export function buildTelegramMessage(
   const avgScore = (valid.reduce((s, r) => s + r.score, 0) / valid.length).toFixed(1);
 
   // ---------- Row renderers ----------
+  // Monospace rows (no <b>; escaping done by preBlock). .HK stripped throughout.
   const fmtBuyRow = (r: ResultWithSepa): string => {
-    const sym = htmlEscape(r.symbol).padEnd(5);
+    const sym = dispSym(r.symbol).padEnd(5);
     const sc  = r.score.toFixed(1);
-    const px  = fmtPrice(r.current_price, r.exchange);
-    const chg = fmtChg(r.change_pct);
-    const reg = htmlEscape(fmtRegime(r.regime));
-    return `  • <b>${sym}</b> ${sc}/10 | ${px} [${chg}] | ${reg}`;
+    const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
+    const chg = fmtChg(r.change_pct).padStart(6);
+    return `${sym} ${sc} ${px} ${chg} ${regimeAbbr(r.regime)}`;
   };
 
   const fmtTacticalRow = (r: ResultWithSepa): string => {
-    const sym = htmlEscape(r.symbol).padEnd(5);
+    const sym = dispSym(r.symbol).padEnd(5);
     const sc  = r.score.toFixed(1);
-    const px  = fmtPrice(r.current_price, r.exchange);
-    const chg = fmtChg(r.change_pct);
+    const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
+    const chg = fmtChg(r.change_pct).padStart(6);
     const tt  = ttFor(r);
-    const fails = tt ? listTtFailures(tt) : "";
-    const ttTag = tt ? htmlEscape(`[TT: ${tt.criteria_met}/7 — Fails: ${fails}]`) : "";
-    return `  • <b>${sym}</b> ${sc}/10 | ${px} [${chg}] | ${ttTag}`;
+    const ttTag = tt ? `TT${tt.criteria_met}/7 ✗${listTtFailures(tt)}` : "TT—";
+    return `${sym} ${sc} ${px} ${chg} ${ttTag}`;
   };
 
   const fmtStrippedRow = (r: ResultWithSepa): string => {
-    const flag = flagFor(r.exchange);
-    const sym  = htmlEscape(r.symbol);
-    const px   = fmtPrice(r.current_price, r.exchange);
-    const tt   = ttFor(r);
-    if (!tt) return `  • ${flag} <b>${sym}</b> [TT data missing] | ${px}`;
-    const tag = htmlEscape(`[TT ${tt.criteria_met}/7 — Fails: ${listTtFailures(tt)}]`);
-    return `  • ${flag} <b>${sym}</b> ${tag} | ${px}`;
+    const sym = dispSym(r.symbol).padEnd(5);
+    const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
+    const tt  = ttFor(r);
+    const ttTag = tt ? `TT${tt.criteria_met}/7 ✗${listTtFailures(tt)}` : "TT—";
+    return `${sym} ${px} ${ttTag}`;
   };
 
   const fmtEmergingRow = (r: ResultWithSepa): string => {
-    const flag = flagFor(r.exchange);
-    const sym  = htmlEscape(r.symbol);
-    const px   = fmtPrice(r.current_price, r.exchange);
-    const chg  = fmtChg(r.change_pct);
-    const tt   = ttFor(r);
-    const ttStr = tt ? `TT ${tt.criteria_met}/7` : "TT —";
-    return `  • ${flag} <b>${sym}</b> [${chg}] | ${ttStr} forming | ${px}`;
+    const sym = dispSym(r.symbol).padEnd(5);
+    const chg = fmtChg(r.change_pct).padStart(6);
+    const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
+    const tt  = ttFor(r);
+    const ttStr = tt ? `TT${tt.criteria_met}/7` : "TT—";
+    return `${sym} ${chg} ${px} ${ttStr}`;
   };
 
-  // Watchlist: HK first then US, inline 3-per-line with " · " separator, % change in parens
+  // Watchlist: HK first then US, inline 3-per-line, " · " separator, .HK stripped, no flag
   const fmtWatchlistLines = (stocks: ResultWithSepa[], perLine = 3): string[] => {
     const hk = stocks.filter(r => r.exchange === "HK");
     const us = stocks.filter(r => r.exchange !== "HK");
@@ -238,9 +254,8 @@ export function buildTelegramMessage(
     for (const group of [hk, us]) {
       for (let i = 0; i < group.length; i += perLine) {
         const chunk = group.slice(i, i + perLine);
-        const flag  = flagFor(chunk[0].exchange);
-        const parts = chunk.map(r => `<b>${htmlEscape(r.symbol)}</b> (${fmtChg(r.change_pct)})`);
-        lines.push(`  ${flag} ${parts.join(" · ")}`);
+        const parts = chunk.map(r => `${htmlEscape(dispSym(r.symbol))} ${fmtChg(r.change_pct)}`);
+        lines.push(`  ${parts.join(" · ")}`);
       }
     }
     return lines;
@@ -272,49 +287,45 @@ export function buildTelegramMessage(
         : "—";
 
       const detail = htmlEscape(`[ST Stop: ${stopStr} | Violated by ${violatedStr} | Close: ${closeStr}]`);
-      lines.push(`  • 🛑 <b>${htmlEscape(r.symbol)}</b>: ST FLIP → 📉 BEARISH (${when})`);
+      lines.push(`  • 🛑 <b>${htmlEscape(dispSym(r.symbol))}</b>: ST FLIP → 📉 BEARISH (${when})`);
       lines.push(`    ${detail}`);
     });
   }
 
-  // FRESH CONFLUENCE BUYS — strict 7/7
+  // Buy/hold tiers — each rendered as a full-width monospace <pre> table
   if (freshBuys.length > 0) {
-    lines.push(`\n🟢 <b>CONFLUENCE BUYS (${freshBuys.length})</b> — ST↑ + BUY + TT 7/7`);
-    freshBuys.forEach(r => lines.push(fmtBuyRow(r)));
+    lines.push(`\n🟢 <b>CONFLUENCE BUYS (${freshBuys.length})</b> <i>ST↑ BUY TT7/7</i>`);
+    lines.push(preBlock(freshBuys.map(fmtBuyRow)));
   }
 
-  // TACTICAL BUYS — 5-6/7
   if (tacticals.length > 0) {
-    lines.push(`\n🟢 <b>TACTICAL BUYS (${tacticals.length})</b> — ST↑ + BUY + TT ≥5/7`);
-    tacticals.forEach(r => lines.push(fmtTacticalRow(r)));
+    lines.push(`\n🟢 <b>TACTICAL BUYS (${tacticals.length})</b> <i>ST↑ BUY TT≥5/7</i>`);
+    lines.push(preBlock(tacticals.map(fmtTacticalRow)));
   }
 
-  // CONFLUENCE HOLDS — HOLD signal but strict 7/7
   if (holdsTier.length > 0) {
-    lines.push(`\n🔵 <b>CONFLUENCE HOLDS (${holdsTier.length})</b> — ST↑ + HOLD + TT 7/7`);
-    holdsTier.forEach(r => lines.push(fmtBuyRow(r)));
+    lines.push(`\n🔵 <b>CONFLUENCE HOLDS (${holdsTier.length})</b> <i>ST↑ HOLD TT7/7</i>`);
+    lines.push(preBlock(holdsTier.map(fmtBuyRow)));
   }
 
-  // EMERGING UPTRENDS — fresh bullish ST flip/re-entry, structure still forming
   if (emerging.length > 0) {
-    lines.push(`\n🚀 <b>EMERGING UPTRENDS (${emerging.length})</b> — fresh ST↑ flip, structure forming (TT &lt; 5/7)`);
-    emerging.forEach(r => lines.push(fmtEmergingRow(r)));
+    lines.push(`\n🚀 <b>EMERGING UPTRENDS (${emerging.length})</b> <i>fresh ST↑ flip, TT&lt;5</i>`);
+    lines.push(preBlock(emerging.map(fmtEmergingRow)));
   }
 
-  // STRIPPED — ST↑ but <5/7 with no fresh flip (genuine deterioration)
   if (stripped.length > 0) {
-    lines.push(`\n⚠️ <b>STRIPPED FROM BUYS (${stripped.length})</b> — Severe Structural Failures (TT &lt; 5/7)`);
-    stripped.forEach(r => lines.push(fmtStrippedRow(r)));
+    lines.push(`\n⚠️ <b>STRIPPED FROM BUYS (${stripped.length})</b> <i>structural fail, TT&lt;5</i>`);
+    lines.push(preBlock(stripped.map(fmtStrippedRow)));
   }
 
-  // PASSIVE WATCHLIST — ST↓
+  // PASSIVE WATCHLIST — ST↓ (inline, not a table)
   if (watchlist.length > 0) {
-    lines.push(`\n⚪ <b>PASSIVE WATCHLIST (${watchlist.length})</b> — ST↓ (No Action)`);
+    lines.push(`\n⚪ <b>WATCHLIST ST↓ (${watchlist.length})</b>`);
     lines.push(...fmtWatchlistLines(watchlist, 3));
   }
 
   // Footer
-  lines.push(`\n📊 <i>Portfolio Avg Score: ${avgScore}/10 · ${valid.length} Assets · HKT ${timeStr}</i>`);
+  lines.push(`\n📊 <i>Avg ${avgScore}/10 · ${valid.length} assets · HKT ${timeStr}</i>`);
 
   return lines.join("\n");
 }
