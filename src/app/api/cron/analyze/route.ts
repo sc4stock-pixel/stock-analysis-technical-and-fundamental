@@ -15,12 +15,7 @@ export async function POST(req: NextRequest) {
   }
 
   const baseUrl  = new URL(req.url).origin;
-  // Intraday mode (e.g. ?intraday=hk): scan only that region's stocks and alert ONLY
-  // on a fresh ST flip (provisional, based on the in-progress bar). No flip = silent.
-  const intraday = new URL(req.url).searchParams.get("intraday");
-  const portfolio = intraday === "hk"
-    ? DEFAULT_CONFIG.stocks.PORTFOLIO.filter(s => s.exchange === "HK")
-    : DEFAULT_CONFIG.stocks.PORTFOLIO;
+  const portfolio = DEFAULT_CONFIG.stocks.PORTFOLIO;
 
   // Analyze all stocks in parallel — each /api/stocks call is within its own timeout
   const results = await Promise.all(
@@ -79,14 +74,12 @@ export async function POST(req: NextRequest) {
     return flip?.flipType && flip.barsSince <= 1;
   });
 
-  // Intraday: fire ONLY on a fresh flip (ignore steady-state signals). Otherwise stay silent.
-  const shouldSend = intraday ? hasRecentFlip : (hasSignals || hasRecentFlip);
-  if (!shouldSend) {
+  if (!hasSignals && !hasRecentFlip) {
     return NextResponse.json({ ok: true, skipped: true, reason: "no signals or flips", analyzed: payload.length });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const message  = buildTelegramMessage(payload as any, intraday ? "intraday" : "cron");
+  const message  = buildTelegramMessage(payload as any, "cron");
   const tgResult = await sendTelegramMessage(message, "alerts");
 
   return NextResponse.json({
