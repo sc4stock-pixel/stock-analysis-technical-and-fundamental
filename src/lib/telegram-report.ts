@@ -131,23 +131,63 @@ function detectProximity(valid: SlimResult[]): ProximityHit[] {
 }
 
 // ============================================================
-// Kronos vs TimesFM one-line forecast summary
+// Kronos vs TimesFM forecast table (compact, US then HK, sorted by Kronos 20d dir)
 // ============================================================
-function kronosForecastLine(
-  symbol: string,
-  tfm: TimesfmForecasts[string] | undefined,
-  kro: KronosForecasts[string] | undefined,
-): string | null {
-  if (!kro && !tfm) return null;
-  const last = kro?.last_price ?? null;
-  const kPct = (kro && last && Array.isArray(kro.forward.p50) && kro.forward.p50.length >= 20)
-    ? ((kro.forward.p50[19] - last) / last) * 100 : null;
-  const tPct = (tfm && last && Array.isArray(tfm.p50) && tfm.p50.length >= 20)
-    ? ((tfm.p50[19] - last) / last) * 100 : null;
-  const kDir = kro?.historical ? `K ${kro.historical.dir_hits}/20` : "";
-  const tDir = tfm?.historical ? `T ${tfm.historical.dir_hits}/20` : "";
-  const fmt = (v: number | null) => v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
-  return `📈 ${symbol} · Kronos ${fmt(kPct)} / TimesFM ${fmt(tPct)} (20d dir: ${kDir}, ${tDir})`;
+interface ForecastRow {
+  label: string; isHK: boolean;
+  kPct: number | null; tPct: number | null;
+  kDir: number | null; tDir: number | null;
+}
+
+function buildForecastSection(
+  ordered: { symbol: string }[],
+  timesfmData: TimesfmForecasts | null | undefined,
+  kronosData: KronosForecasts | null | undefined,
+): string[] {
+  const rows: ForecastRow[] = [];
+  for (const r of ordered) {
+    const kro = kronosData?.[r.symbol];
+    const tfm = timesfmData?.[r.symbol];
+    if (!kro && !tfm) continue;
+    const last = kro?.last_price ?? null;
+    const kPct = (kro && last && Array.isArray(kro.forward.p50) && kro.forward.p50.length >= 20)
+      ? ((kro.forward.p50[19] - last) / last) * 100 : null;
+    const tPct = (tfm && last && Array.isArray(tfm.p50) && tfm.p50.length >= 20)
+      ? ((tfm.p50[19] - last) / last) * 100 : null;
+    const isHK = r.symbol.endsWith(".HK");
+    rows.push({
+      // strip ".HK" for HK names — shorter AND stops Telegram auto-linking "9988.HK" as a URL
+      label: isHK ? r.symbol.replace(".HK", "") : r.symbol,
+      isHK,
+      kPct, tPct,
+      kDir: kro?.historical?.dir_hits ?? null,
+      tDir: tfm?.historical?.dir_hits ?? null,
+    });
+  }
+  if (rows.length === 0) return [];
+
+  const byDirDesc = (a: ForecastRow, b: ForecastRow) => (b.kDir ?? -1) - (a.kDir ?? -1);
+  const us = rows.filter(x => !x.isHK).sort(byDirDesc);
+  const hk = rows.filter(x => x.isHK).sort(byDirDesc);
+
+  const pct = (v: number | null) => v == null ? "  —  " : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+  const fmtRow = (x: ForecastRow) => {
+    const lbl = x.label.padEnd(5);
+    const k = pct(x.kPct).padStart(7);
+    const t = pct(x.tPct).padStart(7);
+    const dir = x.kDir != null ? `${x.kDir}/20` : "  —  ";
+    const tdir = x.tDir != null ? ` T${x.tDir}/20` : "";
+    return `${lbl} K${k} T${t}  ${dir}${tdir}`;
+  };
+
+  const table: string[] = [];
+  if (us.length) { table.push("US"); us.forEach(x => table.push(fmtRow(x))); }
+  if (hk.length) { table.push("HK"); hk.forEach(x => table.push(fmtRow(x))); }
+
+  return [
+    `\n📊 <b>FORECASTS 20d</b> <i>K=Kronos T=TimesFM · dir=hits/20</i>`,
+    `<pre>${table.join("\n")}</pre>`,
+  ];
 }
 
 // ============================================================
@@ -265,17 +305,9 @@ export function buildEodReport(
     lines.push(...groupedInline(bearish, 3));
   }
 
-  // FORECASTS — Kronos vs TimesFM 20-day outlook per symbol
+  // FORECASTS — compact Kronos vs TimesFM table (US then HK, sorted by Kronos 20d dir)
   if (kronosData || timesfmData) {
-    const forecastLines: string[] = [];
-    for (const r of ordered) {
-      const fl = kronosForecastLine(r.symbol, timesfmData?.[r.symbol], kronosData?.[r.symbol]);
-      if (fl) forecastLines.push(`  ${fl}`);
-    }
-    if (forecastLines.length > 0) {
-      lines.push(`\n📊 <b>FORECASTS (20d)</b>`);
-      lines.push(...forecastLines);
-    }
+    lines.push(...buildForecastSection(ordered, timesfmData, kronosData));
   }
 
   const errorCount = results.length - valid.length;
