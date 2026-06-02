@@ -97,6 +97,8 @@ const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: 
   if (!active || !payload?.length) return null;
   const get = (name: string) => payload.find((x: {name:string;value:number}) => x.name === name)?.value as number | undefined;
   const close = get("Close"); const p50 = get("P50");
+  const kronosFwd = get("Kronos"); const actual = get("Actual");
+  const kronosPred = get("Kronos pred"); const tfmPred = get("TimesFM pred");
   const sma20 = get("SMA20"); const sma50 = get("SMA50");
   const ema20 = get("EMA20"); const ema50 = get("EMA50");
   const stBull = get("ST_Bull"); const stBear = get("ST_Bear");
@@ -106,7 +108,11 @@ const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: 
     <div className="bg-[#0f1629] border border-[#1e2d4a] rounded px-2.5 py-2 text-xs font-mono shadow-xl max-w-[220px]">
       <div className="text-[#6b85a0] mb-1.5 border-b border-[#1e2d4a] pb-1">{label}{p50 != null ? " 🔮" : ""}</div>
       {close  != null && <div className="text-[#c8d8f0]">Close: <span className="text-[#00d4ff] font-bold">{close.toFixed(2)}</span></div>}
-      {p50    != null && <div className="text-[#a78bfa] font-bold">P50 Forecast: {p50.toFixed(2)}</div>}
+      {p50    != null && <div className="text-[#a78bfa] font-bold">TimesFM P50: {p50.toFixed(2)}</div>}
+      {kronosFwd  != null && <div className="text-[#ff8c42] font-bold">Kronos: {kronosFwd.toFixed(2)}</div>}
+      {actual     != null && <div className="text-[#e8edf6] font-bold">Actual: {actual.toFixed(2)}</div>}
+      {kronosPred != null && <div className="text-[#ff8c42]">Kronos pred: {kronosPred.toFixed(2)}</div>}
+      {tfmPred    != null && <div className="text-[#a78bfa]">TimesFM pred: {tfmPred.toFixed(2)}</div>}
       {sma20  != null && <div className="text-[#00ff88]">SMA20: {sma20.toFixed(2)}</div>}
       {sma50  != null && <div className="text-[#ff7f50]">SMA50: {sma50.toFixed(2)}</div>}
       {ema20  != null && <div className="text-[#a78bfa]">EMA20: {ema20.toFixed(2)}</div>}
