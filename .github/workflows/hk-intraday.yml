@@ -1,0 +1,31 @@
+name: HK Intraday Flip Alert
+
+# Fires ONLY on a fresh ST flip during the HK session (provisional, in-progress bar).
+# Silent otherwise. HK trades Mon-Fri 09:30-12:00 & 13:00-16:00 HKT.
+on:
+  schedule:
+    - cron: '0 3 * * 1-5'    # 11:00 HKT (late morning session)
+    - cron: '30 6 * * 1-5'   # 14:30 HKT (mid afternoon session)
+  workflow_dispatch:
+
+jobs:
+  intraday:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger HK intraday flip scan
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          response=$(curl -sf --max-time 90 \
+            -X POST "https://stock-analysis-technical-and-fundam.vercel.app/api/cron/analyze?intraday=hk" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            || echo '{"ok":false,"error":"curl failed"}')
+          echo "Response: $response"
+          if echo "$response" | grep -q '"skipped":true'; then
+            echo "No fresh HK flip - no alert sent (expected most runs)."
+          elif echo "$response" | grep -q '"ok":true'; then
+            echo "HK intraday flip alert sent."
+          else
+            echo "HK intraday scan failed: $response"
+            exit 1
+          fi

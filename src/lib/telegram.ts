@@ -113,14 +113,15 @@ type ResultWithSepa = ResultWithFlip & { sepa_metadata?: SepaMetadata };
 // ============================================================
 export function buildTelegramMessage(
   results: ResultWithFlip[],
-  source: "manual" | "cron" = "manual",
+  source: "manual" | "cron" | "intraday" = "manual",
 ): string {
   const valid = (results as ResultWithSepa[]).filter(r => r.signal !== "ERROR" && !r.error);
   if (valid.length === 0) return "📊 TA Report — no valid results.";
 
   // Header — branded by trigger source
-  const headerLine = source === "cron"
-    ? "📅 <b>Daily Market Brief (Scheduled Scan)</b>"
+  const headerLine =
+    source === "cron"     ? "📅 <b>Daily Market Brief (Scheduled Scan)</b>"
+    : source === "intraday" ? "⚡ <b>HK Intraday Flip Alert</b> <i>(provisional — based on the in-progress bar)</i>"
     : "⚡ <b>TA Execution Alert (On-Demand Scan)</b>";
 
   const dateStr = new Date().toLocaleDateString("en-US", {
@@ -144,6 +145,13 @@ export function buildTelegramMessage(
   // Actionable exits: bearish ST flips within 2 bars
   const exitSignals = todayFlips.filter(x => x.flipType === "BEARISH");
 
+  // Symbols with a FRESH bullish ST flip/re-entry (≤2 bars) — used to separate
+  // genuinely-deteriorating names from brand-new upside breakouts that are still
+  // below their SMAs (low TT) only because the move just started.
+  const freshBullishSyms = new Set(
+    todayFlips.filter(x => x.flipType === "BULLISH").map(x => x.r.symbol),
+  );
+
   // ---------- Tier classification ----------
   const ttFor = (r: ResultWithSepa): TrendTemplateCriteria | undefined =>
     r.sepa_metadata?.trend_template_criteria;
@@ -160,14 +168,22 @@ export function buildTelegramMessage(
   const isConfluenceHold = (r: ResultWithSepa) =>
     r.signal === "HOLD" && r.st_direction === 1 && (ttFor(r)?.criteria_met ?? 0) === 7;
 
-  const isStripped = (r: ResultWithSepa) =>
+  // ST↑ but trend-template not yet confirmed (< 5/7)
+  const isWeakStructure = (r: ResultWithSepa) =>
     r.st_direction === 1 && (ttFor(r)?.criteria_met ?? 7) < 5;
+  // Emerging = weak structure BUT a fresh bullish flip → new breakout, not decay
+  const isEmerging = (r: ResultWithSepa) =>
+    isWeakStructure(r) && freshBullishSyms.has(r.symbol);
+  // Stripped = weak structure WITHOUT a fresh flip → genuine deterioration
+  const isStripped = (r: ResultWithSepa) =>
+    isWeakStructure(r) && !freshBullishSyms.has(r.symbol);
 
   const isWatchlist = (r: ResultWithSepa) => r.st_direction !== 1;
 
   const freshBuys  = valid.filter(isFreshConfluence);
   const tacticals  = valid.filter(isTacticalBuy);
   const holdsTier  = valid.filter(isConfluenceHold);
+  const emerging   = valid.filter(isEmerging);
   const stripped   = valid.filter(isStripped);
   const watchlist  = valid.filter(isWatchlist);
 
@@ -202,6 +218,16 @@ export function buildTelegramMessage(
     if (!tt) return `  • ${flag} <b>${sym}</b> [TT data missing] | ${px}`;
     const tag = htmlEscape(`[TT ${tt.criteria_met}/7 — Fails: ${listTtFailures(tt)}]`);
     return `  • ${flag} <b>${sym}</b> ${tag} | ${px}`;
+  };
+
+  const fmtEmergingRow = (r: ResultWithSepa): string => {
+    const flag = flagFor(r.exchange);
+    const sym  = htmlEscape(r.symbol);
+    const px   = fmtPrice(r.current_price, r.exchange);
+    const chg  = fmtChg(r.change_pct);
+    const tt   = ttFor(r);
+    const ttStr = tt ? `TT ${tt.criteria_met}/7` : "TT —";
+    return `  • ${flag} <b>${sym}</b> [${chg}] | ${ttStr} forming | ${px}`;
   };
 
   // Watchlist: HK first then US, inline 3-per-line with " · " separator, % change in parens
@@ -253,7 +279,7 @@ export function buildTelegramMessage(
 
   // FRESH CONFLUENCE BUYS — strict 7/7
   if (freshBuys.length > 0) {
-    lines.push(`\n🟢 <b>FRESH CONFLUENCE BUYS (${freshBuys.length})</b> — ST↑ + BUY + TT 7/7`);
+    lines.push(`\n🟢 <b>CONFLUENCE BUYS (${freshBuys.length})</b> — ST↑ + BUY + TT 7/7`);
     freshBuys.forEach(r => lines.push(fmtBuyRow(r)));
   }
 
@@ -269,7 +295,13 @@ export function buildTelegramMessage(
     holdsTier.forEach(r => lines.push(fmtBuyRow(r)));
   }
 
-  // STRIPPED — ST↑ but <5/7 (severe structural failure)
+  // EMERGING UPTRENDS — fresh bullish ST flip/re-entry, structure still forming
+  if (emerging.length > 0) {
+    lines.push(`\n🚀 <b>EMERGING UPTRENDS (${emerging.length})</b> — fresh ST↑ flip, structure forming (TT &lt; 5/7)`);
+    emerging.forEach(r => lines.push(fmtEmergingRow(r)));
+  }
+
+  // STRIPPED — ST↑ but <5/7 with no fresh flip (genuine deterioration)
   if (stripped.length > 0) {
     lines.push(`\n⚠️ <b>STRIPPED FROM BUYS (${stripped.length})</b> — Severe Structural Failures (TT &lt; 5/7)`);
     stripped.forEach(r => lines.push(fmtStrippedRow(r)));
