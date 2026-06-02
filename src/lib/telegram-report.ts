@@ -285,11 +285,13 @@ export function buildEodReport(
   // ST BULLISH — monospace block for column alignment
   if (bullish.length > 0) {
     lines.push(`\n🟢 <b>ST BULLISH (${bullish.length})</b> — ranked by SEPA`);
+    const maxSymLen = Math.max(...bullish.map(r => r.symbol.length));
     const rows: string[] = [];
     bullish.forEach((r) => {
       const sepa = r.sepa_metadata ? fmtSepa(r.sepa_metadata) : "—";
       const chg  = fmtChg(r.change_pct);
-      rows.push(`${r.symbol} ${sepa} ${chg}`);
+      const sym  = r.symbol.padEnd(maxSymLen);
+      rows.push(`${sym} ${sepa} ${chg}`);
     });
     // Wrap in <pre> so Telegram renders monospace and preserves column alignment
     lines.push(`<pre>${rows.join("\n")}</pre>`);
