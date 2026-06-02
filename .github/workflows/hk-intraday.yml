@@ -4,8 +4,8 @@ name: HK Intraday Flip Alert
 # Silent otherwise. HK trades Mon-Fri 09:30-12:00 & 13:00-16:00 HKT.
 on:
   schedule:
-    - cron: '0 3 * * 1-5'    # 11:00 HKT (late morning session)
-    - cron: '30 6 * * 1-5'   # 14:30 HKT (mid afternoon session)
+    - cron: '0 2 * * 1-5'    # 10:00 HKT (morning session)
+    - cron: '0 6 * * 1-5'    # 14:00 HKT (afternoon session)
   workflow_dispatch:
 
 jobs:
