@@ -10,3 +10,6 @@ echo '{"async": true, "asyncTimeout": 300000}'
 
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
 npm install
+
+# Restore global CLI tools
+npm install -g notebooklm 2>/dev/null || true
