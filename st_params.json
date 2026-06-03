@@ -1,7 +1,7 @@
 {
-  "last_optimized": "2026-06-02",
+  "last_optimized": "2026-06-03",
   "next_optimization": "2026-07-05",
-  "optimization_count": 11,
+  "optimization_count": 12,
   "stocks": {
     "9988.HK": {
       "atr_period": 12,
@@ -79,25 +79,6 @@
       "wf_passed": false,
       "wf_is_true_oos": true
     },
-    "0175.HK": {
-      "atr_period": 14,
-      "multiplier": 3.5,
-      "total_return": 84.42,
-      "sharpe": 0.85,
-      "num_trades": 4,
-      "wf_train_atr_period": 14,
-      "wf_train_multiplier": 3.5,
-      "wf_train_sharpe": 0.85,
-      "wf_train_return": 58.81,
-      "wf_train_trades": 2,
-      "wf_test_sharpe": 1.3,
-      "wf_test_return": 22.21,
-      "wf_test_trades": 1,
-      "wf_efficiency_ratio": 0.0,
-      "wf_efficiency_quality": "NO DATA",
-      "wf_passed": false,
-      "wf_is_true_oos": true
-    },
     "3033.HK": {
       "atr_period": 14,
       "multiplier": 3.25,
@@ -114,6 +95,25 @@
       "wf_test_trades": 2,
       "wf_efficiency_ratio": 0.0,
       "wf_efficiency_quality": "FAILED OOS",
+      "wf_passed": false,
+      "wf_is_true_oos": true
+    },
+    "0175.HK": {
+      "atr_period": 14,
+      "multiplier": 3.5,
+      "total_return": 84.42,
+      "sharpe": 0.85,
+      "num_trades": 4,
+      "wf_train_atr_period": 14,
+      "wf_train_multiplier": 3.5,
+      "wf_train_sharpe": 0.85,
+      "wf_train_return": 58.81,
+      "wf_train_trades": 2,
+      "wf_test_sharpe": 1.3,
+      "wf_test_return": 22.21,
+      "wf_test_trades": 1,
+      "wf_efficiency_ratio": 0.0,
+      "wf_efficiency_quality": "NO DATA",
       "wf_passed": false,
       "wf_is_true_oos": true
     },
@@ -220,8 +220,8 @@
       "num_trades": 9,
       "wf_train_atr_period": 10,
       "wf_train_multiplier": 3.0,
-      "wf_train_sharpe": 0.51,
-      "wf_train_return": 22.69,
+      "wf_train_sharpe": 0.55,
+      "wf_train_return": 24.86,
       "wf_train_trades": 4,
       "wf_test_sharpe": -1.85,
       "wf_test_return": -17.83,
@@ -234,8 +234,8 @@
     "TSM": {
       "atr_period": 14,
       "multiplier": 3.5,
-      "total_return": 92.12,
-      "sharpe": 0.73,
+      "total_return": 94.55,
+      "sharpe": 0.74,
       "num_trades": 3,
       "wf_train_atr_period": 14,
       "wf_train_multiplier": 2.75,
