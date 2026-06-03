@@ -8,6 +8,7 @@ import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
 import StockCard, { TABS, Tab } from "@/components/StockCard";
 import dynamic from "next/dynamic";
 import AlertsPanel from "@/components/AlertsPanel";
+import { UserButton } from "@clerk/nextjs";
 import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import { fetchKronosForecasts } from "@/lib/kronos";
@@ -482,6 +483,7 @@ export default function Dashboard() {
             className="px-4 py-1.5 text-xs font-bold bg-[#00d4ff]/10 border border-[#00d4ff]/40 text-[#00d4ff] hover:bg-[#00d4ff]/20 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-all">
             {loading ? `SCANNING… ${progress}%` : "▶ RUN ANALYSIS"}
           </button>
+          <UserButton />
         </div>
       </header>
       {stOptMsg && (
