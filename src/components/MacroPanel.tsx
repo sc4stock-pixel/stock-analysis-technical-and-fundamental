@@ -177,14 +177,16 @@ export default function MacroPanel({ data, loading, onRefresh }: Props) {
       {!collapsed && data && (
         <div className="px-3 pb-3 border-t border-[#1e2d4a]/50">
 
-          {/* Factor cards + Radar */}
-          <div className="flex gap-3 mt-3 items-start overflow-x-auto">
+          {/* Factor cards + Radar — stacks on mobile, side-by-side on sm+ */}
+          <div className="flex flex-col sm:flex-row gap-3 mt-3 sm:items-start">
             <div className="flex gap-2 flex-wrap">
               {Object.values(data.factors).map((f, i) => <FactorCard key={i} factor={f} />)}
             </div>
-            <div className="shrink-0 flex flex-col items-center ml-auto">
+            <div className="flex flex-col items-center sm:shrink-0 sm:ml-auto">
               <div className="text-[#4a6080] text-[0.58rem] mb-1 font-bold tracking-widest">FACTOR RADAR</div>
-              <RadarChart factors={data.factors} />
+              <div className="w-[120px] sm:w-[150px] overflow-hidden">
+                <RadarChart factors={data.factors} />
+              </div>
             </div>
           </div>
 

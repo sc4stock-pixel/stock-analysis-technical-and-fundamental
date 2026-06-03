@@ -211,7 +211,7 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded border border-[#1e2d4a]">
+      <div className="overflow-x-auto max-w-full min-w-0 rounded border border-[#1e2d4a]">
         <table className="w-full text-xs min-w-[980px]">
           <thead>
             <tr className="bg-[#0f1629] border-b border-[#1e2d4a] uppercase tracking-wider">
