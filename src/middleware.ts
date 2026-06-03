@@ -12,14 +12,16 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 // NOTE: /api/telegram (UI test-ping) has NO secret and is intentionally LEFT
 // protected by Clerk — do not add it here.
 const isPublicRoute = createRouteMatcher([
-  // Clerk's own auth routes must stay public
+  // Clerk's own auth pages
   "/sign-in(.*)",
   "/sign-up(.*)",
-  // Machine endpoints (self-authenticated or read-only) — see note above
-  "/api/cron/(.*)",
-  "/api/telegram-bot",
-  "/api/reconcile",
+  // Machine endpoints — each enforces its OWN secret in-handler (defense in depth):
+  "/api/cron/(.*)",      // x-cron-secret === CRON_SECRET
+  "/api/telegram-bot",   // x-telegram-bot-api-secret-token
+  "/api/reconcile",      // x-cron-secret
+  "/api/health",         // x-cron-secret
 ]);
+// NOTE: /api/telegram (UI test-ping, no secret) is intentionally NOT public — stays Clerk-protected.
 
 export default clerkMiddleware(async (auth, request) => {
   if (!isPublicRoute(request)) {
