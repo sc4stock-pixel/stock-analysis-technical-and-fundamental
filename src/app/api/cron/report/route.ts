@@ -6,6 +6,7 @@ import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import { analyzeStock } from "@/lib/analyze-stock";
 import { detectFlip, type ChartBar } from "@/lib/flip";
+import { classifyValidity, degradedAlertText } from "@/lib/pipeline-health";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -31,6 +32,12 @@ export async function POST(req: NextRequest) {
     }
     return slim;
   });
+
+  const validity = classifyValidity(payload as Array<Record<string, unknown>>);
+  if (validity.degraded) {
+    await sendTelegramMessage(degradedAlertText(validity, `EOD report (${market})`), "alerts");
+    return NextResponse.json({ ok: false, ...validity, market });
+  }
 
   // Fetch forecast data in parallel (best-effort — failures don't block the report)
   const [kronosData, timesfmData] = await Promise.all([

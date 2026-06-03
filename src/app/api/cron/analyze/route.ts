@@ -3,6 +3,7 @@ import { buildTelegramMessage, sendTelegramMessage } from "@/lib/telegram";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import { analyzeStock } from "@/lib/analyze-stock";
 import { detectFlip, type ChartBar } from "@/lib/flip";
+import { classifyValidity, degradedAlertText } from "@/lib/pipeline-health";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -24,6 +25,12 @@ export async function POST(req: NextRequest) {
     }
     return slim;
   });
+
+  const validity = classifyValidity(payload as Array<Record<string, unknown>>);
+  if (validity.degraded) {
+    await sendTelegramMessage(degradedAlertText(validity, "execution alerts"), "alerts");
+    return NextResponse.json({ ok: false, ...validity });
+  }
 
   // Only send Telegram if there are actionable signals or recent flips
   const hasSignals    = payload.some((r: Record<string, unknown>) => r.signal === "BUY" || r.signal === "SELL" || r.signal === "STRONG_SELL");
