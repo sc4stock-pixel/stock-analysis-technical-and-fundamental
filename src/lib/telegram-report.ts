@@ -54,6 +54,11 @@ export function holidayStatus(): { us: boolean; hk: boolean; label: string } | n
   return HOLIDAYS[key] ?? null;
 }
 
+export function reportHeaderLabel(market: "us" | "hk", bothClosed: boolean): string {
+  if (bothClosed) return "🏖️ Holiday Status";
+  return market === "us" ? "🌅 Morning Brief" : "🌇 HK Close";
+}
+
 // ---------- Formatters ----------
 function fmtChg(pct: number): string {
   return pct >= 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`;
@@ -214,10 +219,7 @@ export function buildEodReport(
   const bothClosed = holiday?.us && holiday?.hk;
 
   // Header — swaps to "Holiday Status" when both markets closed
-  const headerLabel = bothClosed
-    ? "Holiday Status"
-    : market === "us" ? "US Close" : "HK Close";
-  const header = `🌅 <b>Morning Brief · ${headerLabel}</b> [${dateStr}]`;
+  const header = `<b>${reportHeaderLabel(market, !!bothClosed)}</b> [${dateStr}]`;
 
   // Breadth: count stocks where close > SMA50
   const aboveSma50 = valid.filter(r =>
