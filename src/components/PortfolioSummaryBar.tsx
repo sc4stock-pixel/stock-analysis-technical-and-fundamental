@@ -1,6 +1,7 @@
 "use client";
 import { useState, useCallback } from "react";
 import { StockAnalysisResult, TimesfmForecasts } from "@/types";
+import InfoTooltip from "@/components/InfoTooltip";
 
 interface Props {
   results: StockAnalysisResult[];
@@ -177,6 +178,7 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }
       <div className="mb-2 space-y-1">
         <div className="flex items-center gap-3 text-xs flex-wrap">
           <span className="text-[#00d4ff] font-bold tracking-widest">◈ SCORE</span>
+          <InfoTooltip id="portfolio" />
           <span>
             {buy  > 0 && <span className="text-[#00ff88] font-bold mr-2">▲{buy} BUY</span>}
             {sell > 0 && <span className="text-[#ff4757] font-bold mr-2">▼{sell} SELL</span>}

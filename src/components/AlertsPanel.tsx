@@ -1,5 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
+import InfoTooltip from "@/components/InfoTooltip";
 import { StockAnalysisResult } from "@/types";
 import { supertrend, ema, sma } from "@/lib/indicators";
 import type { WorkerState, WorkerEvent } from "@/types/worker-state";
@@ -365,6 +366,7 @@ export default function AlertsPanel({ results, workerState }: Props) {
       >
         <div className="flex items-center gap-2">
           <span className="text-[#f59e0b] text-sm font-bold">⚡ ALERTS</span>
+          <InfoTooltip id="alerts" />
           <span className="text-[#4a6080] text-xs">({alerts.length + workerEvents.length})</span>
           {(actionAlerts.length + workerEvents.length) > 0 && (
             <span className="text-[0.6rem] font-mono font-bold px-1.5 py-0.5 rounded bg-[#f59e0b]/15 border border-[#f59e0b]/30 text-[#f59e0b]">

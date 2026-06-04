@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { AppConfig } from "@/types";
+import InfoTooltip from "@/components/InfoTooltip";
 
 interface Props {
   config: AppConfig;
@@ -84,6 +85,9 @@ export default function ConfigPanel({
             {t.label}
           </button>
         ))}
+        <span className="ml-auto flex items-center pr-2">
+          <InfoTooltip id="config" />
+        </span>
       </div>
 
       <div className="p-4 max-h-[420px] overflow-y-auto">

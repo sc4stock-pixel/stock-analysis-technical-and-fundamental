@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { MacroData, MacroFactor } from "@/lib/macro-types";
+import InfoTooltip from "@/components/InfoTooltip";
 
 interface Props {
   data: MacroData | null;
@@ -144,6 +145,7 @@ export default function MacroPanel({ data, loading, onRefresh }: Props) {
         onClick={() => setCollapsed(v => !v)}>
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-[#00d4ff] text-xs font-bold tracking-widest">🌐 MARKET INTELLIGENCE</span>
+          <InfoTooltip id="macro-us" />
           {data && (
             <>
               <span className="text-[#1e2d4a]">|</span>

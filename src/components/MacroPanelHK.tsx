@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { HKMacroData, MacroFactor } from "@/lib/macro-types";
+import InfoTooltip from "@/components/InfoTooltip";
 
 interface Props {
   data: HKMacroData | null;
@@ -143,6 +144,7 @@ export default function MacroPanelHK({ data, loading, onRefresh }: Props) {
         onClick={() => setCollapsed(v => !v)}>
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-[#ff7f50] text-xs font-bold tracking-widest">🇭🇰 HK MARKET INTELLIGENCE</span>
+          <InfoTooltip id="macro-hk" />
           {data && (
             <>
               <span className="text-[#1e2d4a]">|</span>

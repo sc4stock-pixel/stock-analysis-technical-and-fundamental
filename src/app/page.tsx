@@ -5,6 +5,8 @@ import { MacroData, HKMacroData, mbsScoreAdjustment } from "@/lib/macro-types";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import ConfigPanel from "@/components/ConfigPanel";
 import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
+import LegendDrawer from "@/components/LegendDrawer";
+import InfoTooltip from "@/components/InfoTooltip";
 import StockCard, { TABS, Tab } from "@/components/StockCard";
 import dynamic from "next/dynamic";
 import AlertsPanel from "@/components/AlertsPanel";
@@ -61,6 +63,7 @@ export default function Dashboard() {
   const [stOptimizing, setStOptimizing] = useState(false);
   // Global tab broadcast — null means each card uses its own state
   const [globalTab, setGlobalTab] = useState<Tab | null>(null);
+  const [legendOpen, setLegendOpen] = useState(false);
   const [stOptMsg, setStOptMsg]         = useState<string | null>(null);
 
   const [tgSending, setTgSending]   = useState(false);
@@ -456,6 +459,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-1 border border-[#1e2d4a] rounded px-1.5 py-0.5"
                  title="Broadcast a tab to all cards — click again to release">
               <span className="text-[#4a6080] text-[0.6rem] font-mono pr-1 select-none">ALL:</span>
+              <InfoTooltip id="stock" />
               {(["OVERVIEW","CHART","BACKTEST","MONTE CARLO","PLAN","FUNDAMENTAL"] as Tab[]).map(t => {
                 const labels: Record<Tab, string> = {
                   OVERVIEW: "OVR", CHART: "CHT", BACKTEST: "BKT",
@@ -484,6 +488,14 @@ export default function Dashboard() {
             {loading ? `SCANNING… ${progress}%` : "▶ RUN ANALYSIS"}
           </button>
           <UserButton />
+          <button
+            type="button"
+            onClick={() => setLegendOpen(true)}
+            aria-haspopup="dialog"
+            className="ml-2 inline-flex items-center gap-1.5 rounded-[5px] border border-[#1e2d4a] px-2.5 py-1 text-[0.7rem] tracking-[0.04em] text-[#6b85a0] transition-colors hover:border-[#00d4ff] hover:bg-[rgba(0,212,255,0.06)] hover:text-[#00d4ff] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#00d4ff]"
+          >
+            <span className="text-[11px]">❔</span> How to read this
+          </button>
         </div>
       </header>
       {stOptMsg && (
@@ -647,6 +659,7 @@ export default function Dashboard() {
           (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 16px rgba(0,212,255,0.4)";
         }}
       >↑</button>
+      <LegendDrawer open={legendOpen} onClose={() => setLegendOpen(false)} />
     </div>
   );
 }
