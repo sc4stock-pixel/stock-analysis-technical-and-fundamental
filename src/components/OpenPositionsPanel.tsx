@@ -2,6 +2,7 @@
 import { useState, useMemo } from "react";
 import { StockAnalysisResult } from "@/types";
 import { supertrend, sma } from "@/lib/indicators";
+import InfoTooltip from "@/components/InfoTooltip";
 
 interface Props {
   results: StockAnalysisResult[];
@@ -195,6 +196,7 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
           <span className="text-[#00ff88] text-xs font-bold tracking-widest">
             🟢 OPEN ST POSITIONS
           </span>
+          <InfoTooltip id="positions" />
           <span className="text-[#4a6080] text-xs">({positions.length})</span>
           <span className="text-[#1e2d4a]">|</span>
           <span className="text-[#4a6080] text-xs">
