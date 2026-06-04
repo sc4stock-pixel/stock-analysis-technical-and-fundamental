@@ -46,7 +46,7 @@ async function computeOne(symbol: string): Promise<ReconcileTicker | null> {
 
 export async function GET(req: NextRequest) {
   const secret = req.headers.get("x-cron-secret");
-  if (!secret || secret !== process.env.CRON_SECRET) {
+  if (!secret || secret !== process.env.RECONCILE_SECRET) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {

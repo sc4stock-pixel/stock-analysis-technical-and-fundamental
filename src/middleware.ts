@@ -8,7 +8,8 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 // Each whitelisted route carries its OWN auth or is read-only:
 //   /api/cron/*       — guarded by x-cron-secret === CRON_SECRET
 //   /api/telegram-bot — guarded by x-telegram-bot-api-secret-token === TELEGRAM_WEBHOOK_SECRET
-//   /api/reconcile    — GET-only, read-only recompute (no writes)
+//   /api/reconcile    — read-only recompute; guarded by x-cron-secret === RECONCILE_SECRET
+//                       (its own secret, since the autopilot worker — not a browser — calls it)
 // NOTE: /api/telegram (UI test-ping) has NO secret and is intentionally LEFT
 // protected by Clerk — do not add it here.
 const isPublicRoute = createRouteMatcher([
@@ -18,7 +19,7 @@ const isPublicRoute = createRouteMatcher([
   // Machine endpoints — each enforces its OWN secret in-handler (defense in depth):
   "/api/cron/(.*)",      // x-cron-secret === CRON_SECRET
   "/api/telegram-bot",   // x-telegram-bot-api-secret-token
-  "/api/reconcile",      // x-cron-secret
+  "/api/reconcile",      // x-cron-secret === RECONCILE_SECRET
   "/api/health",         // x-cron-secret
 ]);
 // NOTE: /api/telegram (UI test-ping, no secret) is intentionally NOT public — stays Clerk-protected.
