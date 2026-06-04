@@ -16,6 +16,7 @@ interface ReconcileTicker {
   atrPeriod: number;
   mult: number;
   score: number;   // 7-criterion TT count
+  barDate: string; // YYYY-MM-DD of the last bar used for computation
 }
 
 async function loadUniverse(): Promise<string[]> {
@@ -40,8 +41,9 @@ async function computeOne(symbol: string): Promise<ReconcileTicker | null> {
   const [, dirArr] = supertrend(highs, lows, closes, p.atrPeriod, p.multiplier);
   const dir = (dirArr[dirArr.length - 1] === 1) ? "up" : "down";
   const score = computeTrendTemplateCriteria(closes, DEFAULT_CONFIG.analysis.smaLong).criteria_met;
+  const barDate = ohlcv.bars[ohlcv.bars.length - 1].date;
 
-  return { dir, atrPeriod: p.atrPeriod, mult: p.multiplier, score };
+  return { dir, atrPeriod: p.atrPeriod, mult: p.multiplier, score, barDate };
 }
 
 export async function GET(req: NextRequest) {
