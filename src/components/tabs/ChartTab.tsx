@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import InfoTooltip from "@/components/InfoTooltip";
 import { StockAnalysisResult, ChartBar, AppConfig } from "@/types";
 import { supertrend } from "@/lib/indicators";
 import {
@@ -423,6 +424,7 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-1.5">
+        <InfoTooltip id="chart" />
         <div className="flex gap-1">{(["1M","3M","6M","1Y","2Y"] as Range[]).map(r => <RangeBtn key={r} r={r} />)}</div>
         <div className="h-3 w-px bg-[#1e2d4a]" />
         <Tog label="SMA"    active={showSMA}    onClick={() => setShowSMA(v=>!v)}    activeClass="border-[#ffa502]/60 text-[#ffa502] bg-[#ffa502]/10" />

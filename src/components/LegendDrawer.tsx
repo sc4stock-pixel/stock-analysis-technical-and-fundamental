@@ -68,8 +68,8 @@ export default function LegendDrawer({
               <div className="mt-[3px] text-[0.66rem] text-[#4a6080]">⏱ {m.cadence}</div>
               {m.detail && m.detail.length > 0 && (
                 <ul className="mt-[7px] list-none p-0">
-                  {m.detail.map((d, i) => (
-                    <li key={i} className="pl-[2px] text-[0.69rem] leading-[1.6] text-[#6b85a0]">
+                  {m.detail.map((d) => (
+                    <li key={d} className="pl-[2px] text-[0.69rem] leading-[1.6] text-[#6b85a0]">
                       {d}
                     </li>
                   ))}

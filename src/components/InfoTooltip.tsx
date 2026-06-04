@@ -51,8 +51,9 @@ export default function InfoTooltip({ id }: { id: string }) {
       </button>
       {open && (
         <span
-          role="tooltip"
-          className="absolute left-[-8px] top-[22px] z-[60] w-[248px] rounded-[7px] border border-[#00d4ff] bg-[#0c1424] p-[10px_11px] shadow-[0_10px_30px_rgba(0,0,0,0.55)]"
+          role="dialog"
+          aria-label={meta.label}
+          className="absolute left-[-8px] top-[22px] z-[95] w-[248px] rounded-[7px] border border-[#00d4ff] bg-[#0c1424] p-[10px_11px] shadow-[0_10px_30px_rgba(0,0,0,0.55)]"
         >
           <span className="mb-[5px] block text-[0.62rem] uppercase tracking-[0.1em] text-[#00d4ff]">
             {meta.label}
