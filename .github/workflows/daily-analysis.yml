@@ -1,15 +1,12 @@
 name: Daily Portfolio Analysis & Alerts
 
 on:
-  # NOTE: GitHub Actions cron is consistently delayed 2–4h on free repos.
-  # Schedules below are shifted 3h30m EARLIER than the actual target HKT times
-  # so that even with GHA's typical delay, fires land near the intended window.
-  # cron-job.org runs the real schedule; GHA is a fallback safety net.
-  schedule:
-    # Target 8:55am HKT Mon–Sat. Shifted: 5:25am HKT = 21:25 UTC previous day.
-    - cron: '25 21 * * 0-5'   # → US close / morning brief
-    # Target 4:30pm HKT Mon–Fri. Shifted: 1:00pm HKT = 05:00 UTC.
-    - cron: '0 5 * * 1-5'     # → HK close
+  # GHA `schedule:` removed 2026-06-04 — GitHub delayed the EOD report 2–4h (it landed
+  # ~4:55pm instead of 4:30pm HKT). The EOD breadth report is now triggered EXCLUSIVELY by
+  # cron-job.org (jobs "Stock Analysis · HK/US EOD report" → POST /api/cron/report, 16:30/08:55
+  # HKT, with x-cron-secret). Execution alerts come from the autopilot worker. No GHA fallback —
+  # if cron-job.org is down, that report is skipped (acceptable vs. the multi-hour-late noise).
+  # workflow_dispatch retained for manual runs.
   workflow_dispatch:
     inputs:
       market:
