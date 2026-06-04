@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import { supertrend } from "@/lib/indicators";
 import { computeTrendTemplateCriteria } from "@/lib/trendTemplate";
@@ -44,7 +44,11 @@ async function computeOne(symbol: string): Promise<ReconcileTicker | null> {
   return { dir, atrPeriod: p.atrPeriod, mult: p.multiplier, score };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const secret = req.headers.get("x-cron-secret");
+  if (!secret || secret !== process.env.RECONCILE_SECRET) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   try {
     const symbols = await loadUniverse();
     const results = await Promise.all(

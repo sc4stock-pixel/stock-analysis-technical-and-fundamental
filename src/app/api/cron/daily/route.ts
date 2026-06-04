@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
     "x-cron-secret":  secret,
   };
 
-  // Fire both sequentially. Each one already runs its own internal parallel
-  // /api/stocks fan-out, so back-to-back calls add ~5-8s total, well under
+  // Fire both sequentially. Each one runs its own in-process portfolio
+  // analysis (analyzeStock), so back-to-back calls add ~5-8s total, well under
   // the 60s maxDuration budget.
   const callRoute = async (path: string) => {
     try {
