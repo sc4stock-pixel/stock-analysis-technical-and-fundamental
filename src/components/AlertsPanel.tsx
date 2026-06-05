@@ -3,7 +3,8 @@ import { useState, useMemo } from "react";
 import InfoTooltip from "@/components/InfoTooltip";
 import { StockAnalysisResult } from "@/types";
 import { supertrend, ema, sma } from "@/lib/indicators";
-import type { WorkerState, WorkerEvent } from "@/types/worker-state";
+import type { WorkerState } from "@/types/worker-state";
+import { reconcileWorkerEvents, type ReconciledEvent } from "@/lib/worker-events";
 
 interface Props {
   results: StockAnalysisResult[];
@@ -30,13 +31,15 @@ const EVENT_META: Record<string, { icon: string; label: string; cls: string }> =
   tt_regained: { icon: "✅", label: "TT 4→5 REGAINED",     cls: "border-[#00ff88]/25 bg-[#00ff88]/5" },
 };
 
-function workerEventRow(ev: WorkerEvent, idx: number) {
+function workerEventRow(ev: ReconciledEvent, idx: number) {
   const meta = EVENT_META[ev.type] ?? { icon: "·", label: ev.type, cls: "" };
   const status = ev.confirmed ? "CONFIRMED" : "PROVISIONAL";
+  const isFlip = ev.type === "flip_buy" || ev.type === "flip_exit";
+  const stArrow = ev.currentDir === "up" ? "ST↑" : ev.currentDir === "down" ? "ST↓" : "";
   return (
     <div
       key={`worker-${idx}`}
-      className={`flex items-start gap-2 text-xs p-1.5 rounded border mb-1 ${meta.cls}`}
+      className={`flex items-start gap-2 text-xs p-1.5 rounded border mb-1 ${meta.cls} ${ev.superseded ? "opacity-50" : ""}`}
     >
       <span className="shrink-0">{meta.icon}</span>
       <span className="flex-1">
@@ -44,6 +47,15 @@ function workerEventRow(ev: WorkerEvent, idx: number) {
         <span className="text-[#4a6080] ml-1">
           [{ev.barDate} · {ev.session.toUpperCase()} · {status}]
         </span>
+        {isFlip && ev.current && (
+          <span className="ml-1 text-[#00ff88]">✓ current{stArrow ? ` (${stArrow})` : ""}</span>
+        )}
+        {isFlip && ev.superseded && ev.reverted && (
+          <span className="ml-1 text-[#ffa502]">↳ reverted{stArrow ? ` · now ${stArrow}` : ""}</span>
+        )}
+        {isFlip && ev.superseded && !ev.reverted && (
+          <span className="ml-1 text-[#4a6080]">↳ superseded</span>
+        )}
       </span>
     </div>
   );
@@ -354,7 +366,10 @@ export default function AlertsPanel({ results, workerState }: Props) {
   // Split into action alerts (flip/reentry) and informational
   const actionAlerts = alerts.filter(a => a.alertType === "flip" || a.alertType === "reentry");
   const infoAlerts   = alerts.filter(a => a.alertType !== "flip" && a.alertType !== "reentry");
-  const workerEvents = workerState?.events ?? [];
+  const workerEvents = useMemo(
+    () => reconcileWorkerEvents(workerState?.events ?? [], workerState?.tickers ?? {}),
+    [workerState],
+  );
 
   if (alerts.length === 0 && workerEvents.length === 0) return null;
 
