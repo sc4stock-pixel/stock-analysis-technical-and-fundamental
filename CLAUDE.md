@@ -8,9 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev      # start dev server (Next.js 14, http://localhost:3000)
 npm run build    # production build
 npm run lint     # ESLint
+npm test         # run the vitest suite (src/**/*.test.ts)
 ```
 
-No test suite is configured.
+Tests run on **vitest** (`vitest.config.ts`). Unit tests live alongside source as
+`src/**/*.test.ts` (e.g. `src/lib/worker-events.test.ts`). Prefer extracting pure logic
+into a `src/lib/*.ts` module with a colocated `.test.ts` over inlining it in components.
 
 ## Architecture
 
