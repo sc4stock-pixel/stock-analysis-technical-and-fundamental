@@ -150,24 +150,35 @@ async function getVixStructure(): Promise<MacroFactor> {
 // ── 3. Yield Spread (10Y ‑ 2Y) via FRED ──────────────────────
 async function getYieldSpread(): Promise<MacroFactor> {
   try {
-    // FRED CSV endpoint for DGS10 and DGS2 (daily, last 5 observations)
-    const url = "https://fred.stlouisfed.org/graph/fredgraph.csv?bgcolor=%23e1e9f0&chart_type=line&drp=0&fo=open%20sans&graph_bgcolor=%23ffffff&height=450&mode=fred&recession_bars=on&txtcolor=%23444444&ts=12&tts=12&width=1168&ntick=0&thu=0&trc=0&show_legend=yes&show_axis_titles=yes&show_tooltip=yes&id=DGS10,DGS2&scale=left&cosd=2020-01-02&coed=9999-12-31&line_color=%234572a7&link_values=false&line_style=solid&mark_type=none&mw=3&lw=2&ost=-99999&oet=99999&mma=0&fml=a&fq=Daily&fam=avg&fgst=lin&fgsnd=2020-02-01&line_index=1&transformation=lin&vintage_date=2026-01-01&revision_date=2026-01-01&nd=2020-01-02";
+    // FRED CSV for DGS10 and DGS2. Request only a recent ~40-day window (small,
+    // fast) — NO vintage/revision pin (the old URL froze data at 2026-01-01) and
+    // none of the graph-styling params. cosd is computed dynamically so it stays
+    // current.
+    const cosd = new Date(Date.now() - 40 * 86400 * 1000).toISOString().slice(0, 10);
+    const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10,DGS2&cosd=${cosd}`;
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
       cache: "no-store",
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) throw new Error("FRED fetch failed");
+    if (!res.ok) throw new Error(`FRED fetch failed: HTTP ${res.status}`);
     const csv = await res.text();
     const lines = csv.trim().split("\n");
     if (lines.length < 2) throw new Error("empty FRED data");
-    // Last line is the most recent observation
-    const lastLine = lines[lines.length - 1];
-    const cols = lastLine.split(",");
-    if (cols.length < 3) throw new Error("unexpected CSV columns");
-    const dgs10 = parseFloat(cols[1]); // 10-year
-    const dgs2 = parseFloat(cols[2]);  // 2-year
-    if (isNaN(dgs10) || isNaN(dgs2)) throw new Error("invalid FRED data");
+
+    // Scan from the most recent row backwards for the last observation where BOTH
+    // yields are numeric. FRED writes "." for not-yet-published / weekend / holiday
+    // days, and the latest rows are frequently "." — taking strictly the last line
+    // (the old behaviour) threw NaN and showed the panel as "unavailable".
+    let dgs10 = NaN, dgs2 = NaN;
+    for (let i = lines.length - 1; i >= 1; i--) {
+      const cols = lines[i].split(",");
+      if (cols.length < 3) continue;
+      const a = parseFloat(cols[1]); // 10-year
+      const b = parseFloat(cols[2]); // 2-year
+      if (!isNaN(a) && !isNaN(b)) { dgs10 = a; dgs2 = b; break; }
+    }
+    if (isNaN(dgs10) || isNaN(dgs2)) throw new Error("no valid FRED observation in window");
 
     const spread = dgs10 - dgs2;
     let score: number;
@@ -189,7 +200,8 @@ async function getYieldSpread(): Promise<MacroFactor> {
       signal,
       detail,
     };
-  } catch {
+  } catch (e) {
+    console.warn("[getYieldSpread] FRED 10Y-2Y unavailable — falling back to neutral:", e);
     return { label: "10Y-2Y Spread", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
   }
 }
