@@ -41,7 +41,7 @@ export const CHECKS: Check[] = [
   { artifact: "st_params.json", source: { kind: "embedded", file: "st_params.json", field: "last_optimized" }, threshold: { maxAgeHours: 40 * 24 } },
   { artifact: "timesfm_forecasts.json", source: { kind: "commit", file: "timesfm_forecasts.json" }, threshold: { maxTradingDays: 2, region: "us" } },
   { artifact: "kronos_forecasts.json", source: { kind: "commit", file: "kronos_forecasts.json" }, threshold: { maxTradingDays: 2, region: "us" } },
-  { artifact: "av_earnings_cache.json", source: { kind: "commit", file: "av_earnings_cache.json" }, threshold: { maxAgeHours: 1 } }, // TEMP: forced-stale alert test — revert to 9 * 24
+  { artifact: "av_earnings_cache.json", source: { kind: "commit", file: "av_earnings_cache.json" }, threshold: { maxAgeHours: 9 * 24 } },
   { artifact: "fundamentals_cache.json", source: { kind: "commit", file: "fundamentals_cache.json" }, threshold: { maxAgeHours: 9 * 24 } },
   { artifact: "southbound_data.json", source: { kind: "commit", file: "southbound_data.json" }, threshold: { maxTradingDays: 2, region: "hk" } },
   { artifact: "kv:state:us", source: { kind: "kv", region: "us" }, threshold: { maxTradingDays: 2, region: "us" } },
