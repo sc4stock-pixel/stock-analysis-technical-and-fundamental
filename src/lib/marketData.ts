@@ -25,8 +25,17 @@ export async function getSTParams(symbol: string): Promise<{ atrPeriod: number; 
         const data = await res.json();
         _stParamsCache = data?.stocks ?? {};
         _stParamsFetchedAt = now;
+        // TEMP DIAGNOSTIC (remove after root-causing reconcile drift, see HANDOFF):
+        // confirm the fetch succeeded and how many stocks parsed.
+        console.error(`[getSTParams] fetch OK status=${res.status} stocks=${Object.keys(_stParamsCache ?? {}).length}`);
+      } else {
+        // TEMP DIAGNOSTIC: non-OK (e.g. 429 raw-GH egress rate-limit) → every
+        // symbol silently falls back to the (14, 3) default. This is the suspect.
+        console.error(`[getSTParams] fetch NON-OK status=${res.status} → all symbols fall back to default`);
       }
-    } catch {
+    } catch (e) {
+      // TEMP DIAGNOSTIC: network/parse failure → fallback for all symbols.
+      console.error(`[getSTParams] fetch THREW → all symbols fall back to default:`, e);
       _stParamsCache = _stParamsCache ?? {}; // keep stale on error
     }
   }
