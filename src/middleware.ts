@@ -21,6 +21,7 @@ const isPublicRoute = createRouteMatcher([
   "/api/telegram-bot",   // x-telegram-bot-api-secret-token
   "/api/reconcile",      // x-cron-secret === RECONCILE_SECRET
   "/api/health",         // x-cron-secret
+  "/api/debug-yield",    // TEMP diagnostic (remove with the route) — public, read-only, public data only
 ]);
 // NOTE: /api/telegram (UI test-ping, no secret) is intentionally NOT public — stays Clerk-protected.
 
