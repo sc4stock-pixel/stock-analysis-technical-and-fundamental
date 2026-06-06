@@ -22,20 +22,22 @@ export async function getSTParams(symbol: string): Promise<{ atrPeriod: number; 
     try {
       const res = await fetch(ST_PARAMS_URL, { cache: "no-store" });
       if (res.ok) {
-        const data = await res.json();
+        // Defend against bare NaN/Infinity tokens: the Python optimizer can
+        // emit them (valid for json.load, invalid for JSON.parse), and a single
+        // one would otherwise throw here and silently default EVERY symbol to
+        // (14, 3). Coerce non-finite literals → null before parsing.
+        const text = await res.text();
+        const data = JSON.parse(
+          text.replace(/\bNaN\b/g, "null").replace(/-?\bInfinity\b/g, "null")
+        );
         _stParamsCache = data?.stocks ?? {};
         _stParamsFetchedAt = now;
-        // TEMP DIAGNOSTIC (remove after root-causing reconcile drift, see HANDOFF):
-        // confirm the fetch succeeded and how many stocks parsed.
-        console.error(`[getSTParams] fetch OK status=${res.status} stocks=${Object.keys(_stParamsCache ?? {}).length}`);
       } else {
-        // TEMP DIAGNOSTIC: non-OK (e.g. 429 raw-GH egress rate-limit) → every
-        // symbol silently falls back to the (14, 3) default. This is the suspect.
-        console.error(`[getSTParams] fetch NON-OK status=${res.status} → all symbols fall back to default`);
+        // Fail loud — never let a bad fetch masquerade as "no params".
+        console.error(`[getSTParams] st_params fetch failed: HTTP ${res.status} — falling back to default params`);
       }
     } catch (e) {
-      // TEMP DIAGNOSTIC: network/parse failure → fallback for all symbols.
-      console.error(`[getSTParams] fetch THREW → all symbols fall back to default:`, e);
+      console.error("[getSTParams] st_params fetch/parse error — falling back to default params:", e);
       _stParamsCache = _stParamsCache ?? {}; // keep stale on error
     }
   }

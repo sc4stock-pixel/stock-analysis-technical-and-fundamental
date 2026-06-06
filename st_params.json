@@ -148,7 +148,7 @@
       "wf_train_return": 15.36,
       "wf_train_trades": 5,
       "wf_test_sharpe": 0.0,
-      "wf_test_return": NaN,
+      "wf_test_return": null,
       "wf_test_trades": 2,
       "wf_efficiency_ratio": 0.0,
       "wf_efficiency_quality": "FAILED OOS",

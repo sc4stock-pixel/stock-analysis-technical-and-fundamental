@@ -16,6 +16,7 @@ Backtest logic:   matches Python BacktestEngine (strategy_type='supertrend')
 Dependencies: yfinance pandas numpy   (no local package imports)
 """
 import json
+import math
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
@@ -24,6 +25,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+
+def _json_safe(obj):
+    """Recursively replace non-finite floats (NaN/Inf) with None so the output
+    is standards-valid JSON that JS JSON.parse accepts. See OUTPUT_PATH write."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
 
 # ─── Portfolio — loaded from portfolio.json; hardcoded list is the fallback ───
 _PORTFOLIO_FALLBACK = [
@@ -427,7 +440,10 @@ def main() -> None:
         "optimization_count": opt_count + 1,
         "stocks":             stocks_out,
     }
-    OUTPUT_PATH.write_text(json.dumps(output, indent=2))
+    # Emit STRICT JSON: a bare NaN/Infinity (e.g. wf_test_return with no OOS
+    # trades) is valid for Python's json.load but breaks JS JSON.parse, which
+    # silently nukes every consumer's params. Sanitize non-finite floats → null.
+    OUTPUT_PATH.write_text(json.dumps(_json_safe(output), indent=2))
 
     print(f"\n✅ Wrote {len(stocks_out)}/{len(PORTFOLIO)} stocks → {OUTPUT_PATH}")
     if errors:
