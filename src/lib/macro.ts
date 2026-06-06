@@ -147,40 +147,49 @@ async function getVixStructure(): Promise<MacroFactor> {
   }
 }
 
-// ── 3. Yield Spread (10Y ‑ 2Y) via FRED ──────────────────────
+// ── 3. Yield Spread (10Y ‑ 2Y) via U.S. Treasury ──────────────────────
+// NOTE: FRED's fredgraph.csv endpoint is unreachable from Vercel's egress
+// (verified: TimeoutError at 12s), which is why this panel showed "unavailable".
+// The U.S. Treasury daily par-yield feed responds in ~55ms from Vercel, needs no
+// API key, and exposes the same constant-maturity 2Y/10Y yields.
+async function fetchTreasuryYields(month: string): Promise<{ y2: number; y10: number } | null> {
+  const url = `https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value_month=${month}`;
+  const res = await fetch(url, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Treasury fetch failed: HTTP ${res.status}`);
+  const xml = await res.text();
+  // Namespaced tags: <d:BC_2YEAR>…</d:BC_2YEAR>, <d:BC_10YEAR>…. Entries are in
+  // chronological order; take the most recent where both are present.
+  const extract = (re: RegExp): number[] => {
+    const out: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml)) !== null) out.push(parseFloat(m[1]));
+    return out;
+  };
+  const y2s = extract(/<d:BC_2YEAR[^>]*>([\d.]+)<\/d:BC_2YEAR>/g);
+  const y10s = extract(/<d:BC_10YEAR[^>]*>([\d.]+)<\/d:BC_10YEAR>/g);
+  const n = Math.min(y2s.length, y10s.length);
+  if (n === 0) return null;
+  const y2 = y2s[n - 1], y10 = y10s[n - 1];
+  if (isNaN(y2) || isNaN(y10)) return null;
+  return { y2, y10 };
+}
+
 async function getYieldSpread(): Promise<MacroFactor> {
   try {
-    // FRED CSV for DGS10 and DGS2. Request only a recent ~40-day window (small,
-    // fast) — NO vintage/revision pin (the old URL froze data at 2026-01-01) and
-    // none of the graph-styling params. cosd is computed dynamically so it stays
-    // current.
-    const cosd = new Date(Date.now() - 40 * 86400 * 1000).toISOString().slice(0, 10);
-    const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10,DGS2&cosd=${cosd}`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) throw new Error(`FRED fetch failed: HTTP ${res.status}`);
-    const csv = await res.text();
-    const lines = csv.trim().split("\n");
-    if (lines.length < 2) throw new Error("empty FRED data");
+    const now = new Date();
+    const thisMonth = now.toISOString().slice(0, 7).replace("-", "");
+    // Early in a month (or over a holiday gap) the current feed may be empty —
+    // fall back to the previous month so the latest reading is always found.
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonth = `${prev.getFullYear()}${String(prev.getMonth() + 1).padStart(2, "0")}`;
+    const data = (await fetchTreasuryYields(thisMonth)) ?? (await fetchTreasuryYields(prevMonth));
+    if (!data) throw new Error("no Treasury yield observation found");
 
-    // Scan from the most recent row backwards for the last observation where BOTH
-    // yields are numeric. FRED writes "." for not-yet-published / weekend / holiday
-    // days, and the latest rows are frequently "." — taking strictly the last line
-    // (the old behaviour) threw NaN and showed the panel as "unavailable".
-    let dgs10 = NaN, dgs2 = NaN;
-    for (let i = lines.length - 1; i >= 1; i--) {
-      const cols = lines[i].split(",");
-      if (cols.length < 3) continue;
-      const a = parseFloat(cols[1]); // 10-year
-      const b = parseFloat(cols[2]); // 2-year
-      if (!isNaN(a) && !isNaN(b)) { dgs10 = a; dgs2 = b; break; }
-    }
-    if (isNaN(dgs10) || isNaN(dgs2)) throw new Error("no valid FRED observation in window");
-
-    const spread = dgs10 - dgs2;
+    const spread = data.y10 - data.y2;
     let score: number;
     let signal: MacroFactor["signal"];
     let detail: string;
