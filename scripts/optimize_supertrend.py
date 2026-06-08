@@ -17,7 +17,9 @@ Dependencies: yfinance pandas numpy   (no local package imports)
 """
 import json
 import math
+import random
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from pathlib import Path
@@ -367,14 +369,29 @@ def _compute_oos_wfo(df: pd.DataFrame) -> dict:
     }
 
 
+def _fetch_history(symbol: str, retries: int = 4) -> pd.DataFrame:
+    """yfinance backs cookie/crumb caching with a shared SQLite file, which is
+    not safe under concurrent ThreadPoolExecutor access — one worker can hit
+    'database is locked' while another holds the write lock. Retry with
+    jittered backoff since the contention is transient."""
+    for attempt in range(retries):
+        try:
+            return yf.Ticker(symbol).history(
+                period=f"{int(LOOKBACK_DAYS * 1.5)}d", auto_adjust=True
+            )
+        except Exception as e:
+            if "database is locked" in str(e).lower() and attempt < retries - 1:
+                time.sleep(1.5 * (attempt + 1) + random.random())
+                continue
+            raise
+
+
 def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
     symbol = stock["symbol"]
     print(f"  Optimizing {symbol} ({stock['name']})...", flush=True)
 
     try:
-        df = yf.Ticker(symbol).history(
-            period=f"{int(LOOKBACK_DAYS * 1.5)}d", auto_adjust=True
-        )
+        df = _fetch_history(symbol)
         if df.empty or len(df) < 100:
             print(f"    ⚠  {symbol}: insufficient data ({len(df)} bars)")
             return symbol, None
