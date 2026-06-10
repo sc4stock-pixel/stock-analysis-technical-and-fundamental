@@ -133,6 +133,9 @@ export function calculateScores(params: {
     // AUDIT FIX C4 (2026-05-20): old pattern matched STRONG_DOWNTREND,
     // STRENGTHENING_DOWNTREND, etc. — applied the RSI uptrend bonus in bear regimes.
     // Anchor to *UPTREND suffix so only bullish regime labels qualify.
+    // PARITY VERIFIED (2026-06-10): Python signals.py:234 uses the identical
+    // suffix anchor — WEAK_UPTREND_STRENGTHENING / WEAK_UPTREND_WEAKENING /
+    // EXTREME_VOL_BULLISH are excluded in BOTH codebases by design. Keep in sync.
     const isUptrend = /UPTREND$/i.test(regime);
 
     // RSI
