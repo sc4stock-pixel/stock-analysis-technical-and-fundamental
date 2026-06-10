@@ -277,7 +277,11 @@ export function runBacktest(
       }
       // M8 AUDIT FIX: skip entry when equity < entry price (would open 0-share
       // phantom trade corrupting trade count, win rate, and expectancy).
-      if (shares <= 0) continue;
+      if (shares <= 0) {
+        equityCurve.push(runningEquity);
+        equityDates.push(cur.date);
+        continue;
+      }
 
       const entryCostPerShare = entryPrice * (1 + commission);
 
@@ -491,7 +495,11 @@ export function runSupertrendBacktest(
           shares = Math.floor((runningEquity * 0.998) / entryPrice);
         }
         // M8 AUDIT FIX: same 0-share guard as Score engine above.
-        if (shares <= 0) continue;
+        if (shares <= 0) {
+          equityCurve.push(runningEquity);
+          equityDates.push(cur.date);
+          continue;
+        }
         // Initial stop = prev bar's ST line
         const stStop = (!isNaN(prev.supertrend) && prev.supertrend > 0) ? prev.supertrend : entryPrice - 2 * entryAtr;
         position = {

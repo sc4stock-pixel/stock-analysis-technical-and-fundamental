@@ -7,7 +7,8 @@ Produces the shared st_params.json consumed by both:
   - The local Python script (fetched from GitHub URL; local file as fallback)
 
 Grid  : ATR periods [10, 12, 14] × Multipliers [2.5, 2.75, 3.0, 3.25, 3.5]
-Metric: Sharpe ratio  (fallback: total_return when < 2 trades)
+Metric: total_return (matches local analyzer.py metric='total_return';
+        Sharpe is kept in the output for the wf efficiency-ratio check)
 
 Indicator logic:  exact port of Python indicators.py (Wilder's EWM ATR)
 Backtest logic:   matches Python BacktestEngine (strategy_type='supertrend')
@@ -186,11 +187,11 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
             Signal generated at bar i-1: ST BUY flip AND close > SMA50
                                       OR ST bullish AND SMA50 cross-up
     Stop:   ST line at signal bar; trails upward, never down
-    Exit:   Low ≤ trailing stop → exit at min(stop, open)
+    Exit:   Low ≤ trailing stop AND ST direction bearish → deferred to next open
          OR SELL entry signal (ST flipped bearish previous bar) → exit at open
-    Costs:  SLIPPAGE + COMMISSION at entry and exit.
-    Metric: Sharpe ratio from daily equity curve (annualised × √252).
-            Falls back to total_return when < 2 trades.
+    Costs:  SLIPPAGE + COMMISSION at entry and exit (netted in PnL).
+    Returns total_return (selection metric), Sharpe (MtM curve, annualised
+    × √252, truncated at last closed trade), and num_trades.
     """
     high  = df["High"]
     low   = df["Low"]
@@ -228,6 +229,14 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
     equity_curve = [equity]
     trades       = []
 
+    def _close_position(pos, exit_open):
+        """Net-of-cost exit — mirrors canonical backtest.py (entry_cost_per_share
+        includes buy commission; exit nets slippage + sell commission)."""
+        net_exit = exit_open * (1 - SLIPPAGE) * (1 - COMMISSION)
+        pnl      = (net_exit - pos["cost_per"]) * pos["shares"]
+        trades.append((net_exit - pos["cost_per"]) / pos["cost_per"])
+        return pos["entry_equity"] + pnl
+
     for i in range(1, n):
         sig = entry_sigs[i]
 
@@ -235,12 +244,16 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
             if sig == "BUY":
                 raw_entry  = opens_a[i] * (1 + SLIPPAGE)
                 cost_per   = raw_entry  * (1 + COMMISSION)
-                shares     = int(equity / cost_per)
+                # Sizing matches canonical backtest.py: 99.8% buffer over the
+                # slippage-adjusted entry price (commission netted in PnL).
+                shares     = int((equity * 0.998) / raw_entry)
                 if shares > 0:
                     # Initial stop: ST line at signal bar (previous bar)
                     position = {
                         "entry": raw_entry,
+                        "cost_per": cost_per,
                         "shares": shares,
+                        "entry_equity": equity,
                         "stop": st_vals[i - 1],
                     }
         else:
@@ -255,10 +268,7 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
             # and TS quickSTBacktest. Without this the cron's monthly cache
             # selected different winners than the production engine.
             if position.get("pending_st_exit"):
-                net_exit = opens_a[i] * (1 - SLIPPAGE) * (1 - COMMISSION)
-                pnl      = (net_exit - position["entry"]) * position["shares"]
-                equity  += pnl
-                trades.append((net_exit - position["entry"]) / position["entry"])
+                equity   = _close_position(position, opens_a[i])
                 position = None
             else:
                 stop_hit    = (lows_a[i] <= position["stop"]) and (st_dirs[i] == -1)
@@ -267,21 +277,43 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
                     # Defer to next bar — can't act on close-derived direction at today's open
                     position["pending_st_exit"] = True
                 elif signal_exit:
-                    net_exit = opens_a[i] * (1 - SLIPPAGE) * (1 - COMMISSION)
-                    pnl      = (net_exit - position["entry"]) * position["shares"]
-                    equity  += pnl
-                    trades.append((net_exit - position["entry"]) / position["entry"])
+                    equity   = _close_position(position, opens_a[i])
                     position = None
 
-        equity_curve.append(equity)
+        # Mark-to-market equity — mirrors canonical backtest.py (cash spent =
+        # cost_per × shares; open position valued at the bar close). The old
+        # realized-only curve produced Sharpe values incomparable to the
+        # dashboard's runSupertrendBacktest / quickSTBacktest.
+        if position is not None:
+            cur_value = (position["entry_equity"]
+                         - position["cost_per"] * position["shares"]
+                         + closes_a[i] * position["shares"])
+        else:
+            cur_value = equity
+        equity_curve.append(cur_value)
 
     # ── Metrics ───────────────────────────────────────────────────────────────
     total_return = (equity - INITIAL_CAP) / INITIAL_CAP * 100
     num_trades   = len(trades)
 
-    daily_rets = np.diff(equity_curve) / np.array(equity_curve[:-1])
-    std_r      = float(np.std(daily_rets))
-    sharpe     = float(np.mean(daily_rets)) / std_r * np.sqrt(252) if std_r > 0 else 0.0
+    # AUDIT FIX Sharpe (mirrors backtest.py + TS quickSTBacktest): if the run
+    # ends with an open position, MtM bars for the unclosed trade inflate the
+    # curve while contributing nothing to total_return (realized-cash-only).
+    # Truncate the daily-return series at the last bar where equity was flat.
+    last_closed = len(equity_curve) - 1
+    if position is not None and trades:
+        for j in range(len(equity_curve) - 1, -1, -1):
+            if abs(equity_curve[j] - equity) < 0.01:
+                last_closed = j
+                break
+
+    curve = np.array(equity_curve[: last_closed + 1])
+    if len(curve) > 1:
+        daily_rets = np.diff(curve) / curve[:-1]
+        std_r      = float(np.std(daily_rets))
+        sharpe     = float(np.mean(daily_rets)) / std_r * np.sqrt(252) if std_r > 0 else 0.0
+    else:
+        sharpe = 0.0
 
     return {"total_return": total_return, "sharpe": sharpe, "num_trades": num_trades}
 
@@ -463,7 +495,7 @@ def main() -> None:
     combos = len(ATR_PERIODS) * len(MULTIPLIERS)
     print(f"SuperTrend Optimizer (Python) — {today.isoformat()}")
     print(f"Grid: ATR={ATR_PERIODS} × Mult={MULTIPLIERS} = {combos} combos/stock")
-    print(f"Metric: Sharpe (fallback total_return if <2 trades)\n")
+    print(f"Metric: total_return (Sharpe kept for wf efficiency check)\n")
 
     stocks_out: dict = {}
     errors:     list = []

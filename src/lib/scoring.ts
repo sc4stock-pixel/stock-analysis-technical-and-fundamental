@@ -133,6 +133,9 @@ export function calculateScores(params: {
     // AUDIT FIX C4 (2026-05-20): old pattern matched STRONG_DOWNTREND,
     // STRENGTHENING_DOWNTREND, etc. — applied the RSI uptrend bonus in bear regimes.
     // Anchor to *UPTREND suffix so only bullish regime labels qualify.
+    // PARITY VERIFIED (2026-06-10): Python signals.py:234 uses the identical
+    // suffix anchor — WEAK_UPTREND_STRENGTHENING / WEAK_UPTREND_WEAKENING /
+    // EXTREME_VOL_BULLISH are excluded in BOTH codebases by design. Keep in sync.
     const isUptrend = /UPTREND$/i.test(regime);
 
     // RSI
@@ -232,44 +235,73 @@ export function calculateScores(params: {
   return results;
 }
 
-/** Detect RSI divergence over a lookback window. Returns [direction, type] */
+/**
+ * Per-bar causal RSI divergence — exact port of Python signals.py
+ * detect_rsi_divergence() (AUDIT FIX C1, 2026-05-20).
+ *
+ * The old TS version computed a single scalar over the LAST `lookback` bars,
+ * which pipeline.ts then broadcast across every row — today's divergence
+ * reading invalidated every historical bar's BUY signal in the backtest
+ * (lookahead bias). This port evaluates each bar i using only pivots
+ * confirmed at that bar: a pivot centered at j counts once i >= j + w.
+ *
+ * Returns [divArr, divTypeArr] aligned to the input series:
+ *   div: -1 (bearish), 0 (none), 1 (bullish)
+ */
 export function detectRsiDivergence(
   closes: number[],
   rsiArr: number[],
-  lookback = 20
-): [number, string] {
+  lookback = 20,
+  pivotWindow = 5
+): [number[], string[]] {
   const n = closes.length;
-  if (n < lookback) return [0, "None"];
+  const div: number[] = new Array(n).fill(0);
+  const divType: string[] = new Array(n).fill("None");
+  const w = pivotWindow;
 
-  const recent = { closes: closes.slice(n - lookback), rsi: rsiArr.slice(n - lookback) };
-  const len = recent.closes.length;
+  if (n < lookback + w) return [div, divType];
 
-  const localHighs: { idx: number; price: number; rsi: number }[] = [];
-  const localLows: { idx: number; price: number; rsi: number }[] = [];
-
-  for (let i = 5; i < len - 5; i++) {
-    const window = recent.closes.slice(i - 5, i + 6);
+  // All pivot highs/lows; center j is confirmed once bar i reaches j + w.
+  const pivotHighs: { idx: number; price: number; rsi: number }[] = [];
+  const pivotLows: { idx: number; price: number; rsi: number }[] = [];
+  for (let j = w; j < n - w; j++) {
+    const window = closes.slice(j - w, j + w + 1);
     const maxVal = Math.max(...window);
     const minVal = Math.min(...window);
-    if (recent.closes[i] === maxVal) {
-      localHighs.push({ idx: i, price: recent.closes[i], rsi: recent.rsi[i] });
+    if (closes[j] === maxVal) pivotHighs.push({ idx: j, price: closes[j], rsi: rsiArr[j] });
+    if (closes[j] === minVal) pivotLows.push({ idx: j, price: closes[j], rsi: rsiArr[j] });
+  }
+
+  // Sliding-pointer scan over confirmed pivots within the trailing window.
+  let hiPtr = 0, loPtr = 0;
+  for (let i = lookback + w - 1; i < n; i++) {
+    const confirmedMax = i - w;
+    const windowMin = i - lookback + 1;
+
+    while (hiPtr < pivotHighs.length && pivotHighs[hiPtr].idx < windowMin) hiPtr++;
+    while (loPtr < pivotLows.length && pivotLows[loPtr].idx < windowMin) loPtr++;
+
+    const ph = pivotHighs.slice(hiPtr).filter(p => p.idx <= confirmedMax);
+    const pl = pivotLows.slice(loPtr).filter(p => p.idx <= confirmedMax);
+
+    if (ph.length >= 2) {
+      const h1 = ph[ph.length - 2];
+      const h2 = ph[ph.length - 1];
+      if (h2.price > h1.price && h2.rsi < h1.rsi) {
+        div[i] = -1;
+        divType[i] = "Bearish";
+        continue;
+      }
     }
-    if (recent.closes[i] === minVal) {
-      localLows.push({ idx: i, price: recent.closes[i], rsi: recent.rsi[i] });
+    if (pl.length >= 2) {
+      const l1 = pl[pl.length - 2];
+      const l2 = pl[pl.length - 1];
+      if (l2.price < l1.price && l2.rsi > l1.rsi) {
+        div[i] = 1;
+        divType[i] = "Bullish";
+      }
     }
   }
 
-  if (localHighs.length >= 2) {
-    const h1 = localHighs[localHighs.length - 2];
-    const h2 = localHighs[localHighs.length - 1];
-    if (h2.price > h1.price && h2.rsi < h1.rsi) return [-1, "Bearish"];
-  }
-
-  if (localLows.length >= 2) {
-    const l1 = localLows[localLows.length - 2];
-    const l2 = localLows[localLows.length - 1];
-    if (l2.price < l1.price && l2.rsi > l1.rsi) return [1, "Bullish"];
-  }
-
-  return [0, "None"];
+  return [div, divType];
 }

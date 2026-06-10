@@ -38,8 +38,23 @@ async function fetchAlphaVantage(symbol: string): Promise<EarningsDate | null> {
     if (lines.length < 2) return null;
 
     // CSV: symbol,name,reportDate,fiscalDateEnding,estimate,currency
+    // The name column can contain commas (e.g. "Company, Inc.") — a naive
+    // split shifts every later column. Split on commas outside double quotes.
+    const splitCsvLine = (line: string): string[] => {
+      const out: string[] = [];
+      let cur = "";
+      let inQuotes = false;
+      for (const ch of line) {
+        if (ch === '"') inQuotes = !inQuotes;
+        else if (ch === "," && !inQuotes) { out.push(cur); cur = ""; }
+        else cur += ch;
+      }
+      out.push(cur);
+      return out;
+    };
+
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(",");
+      const cols = splitCsvLine(lines[i]);
       if (cols.length < 3) continue;
       const sym        = cols[0]?.trim();
       const reportDate = cols[2]?.trim();
@@ -55,7 +70,13 @@ async function fetchAlphaVantage(symbol: string): Promise<EarningsDate | null> {
       const reportMs  = new Date(reportDate).getTime();
       const nowMs     = Date.now();
       const daysUntil = Math.round((reportMs - nowMs) / 86400000);
-      const quarter   = fiscal ? `Q${Math.ceil(new Date(fiscal).getMonth() / 3)} ${new Date(fiscal).getFullYear()}` : "—";
+      // Calendar quarter of the fiscal period end. getMonth() is 0-based, so
+      // floor(month/3)+1 — the old ceil(month/3) gave "Q0" for January and
+      // mislabeled Apr/Jul/Oct period-ends one quarter early.
+      const fiscalDate = fiscal ? new Date(fiscal) : null;
+      const quarter   = fiscalDate && !isNaN(fiscalDate.getTime())
+        ? `Q${Math.floor(fiscalDate.getUTCMonth() / 3) + 1} ${fiscalDate.getUTCFullYear()}`
+        : "—";
 
       return {
         symbol,

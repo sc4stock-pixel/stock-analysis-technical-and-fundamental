@@ -55,6 +55,11 @@ export function generateSignals(
     const isBullishCandle = bar.close > bar.open;
     // AUDIT FIX C4 (2026-05-20): same anchor fix as scoring.ts — prevents
     // volume-surge force-entry from firing inside bear regimes.
+    // PARITY VERIFIED (2026-06-10): Python signals.py:859 uses the identical
+    // suffix anchor (str.contains(r'UPTREND$')). Both codebases deliberately
+    // exclude WEAK_UPTREND_STRENGTHENING / WEAK_UPTREND_WEAKENING /
+    // EXTREME_VOL_BULLISH — no force-entry in weak-transitional or extreme-vol
+    // regimes. Do NOT "fix" this to a broader match without changing Python too.
     const isUptrendRegime = /UPTREND$/i.test(bar.regime ?? "");
     bar.volumeSurge   = bar.volRatio > 2.0 && isBullishCandle && isUptrendRegime ? 1 : 0;
     bar.scoreAdjusted = bar.volumeSurge ? bar.score + 2.0 : bar.score;

@@ -1,16 +1,16 @@
 // ============================================================
 // SUPERTREND OPTIMIZER
 // Finds the best ATR period + multiplier combination per stock
-// by running a grid search over 25 combinations and selecting
-// the one with the highest Sharpe ratio (min 2 trades).
+// by running a grid search and selecting the highest total
+// return (min 2 trades; fallback to best return below that).
 //
 // Grid:
-//   ATR periods:  [10, 11, 12, 13, 14]
+//   ATR periods:  [10, 12, 14]
 //   Multipliers:  [2.5, 2.75, 3.0, 3.25, 3.5]
-//   Combinations: 25
+//   Combinations: 15
 //
 // Runs entirely in-memory on pre-computed OHLCV arrays.
-// No external calls. Adds ~25 ST computations per stock.
+// No external calls. Adds ~15 ST computations per stock.
 // ============================================================
 
 import { supertrend, atr as calcAtr } from "./indicators";
