@@ -24,7 +24,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 
 
 def _json_safe(obj):
@@ -368,6 +367,8 @@ def _compute_oos_wfo(df: pd.DataFrame) -> dict:
 
 
 def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
+    import yfinance as yf  # deferred: keeps module importable for unit tests
+
     symbol = stock["symbol"]
     print(f"  Optimizing {symbol} ({stock['name']})...", flush=True)
 
