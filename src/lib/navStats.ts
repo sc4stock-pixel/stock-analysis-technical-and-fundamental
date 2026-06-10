@@ -10,7 +10,7 @@ export interface RegionStats {
   observations: number;
 }
 
-const MIN_OBS_FOR_REGRESSION = 60;
+export const MIN_OBS_FOR_REGRESSION = 60;
 
 export function computeRegionStats(entries: NavEntry[]): RegionStats {
   const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));

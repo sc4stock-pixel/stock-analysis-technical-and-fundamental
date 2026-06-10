@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import InfoTooltip from "@/components/InfoTooltip";
 import type { RegionStats } from "@/lib/navStats";
+import { MIN_OBS_FOR_REGRESSION } from "@/lib/navStats";
 
 interface NavApiResponse {
   US: RegionStats;
@@ -86,7 +87,7 @@ function RegionBlock({ region, stats }: { region: "US" | "HK"; stats: RegionStat
           </>
         ) : (
           <span className="text-[0.72rem] font-mono px-1.5 py-0.5 rounded border border-[#1e2d4a]/50 text-[#4a6080]">
-            α/β {Math.min(stats.observations, 60)}/60 obs
+            α/β {Math.min(stats.observations, MIN_OBS_FOR_REGRESSION)}/{MIN_OBS_FOR_REGRESSION} obs
           </span>
         )}
       </div>
