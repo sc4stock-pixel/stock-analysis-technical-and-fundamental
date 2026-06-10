@@ -81,6 +81,14 @@ SLIPPAGE      = 0.0005    # 0.05% — matches Python config slippageRate
 INITIAL_CAP   = 10_000
 TRAIN_RATIO   = 0.7       # AUDIT FIX C2 (2026-05-20): 70% train, 30% test for OOS WFO
 
+# A1 WALK-FORWARD GATE (2026-06-10): when the honest OOS walk-forward fails,
+# trading the in-sample grid winner is value-destroying (OOS replay over
+# 15 tickers x 23 months: gated +56.4%/Sharpe 1.62 vs ungated +48.5%/1.46).
+# On failure we publish robust defaults instead; the rejected winner is kept
+# in grid_* fields for transparency.
+DEFAULT_ATR_PERIOD = 10
+DEFAULT_MULTIPLIER = 3.0
+
 # Output: repo root/st_params.json  (script lives in repo root/scripts/)
 OUTPUT_PATH = Path(__file__).parent.parent / "st_params.json"
 
@@ -366,6 +374,37 @@ def _compute_oos_wfo(df: pd.DataFrame) -> dict:
     }
 
 
+def _apply_wf_gate(best_params: dict, oos: dict, rerun_backtest) -> dict:
+    """Merge wf_* fields and apply the A1 gate.
+
+    rerun_backtest(atr_period, multiplier) -> backtest result dict; called only
+    on fallback so the published stats describe the params actually written.
+    """
+    out = dict(best_params)
+    out.update(oos)
+    if not oos or oos.get("wf_passed"):
+        out["params_source"] = "optimized"
+        return out
+    out["grid_atr_period"]   = best_params["atr_period"]
+    out["grid_multiplier"]   = best_params["multiplier"]
+    out["grid_total_return"] = best_params["total_return"]
+    out["grid_sharpe"]       = best_params["sharpe"]
+    try:
+        r = rerun_backtest(DEFAULT_ATR_PERIOD, DEFAULT_MULTIPLIER)
+    except Exception:
+        out["params_source"] = "optimized"   # fail open: keep grid winner
+        return out
+    out.update({
+        "atr_period":    DEFAULT_ATR_PERIOD,
+        "multiplier":    DEFAULT_MULTIPLIER,
+        "total_return":  round(r["total_return"], 2),
+        "sharpe":        round(r["sharpe"], 2),
+        "num_trades":    r["num_trades"],
+        "params_source": "default_fallback",
+    })
+    return out
+
+
 def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
     import yfinance as yf  # deferred: keeps module importable for unit tests
 
@@ -389,7 +428,8 @@ def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
 
     # Step 2: True OOS walk-forward → wf_* fields for dashboard
     oos = _compute_oos_wfo(df)
-    best_params.update(oos)
+    best_params = _apply_wf_gate(best_params, oos,
+                                 lambda a, m: _run_st_backtest(df, a, m))
 
     bp = best_params
     oos_str = ""
@@ -397,7 +437,8 @@ def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
         oos_str = (f" | OOS Sharpe={oos['wf_test_sharpe']:.2f}, "
                    f"Return={oos['wf_test_return']:.1f}%, "
                    f"eff={oos['wf_efficiency_ratio']:.2f} ({oos['wf_efficiency_quality']})")
-    print(f"    ✅ {symbol}: ATR={bp['atr_period']}, Mult={bp['multiplier']} "
+    src_tag = " [DEF-FALLBACK]" if bp.get("params_source") == "default_fallback" else ""
+    print(f"    ✅ {symbol}: ATR={bp['atr_period']}, Mult={bp['multiplier']}{src_tag} "
           f"→ Return={bp['total_return']:.1f}%, Sharpe={bp['sharpe']:.2f}, "
           f"Trades={bp['num_trades']}{oos_str}")
     return symbol, best_params
