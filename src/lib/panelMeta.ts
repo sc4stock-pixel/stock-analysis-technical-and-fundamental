@@ -84,6 +84,18 @@ export const PANEL_META: PanelMeta[] = [
     ],
   },
   {
+    id: "nav",
+    label: "Autopilot Realized NAV",
+    meaning: "Realized NAV of the published Autopilot signals (equal-weight, prev-EOD SuperTrend longs, others cash) vs benchmark (SPY / HSI).",
+    cadence: "Accrues one entry per region per EOD Autopilot run.",
+    detail: [
+      "NAV — compounded daily returns of the published signal portfolio, normalized to 1.0 at inception",
+      "Benchmark — SPY (US) / ^HSI (HK), same compounding; line absent while benchmark data is missing",
+      "Return % — total compounded return · Ann. Sharpe — daily mean/sd × √252 · Max DD — worst peak-to-trough",
+      "Alpha / Beta — OLS regression vs benchmark, annualized; appear after 60 paired observations",
+    ],
+  },
+  {
     id: "config",
     label: "Settings",
     meaning: "Analysis & display configuration controls.",

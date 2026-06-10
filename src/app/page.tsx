@@ -12,6 +12,7 @@ import dynamic from "next/dynamic";
 import AlertsPanel from "@/components/AlertsPanel";
 import { UserButton } from "@clerk/nextjs";
 import OpenPositionsPanel from "@/components/OpenPositionsPanel";
+import NavPanel from "@/components/NavPanel";
 import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import { fetchKronosForecasts } from "@/lib/kronos";
 import { supertrend } from "@/lib/indicators";
@@ -561,6 +562,11 @@ export default function Dashboard() {
       {results.length > 0 && (
         <OpenPositionsPanel results={results} onSymbolClick={scrollToCard} />
       )}
+
+      {/* AUTOPILOT REALIZED NAV PANEL */}
+      <div className="mx-4">
+        <NavPanel />
+      </div>
 
       {/* STOCK CARDS */}
       <main className="p-4">
