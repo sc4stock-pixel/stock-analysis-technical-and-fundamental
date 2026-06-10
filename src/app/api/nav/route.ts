@@ -15,7 +15,13 @@ export async function GET() {
     });
     if (!res.ok) return NextResponse.json({ error: `KV error ${res.status}` }, { status: 502 });
     const { result } = await res.json() as { result: string | null };
-    const entries: NavEntry[] = result ? JSON.parse(result) : [];
+    // Python json.dumps can emit bare NaN (the st_params 2026-06-06 lesson, repeated
+    // by the NAV writer 2026-06-10): sanitize to null and drop poisoned entries
+    // instead of letting JSON.parse 500 the whole route.
+    const entries: NavEntry[] = result
+      ? (JSON.parse(result.replace(/\bNaN\b/g, "null")) as NavEntry[])
+          .filter((e) => typeof e.ret === "number" && Number.isFinite(e.ret))
+      : [];
     return NextResponse.json({
       US: computeRegionStats(entries.filter(e => e.region === "US")),
       HK: computeRegionStats(entries.filter(e => e.region === "HK")),
