@@ -457,6 +457,10 @@ export interface TimesfmPriceTargets {
   p10: number[];
   p50: number[];
   p90: number[];
+  /** Baseline close the forecast was generated from — use this (not Kronos's
+   *  last_price) for TimesFM % moves, so the two models' baselines can't
+   *  diverge when one file is staler than the other. */
+  last_price?: number;
   historical?: ForecastHistorical;
 }
 

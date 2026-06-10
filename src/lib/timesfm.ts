@@ -1,6 +1,8 @@
-import { TimesfmForecasts, TimesfmPriceTargets } from "@/types";
+import { ForecastHistorical, TimesfmForecasts, TimesfmPriceTargets } from "@/types";
 
 interface RawStockForecast {
+  last_price?: number;
+  historical?: ForecastHistorical;
   price_targets?: {
     t1: number;
     t2: number;
@@ -41,6 +43,9 @@ export async function fetchTimesfmForecasts(): Promise<TimesfmForecasts | null> 
     for (const [symbol, data] of Object.entries(raw)) {
       if (!data) continue;
       const pt = data.price_targets;
+      // Carry last_price + historical through — dropping them forced the EOD
+      // report to borrow Kronos's baseline for TimesFM % moves (mixed baselines
+      // when one file is staler) and made tfm.historical.dir_hits always null.
       if (pt && pt.t1 != null && Array.isArray(pt.p50) && pt.p50.length > 0) {
         normalized[symbol] = {
           t1: pt.t1,
@@ -49,6 +54,8 @@ export async function fetchTimesfmForecasts(): Promise<TimesfmForecasts | null> 
           p10: pt.p10 ?? [],
           p50: pt.p50 ?? [],
           p90: pt.p90 ?? [],
+          last_price: data.last_price,
+          historical: data.historical,
           st_persistence: data.st_persistence,
         } as TimesfmPriceTargets;
       } else if (data.t1 != null && Array.isArray(data.p50) && data.p50.length > 0) {
@@ -59,6 +66,8 @@ export async function fetchTimesfmForecasts(): Promise<TimesfmForecasts | null> 
           p10: data.p10 ?? [],
           p50: data.p50 ?? [],
           p90: data.p90 ?? [],
+          last_price: data.last_price,
+          historical: data.historical,
           st_persistence: data.st_persistence,
         } as TimesfmPriceTargets;
       }

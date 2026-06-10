@@ -98,17 +98,28 @@ export async function fetchYahooOHLCV(
     // NOT yesterday. bars[-2].close = prior trading day's close is the reliable source.
     let changePct = 0;
 
+    const metaChangePct = (): number | null => {
+      if (meta.regularMarketChange == null || lastBar.close <= 0) return null;
+      const impliedPrev = currentPrice - (meta.regularMarketChange as number);
+      return impliedPrev > 0
+        ? ((meta.regularMarketChange as number) / impliedPrev) * 100
+        : null;
+    };
+
     if (secondLast && secondLast.close > 0 && currentPrice > 0) {
       changePct = ((currentPrice - secondLast.close) / secondLast.close) * 100;
-    } else if (meta.regularMarketChange != null && lastBar.close > 0) {
-      const impliedPrev = currentPrice - (meta.regularMarketChange as number);
-      if (impliedPrev > 0) {
-        changePct = ((meta.regularMarketChange as number) / impliedPrev) * 100;
-      }
+    } else {
+      changePct = metaChangePct() ?? 0;
     }
 
-    // Clamp: no stock moves > 50% in a single day (catches any remaining bad data)
-    if (Math.abs(changePct) > 50) changePct = 0;
+    // Sanity gate: a computed move > 50% almost always means a bad prev-close
+    // bar, not a real move. Before zeroing (the old behavior, which also hid
+    // genuine large moves), cross-check against Yahoo's own quote change —
+    // if both agree it's > 50%, trust it; otherwise prefer the meta figure.
+    if (Math.abs(changePct) > 50) {
+      const mc = metaChangePct();
+      changePct = mc !== null && Math.abs(mc) <= Math.abs(changePct) ? mc : 0;
+    }
 
     return { bars, currentPrice, changePct };
   } catch {
