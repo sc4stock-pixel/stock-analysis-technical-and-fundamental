@@ -154,11 +154,16 @@ function buildForecastSection(
     const kro = kronosData?.[r.symbol];
     const tfm = timesfmData?.[r.symbol];
     if (!kro && !tfm) continue;
-    const last = kro?.last_price ?? null;
-    const kPct = (kro && last && Array.isArray(kro.forward.p50) && kro.forward.p50.length >= 20)
-      ? ((kro.forward.p50[19] - last) / last) * 100 : null;
-    const tPct = (tfm && last && Array.isArray(tfm.p50) && tfm.p50.length >= 20)
-      ? ((tfm.p50[19] - last) / last) * 100 : null;
+    // Each model's % move uses its OWN baseline close. Borrowing Kronos's
+    // last_price for TimesFM mixed baselines when one file was staler, and
+    // hid TimesFM entirely whenever Kronos lacked the symbol. Kronos baseline
+    // stays as fallback for older TimesFM files without last_price.
+    const kLast = kro?.last_price ?? null;
+    const tLast = tfm?.last_price ?? kLast;
+    const kPct = (kro && kLast && Array.isArray(kro.forward.p50) && kro.forward.p50.length >= 20)
+      ? ((kro.forward.p50[19] - kLast) / kLast) * 100 : null;
+    const tPct = (tfm && tLast && Array.isArray(tfm.p50) && tfm.p50.length >= 20)
+      ? ((tfm.p50[19] - tLast) / tLast) * 100 : null;
     const isHK = r.symbol.endsWith(".HK");
     rows.push({
       // strip ".HK" for HK names — shorter AND stops Telegram auto-linking "9988.HK" as a URL

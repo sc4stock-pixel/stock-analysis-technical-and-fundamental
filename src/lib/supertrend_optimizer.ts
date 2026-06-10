@@ -85,8 +85,13 @@ function quickSTBacktest(
       if (stEntry[i] === "BUY") {
         const ep    = cur.open * (1 + slippage);
         const shs   = Math.floor((running * 0.998) / ep);
-        const stop  = (!isNaN(stLine[i - 1]) && stLine[i - 1] > 0) ? stLine[i - 1] : ep - 2 * cur.atr;
-        pos = { entryPrice: ep, entryCost: ep * (1 + commission), shares: shs, equity: running, stop };
+        // M8 guard (parity with runSupertrendBacktest + Python cron): a
+        // 0-share entry would count phantom trades toward numTrades, which
+        // gates MIN_TRADES and the OOS quality classification.
+        if (shs > 0) {
+          const stop = (!isNaN(stLine[i - 1]) && stLine[i - 1] > 0) ? stLine[i - 1] : ep - 2 * cur.atr;
+          pos = { entryPrice: ep, entryCost: ep * (1 + commission), shares: shs, equity: running, stop };
+        }
       }
     } else {
       // Trail stop upward
@@ -105,7 +110,9 @@ function quickSTBacktest(
         const exitPrice = cur.open * (1 - slippage);
         const proceeds  = exitPrice * (1 - commission);
         const pnl = (proceeds - pos.entryCost) * pos.shares;
-        const ret = (exitPrice - pos.entryPrice) / pos.entryPrice;
+        // Net return (C6/C7 parity with the production engines): commissions on
+        // both sides, denominated in actual entry cost.
+        const ret = (proceeds - pos.entryCost) / pos.entryCost;
         running = pos.equity + pnl;
         trades.push({ ret, pnl });
         pos = null;
@@ -121,7 +128,9 @@ function quickSTBacktest(
           const exitPrice = cur.open * (1 - slippage);
           const proceeds  = exitPrice * (1 - commission);
           const pnl = (proceeds - pos.entryCost) * pos.shares;
-          const ret = (exitPrice - pos.entryPrice) / pos.entryPrice;
+          // Net return (C6/C7 parity with the production engines): commissions
+          // on both sides, denominated in actual entry cost.
+          const ret = (proceeds - pos.entryCost) / pos.entryCost;
           running = pos.equity + pnl;
           trades.push({ ret, pnl });
           pos = null;
