@@ -93,6 +93,7 @@ export const PANEL_META: PanelMeta[] = [
       "Benchmark — SPY (US) / ^HSI (HK), same compounding; line absent while benchmark data is missing",
       "Return % — total compounded return · Ann. Sharpe — daily mean/sd × √252 · Max DD — worst peak-to-trough",
       "Alpha / Beta — OLS regression vs benchmark, annualized; appear after 60 paired observations",
+      "Buy & Hold — always-long equal-weight of the same ticker universe, same compounding; the strategy-vs-B&H gap isolates the timing contribution (line/chip absent until all entries carry B&H data)",
     ],
   },
   {

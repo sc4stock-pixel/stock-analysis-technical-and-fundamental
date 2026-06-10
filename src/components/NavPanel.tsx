@@ -12,14 +12,16 @@ interface NavApiResponse {
 
 const ACCENT = "#00d4ff";
 const MUTED  = "#4a6080";
+const BH     = "#8a6d3b"; // muted gold — universe buy-and-hold
 
-// Compact inline SVG line chart: nav (accent) + benchNav (muted).
-// benchNav segments are simply absent where null (line stops).
+// Compact inline SVG line chart: nav (accent) + benchNav (muted) + bhNav (muted gold).
+// benchNav/bhNav segments are simply absent where null (line stops).
 function NavChart({ series }: { series: RegionStats["navSeries"] }) {
   const W = 260, H = 64, PAD = 3;
   const navVals   = series.map(p => p.nav);
   const benchVals = series.filter(p => p.benchNav !== null).map(p => p.benchNav as number);
-  const all = [...navVals, ...benchVals];
+  const bhVals    = series.filter(p => p.bhNav !== null).map(p => p.bhNav as number);
+  const all = [...navVals, ...benchVals, ...bhVals];
   const min = Math.min(...all), max = Math.max(...all);
   const span = max - min || 1;
   const x = (i: number) => PAD + (i / (series.length - 1)) * (W - 2 * PAD);
@@ -30,14 +32,32 @@ function NavChart({ series }: { series: RegionStats["navSeries"] }) {
     .map((p, i) => (p.benchNav !== null ? `${x(i).toFixed(1)},${y(p.benchNav).toFixed(1)}` : null))
     .filter((p): p is string => p !== null)
     .join(" ");
+  const bhPts = series
+    .map((p, i) => (p.bhNav !== null ? `${x(i).toFixed(1)},${y(p.bhNav).toFixed(1)}` : null))
+    .filter((p): p is string => p !== null)
+    .join(" ");
+  const hasBhLine = bhVals.length >= 2;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-16" preserveAspectRatio="none">
-      {benchPts.split(" ").length >= 2 && (
-        <polyline points={benchPts} fill="none" stroke={MUTED} strokeWidth={1} opacity={0.7} />
-      )}
-      <polyline points={navPts} fill="none" stroke={ACCENT} strokeWidth={1.5} />
-    </svg>
+    <>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-16" preserveAspectRatio="none">
+        {benchPts.split(" ").length >= 2 && (
+          <polyline points={benchPts} fill="none" stroke={MUTED} strokeWidth={1} opacity={0.7} />
+        )}
+        {hasBhLine && (
+          <polyline points={bhPts} fill="none" stroke={BH} strokeWidth={1} opacity={0.8} />
+        )}
+        <polyline points={navPts} fill="none" stroke={ACCENT} strokeWidth={1.5} />
+      </svg>
+      <div className="text-[0.66rem] font-mono text-[#4a6080] mt-0.5">
+        <span style={{ color: ACCENT }}>—</span> strategy · <span style={{ color: MUTED }}>—</span> bench
+        {hasBhLine && (
+          <>
+            {" "}· <span style={{ color: BH }}>—</span> buy&amp;hold
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -76,6 +96,19 @@ function RegionBlock({ region, stats }: { region: "US" | "HK"; stats: RegionStat
         <StatChip label="Ret" value={`${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%`} color={retColor} />
         <StatChip label="Sharpe" value={stats.annSharpe !== null ? stats.annSharpe.toFixed(2) : "—"} />
         <StatChip label="MaxDD" value={`${stats.maxDrawdownPct.toFixed(1)}%`} color={ddColor} />
+        <StatChip
+          label="B&H"
+          value={
+            stats.bhTotalReturnPct !== null
+              ? `${stats.bhTotalReturnPct >= 0 ? "+" : ""}${stats.bhTotalReturnPct.toFixed(1)}%`
+              : "—"
+          }
+          color={
+            stats.bhTotalReturnPct !== null
+              ? stats.bhTotalReturnPct >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"
+              : undefined
+          }
+        />
         {stats.alpha !== null && stats.beta !== null ? (
           <>
             <StatChip
