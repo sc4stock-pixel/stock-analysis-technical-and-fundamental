@@ -374,7 +374,7 @@ def _compute_oos_wfo(df: pd.DataFrame) -> dict:
     }
 
 
-def _apply_wf_gate(best_params: dict, oos: dict, rerun_backtest) -> dict:
+def _apply_wf_gate(best_params: dict, oos: dict, rerun_backtest, symbol: str = "?") -> dict:
     """Merge wf_* fields and apply the A1 gate.
 
     rerun_backtest(atr_period, multiplier) -> backtest result dict; called only
@@ -391,7 +391,8 @@ def _apply_wf_gate(best_params: dict, oos: dict, rerun_backtest) -> dict:
     out["grid_sharpe"]       = best_params["sharpe"]
     try:
         r = rerun_backtest(DEFAULT_ATR_PERIOD, DEFAULT_MULTIPLIER)
-    except Exception:
+    except Exception as e:
+        print(f"    ⚠  {symbol}: default-fallback rerun failed — {e}; keeping grid winner")
         out["params_source"] = "optimized"   # fail open: keep grid winner
         return out
     out.update({
@@ -429,7 +430,8 @@ def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
     # Step 2: True OOS walk-forward → wf_* fields for dashboard
     oos = _compute_oos_wfo(df)
     best_params = _apply_wf_gate(best_params, oos,
-                                 lambda a, m: _run_st_backtest(df, a, m))
+                                 lambda a, m: _run_st_backtest(df, a, m),
+                                 symbol=symbol)
 
     bp = best_params
     oos_str = ""

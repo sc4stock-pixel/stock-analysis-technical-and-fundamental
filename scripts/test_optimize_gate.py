@@ -57,3 +57,11 @@ def test_rerun_failure_fails_open_to_grid_winner():
         raise RuntimeError("backtest exploded")
     out = opt._apply_wf_gate(dict(GRID_WINNER), dict(OOS_FAILED), _boom)
     assert out["atr_period"] == 12 and out["params_source"] == "optimized"
+
+
+def test_rerun_failure_prints_warning(capsys):
+    def _boom(a, m):
+        raise RuntimeError("backtest exploded")
+    opt._apply_wf_gate(dict(GRID_WINNER), dict(OOS_FAILED), _boom, symbol="TEST")
+    captured = capsys.readouterr()
+    assert "TEST" in captured.out and "fallback rerun failed" in captured.out
