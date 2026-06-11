@@ -24,20 +24,22 @@ function Row({ label, value, color }: { label: string; value: string | number; c
   );
 }
 
-function MetricCol({ label, score, st, higherIsBetter = true }: {
-  label: string; score: number | string; st: number | string; higherIsBetter?: boolean;
+function MetricCol({ label, score, st, higherIsBetter = true, neutral = false }: {
+  label: string; score: number | string; st: number | string; higherIsBetter?: boolean; neutral?: boolean;
 }) {
   const sVal = typeof score === "number" ? score : 0;
   const stVal = typeof st === "number" ? st : 0;
   const scoreWins = higherIsBetter ? sVal >= stVal : sVal <= stVal;
   const tied = Math.abs(sVal - stVal) < 0.01;
+  const scoreHL = !neutral && !tied && scoreWins;
+  const stHL    = !neutral && !tied && !scoreWins;
   return (
     <div className="flex justify-between py-1 border-b border-[#1e2d4a]/30 text-xs">
       <span className="text-[#4a6080] w-28 flex-shrink-0">{label}</span>
-      <span className={`font-mono w-16 text-right ${!tied && scoreWins ? "text-[#00ff88]" : "text-[#c8d8f0]"}`}>
+      <span className={`font-mono w-16 text-right ${scoreHL ? "text-[#00ff88]" : "text-[#c8d8f0]"}`}>
         {typeof score === "number" ? score.toFixed(1) : score}
       </span>
-      <span className={`font-mono w-16 text-right ${!tied && !scoreWins ? "text-[#00ff88]" : "text-[#c8d8f0]"}`}>
+      <span className={`font-mono w-16 text-right ${stHL ? "text-[#00ff88]" : "text-[#c8d8f0]"}`}>
         {typeof st === "number" ? st.toFixed(1) : st}
       </span>
     </div>
@@ -92,6 +94,7 @@ export default function BacktestTab({ result }: Props) {
           <MetricCol label="Avg Win %"   score={cmp.score.avg_win}       st={cmp.supertrend.avg_win} />
           <MetricCol label="Avg Loss %"  score={cmp.score.avg_loss}      st={cmp.supertrend.avg_loss} higherIsBetter={false} />
           <MetricCol label="Max DD %"    score={cmp.score.max_drawdown}  st={cmp.supertrend.max_drawdown} higherIsBetter={false} />
+          <MetricCol label="# Trades"    score={String(cmp.score.num_trades)} st={String(cmp.supertrend.num_trades)} neutral />
           {/* ST optimized params */}
           {result.st_opt_params && (
             <div className="mt-2 pt-2 border-t border-[#1e2d4a]/40">
@@ -171,11 +174,6 @@ export default function BacktestTab({ result }: Props) {
               </div>
             );
           })()}
-          <div className="flex justify-between py-1 border-b border-[#1e2d4a]/30 text-xs">
-            <span className="text-[#4a6080] w-28">Trades</span>
-            <span className="text-[#c8d8f0] font-mono w-16 text-right">{cmp.score.num_trades}</span>
-            <span className="text-[#c8d8f0] font-mono w-16 text-right">{cmp.supertrend.num_trades}</span>
-          </div>
 
           {/* Recent trades — mm/dd/yy dates */}
           <div className="mt-2 pt-2 border-t border-[#1e2d4a]/50 grid grid-cols-2 gap-2">

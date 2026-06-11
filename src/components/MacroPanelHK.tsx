@@ -225,24 +225,6 @@ export default function MacroPanelHK({ data, loading, onRefresh }: Props) {
             <span>Breadth 7.5%</span>
           </div>
 
-          {/* HK Headlines */}
-          {data.headlines.length > 0 && (
-            <div className="mt-3 border-t border-[#1e2d4a]/50 pt-2">
-              <div className="text-[#4a6080] text-xs font-bold mb-1.5 tracking-widest">📰 HK HEADLINES</div>
-              <div className="space-y-1 max-h-24 overflow-y-auto">
-                {data.headlines.map((h, i) => (
-                  <div key={i} className="flex items-start gap-2 text-[0.63rem]">
-                    <span className="shrink-0 mt-0.5">{signalIcon(h.sentiment)}</span>
-                    <span className={`leading-relaxed ${h.sentiment === "bullish" ? "text-[#c8d8f0]" : h.sentiment === "bearish" ? "text-[#8a9bb0]" : "text-[#5a7090]"}`}>
-                      {h.title}
-                    </span>
-                    <span className="shrink-0 text-[#2a3d5a] text-[0.55rem] ml-auto">{h.source}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Footer */}
           <div className="mt-2 flex items-center justify-between">
             <span className="text-[#2a3d5a] text-[0.55rem] font-mono">
