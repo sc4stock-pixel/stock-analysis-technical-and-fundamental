@@ -53,7 +53,7 @@ export const PANEL_META: PanelMeta[] = [
       "Signal — BUY / SELL / HOLD (score + confirmation logic)",
       "ST — current SuperTrend direction (↑ long / ↓ short)",
       "SEPA — Minervini SEPA conditions met, 0–3 (display-only overlay; HK shows —)",
-      "TFM 10d — TimesFM 10-day forecast vs current price, % (display-only)",
+      "TFM 20d / K 20d — TimesFM & Kronos 20-day forecast vs current price, %. Hover a cell for each model's accuracy (direction hits / 20) and their 20d agreement. Display-only.",
       "RSI · MACD H — momentum indicators",
       "Backtest, header-colored: SC (cyan)=Score · ST (amber)=SuperTrend · TFM (purple)=TimesFM — each 2Y%/1Y% return, Sharpe, Alpha",
     ],
