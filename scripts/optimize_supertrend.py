@@ -19,6 +19,7 @@ Dependencies: yfinance pandas numpy   (no local package imports)
 import json
 import math
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from pathlib import Path
@@ -438,16 +439,36 @@ def _apply_wf_gate(best_params: dict, oos: dict, rerun_backtest, symbol: str = "
     return out
 
 
-def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
+FETCH_RETRIES = 3
+
+
+def _fetch_history(symbol: str, retries: int = FETCH_RETRIES) -> pd.DataFrame:
+    """Fetch yfinance history, retrying on transient SQLite cache lock errors.
+
+    yfinance's ticker-timezone cache is a single shared SQLite db; concurrent
+    ThreadPoolExecutor workers can collide on first access and raise
+    'database is locked'. Retry with backoff before giving up.
+    """
     import yfinance as yf  # deferred: keeps module importable for unit tests
 
+    for attempt in range(retries):
+        try:
+            return yf.Ticker(symbol).history(
+                period=f"{int(LOOKBACK_DAYS * 1.5)}d", auto_adjust=True
+            )
+        except Exception as e:
+            if "database is locked" in str(e) and attempt < retries - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+
+
+def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
     symbol = stock["symbol"]
     print(f"  Optimizing {symbol} ({stock['name']})...", flush=True)
 
     try:
-        df = yf.Ticker(symbol).history(
-            period=f"{int(LOOKBACK_DAYS * 1.5)}d", auto_adjust=True
-        )
+        df = _fetch_history(symbol)
         if df.empty or len(df) < 100:
             print(f"    ⚠  {symbol}: insufficient data ({len(df)} bars)")
             return symbol, None
