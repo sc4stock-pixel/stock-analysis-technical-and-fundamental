@@ -554,6 +554,7 @@ export default function Dashboard() {
             results={results}
             onRowClick={scrollToCard}
             timesfmData={timesfmData}
+            kronosData={kronosData}
           />
         </div>
       )}

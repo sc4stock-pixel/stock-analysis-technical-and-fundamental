@@ -1,12 +1,14 @@
 "use client";
 import { useState, useCallback } from "react";
-import { StockAnalysisResult, TimesfmForecasts } from "@/types";
+import { StockAnalysisResult, TimesfmForecasts, KronosForecasts } from "@/types";
+import { kronosRow, timesfmRow, agreement20, ForecastRowData } from "@/lib/forecastBox";
 import InfoTooltip from "@/components/InfoTooltip";
 
 interface Props {
   results: StockAnalysisResult[];
   onRowClick: (symbol: string) => void;
   timesfmData?: TimesfmForecasts | null;
+  kronosData?: KronosForecasts | null;
 }
 
 function grade(score: number): { label: string; color: string } {
@@ -65,7 +67,7 @@ const numColor = (v: number | null | undefined, good = 0) =>
 
 type ColKey =
   | "symbol" | "price" | "change_pct" | "regime" | "grade" | "score"
-  | "signal" | "st_status" | "sepa" | "tfm_10d" | "rsi" | "macd_hist"
+  | "signal" | "st_status" | "sepa" | "tfm_20d" | "k_20d" | "rsi" | "macd_hist"
   | "sc_500d" | "st_500d" | "sc_250d" | "st_250d"
   | "sc_sharpe" | "sc_alpha" | "st_sharpe" | "st_alpha";
 
@@ -74,12 +76,13 @@ interface ColDef {
   label: string;
   labelColor?: string;
   align: "left" | "right" | "center";
-  sortVal: (r: StockAnalysisResult, tfm?: TimesfmForecasts | null) => number;
+  sortVal: (r: StockAnalysisResult, tfm?: TimesfmForecasts | null, kro?: KronosForecasts | null) => number;
 }
 
 const SC_HDR  = "text-[#00d4ff]";
 const ST_HDR  = "text-[#ffa502]";
 const TFM_HDR = "text-[#a78bfa]";
+const K_HDR   = "text-[#ff8c42]";
 
 const COLS: ColDef[] = [
   { key: "symbol",     label: "Ticker",     align: "left",   sortVal: r => r.symbol.charCodeAt(0) },
@@ -91,13 +94,10 @@ const COLS: ColDef[] = [
   { key: "signal",     label: "Signal",     align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
   { key: "st_status",  label: "ST",         align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
   { key: "sepa",       label: "SEPA",       align: "center", sortVal: r => r.sepa_metadata?.sepa_score ?? -1 },
-  { key: "tfm_10d",    label: "TFM 10d",    labelColor: TFM_HDR, align: "right",
-    sortVal: (r, tfm) => {
-      const t2 = tfm?.[r.symbol]?.t2;
-      if (!t2 || !r.current_price) return -999;
-      return (t2 - r.current_price) / r.current_price * 100;
-    }
-  },
+  { key: "tfm_20d",    label: "TFM 20d",    labelColor: TFM_HDR, align: "right",
+    sortVal: (r, tfm) => timesfmRow(tfm?.[r.symbol], r.current_price)?.cells[2]?.pct ?? -999 },
+  { key: "k_20d",      label: "K 20d",      labelColor: K_HDR, align: "right",
+    sortVal: (r, _tfm, kro) => kronosRow(kro?.[r.symbol])?.cells[2]?.pct ?? -999 },
   { key: "rsi",        label: "RSI",        align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
   { key: "macd_hist",  label: "MACD H",     align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
   { key: "sc_500d",    label: "SC 2Y%",     labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.total_return_500d ?? 0 },
@@ -110,7 +110,24 @@ const COLS: ColDef[] = [
   { key: "st_alpha",   label: "ST Alpha",   labelColor: ST_HDR, align: "right", sortVal: r => r.comparison?.supertrend.alpha ?? 0 },
 ];
 
-export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }: Props) {
+function ForecastTd({ row, modelLabel, agreeTip = "", tint = false }: {
+  row: ForecastRowData | null; modelLabel: string; agreeTip?: string; tint?: boolean;
+}) {
+  const c = row?.cells[2] ?? null;
+  const acc = row?.dirHits != null ? ` · acc ${row.dirHits}/20` : "";
+  const title = c == null
+    ? "No forecast"
+    : `${modelLabel} 20d: ${c.price.toFixed(2)} · ${c.pct >= 0 ? "+" : ""}${c.pct.toFixed(1)}%${acc}${agreeTip}`;
+  return (
+    <td className={`px-2 py-1.5 text-right font-mono whitespace-nowrap ${tint ? "bg-[#ff8c42]/5" : ""}`} title={title}>
+      {c == null
+        ? <span className="text-[#4a6080]">--</span>
+        : <span className={c.pct >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>{c.pct >= 0 ? "▲+" : "▼"}{Math.abs(c.pct).toFixed(1)}%</span>}
+    </td>
+  );
+}
+
+export default function PortfolioSummaryBar({ results, onRowClick, timesfmData, kronosData }: Props) {
   const [sortKey, setSortKey] = useState<ColKey>("signal");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
   const [flashSymbol, setFlashSymbol] = useState<string | null>(null);
@@ -129,7 +146,7 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }
   if (results.length === 0) return null;
 
   const col    = COLS.find(c => c.key === sortKey)!;
-  const sorted = [...results].sort((a, b) => sortDir * (col.sortVal(b, timesfmData) - col.sortVal(a, timesfmData)));
+  const sorted = [...results].sort((a, b) => sortDir * (col.sortVal(b, timesfmData, kronosData) - col.sortVal(a, timesfmData, kronosData)));
 
   const buy      = results.filter(r => r.signal === "BUY").length;
   const sell     = results.filter(r => r.signal === "SELL").length;
@@ -150,7 +167,8 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }
   const avgSTAlpha  = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.alpha ?? 0), 0) / withST.length : 0;
   const avgSTWin    = withST.length ? withST.reduce((a, r) => a + (r.comparison?.supertrend.win_rate ?? 0), 0) / withST.length : 0;
 
-  const tfmCount = results.filter(r => timesfmData?.[r.symbol]?.t2 != null).length;
+  const tfmCount = results.filter(r => timesfmRow(timesfmData?.[r.symbol], r.current_price)?.cells[2] != null).length;
+  const kCount   = results.filter(r => kronosRow(kronosData?.[r.symbol])?.cells[2] != null).length;
 
   const SortTh = ({ col: c }: { col: ColDef }) => {
     const active = sortKey === c.key;
@@ -203,9 +221,9 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }
           <span className="text-[#4a6080]">ST Sharpe <span className={numColor(avgSTSharpe, 0.5)}>{avgSTSharpe.toFixed(2)}</span></span>
           <span className="text-[#4a6080]">Win% <span className={numColor(avgSTWin, 50)}>{avgSTWin.toFixed(0)}%</span></span>
           <span className="text-[#4a6080]">ST α <span className={numColor(avgSTAlpha, 0)}>{sn(avgSTAlpha, 1, "%")}</span></span>
-          {tfmCount > 0 && (
+          {(tfmCount > 0 || kCount > 0) && (
             <span className="text-[#a78bfa] font-mono text-[0.6rem] border border-[#a78bfa]/30 rounded px-1.5 py-0.5">
-              🔮 TFM {tfmCount}/{results.length}
+              🔮 K {kCount} · T {tfmCount} / {results.length}
             </span>
           )}
           <span className="text-[#4a6080] text-[0.65rem] ml-auto">↕ Click header to sort &nbsp;·&nbsp; ↵ Click row to jump</span>
@@ -214,7 +232,7 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }
 
       {/* Table */}
       <div className="overflow-x-auto max-w-full min-w-0 rounded border border-[#1e2d4a]">
-        <table className="w-full text-xs min-w-[980px]">
+        <table className="w-full text-xs min-w-[1040px]">
           <thead>
             <tr className="bg-[#0f1629] border-b border-[#1e2d4a] uppercase tracking-wider">
               {COLS.map(c => <SortTh key={c.key} col={c} />)}
@@ -231,11 +249,11 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }
               const chg  = r.change_pct ?? 0;
               const isFlashing = flashSymbol === r.symbol;
 
-              const tfm = timesfmData?.[r.symbol];
-              const tfmT2 = tfm?.t2;
-              const tfmPct = (tfmT2 != null && r.current_price > 0)
-                ? (tfmT2 - r.current_price) / r.current_price * 100
-                : null;
+              const kRow = kronosRow(kronosData?.[r.symbol]);
+              const tRow = timesfmRow(timesfmData?.[r.symbol], r.current_price);
+              const agree = agreement20(kRow, tRow);
+              const agreeTip = (agree === "agree-up" || agree === "agree-down") ? " · ✓ agree"
+                : agree === "diverge" ? " · ✗ diverge" : "";
 
               return (
                 <tr
@@ -329,17 +347,10 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData }
                       );
                     })()}
                   </td>
-                  {/* TFM 10d */}
-                  <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap"
-                    title={tfmT2 != null ? `TimesFM T2 target: ${tfmT2.toFixed(2)}` : "No forecast"}>
-                    {tfmPct == null ? (
-                      <span className="text-[#4a6080]">--</span>
-                    ) : (
-                      <span className={tfmPct >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>
-                        {tfmPct >= 0 ? "▲+" : "▼"}{Math.abs(tfmPct).toFixed(1)}%
-                      </span>
-                    )}
-                  </td>
+                  {/* TFM 20d */}
+                  <ForecastTd row={tRow} modelLabel="TimesFM" />
+                  {/* K 20d */}
+                  <ForecastTd row={kRow} modelLabel="Kronos" agreeTip={agreeTip} tint />
                   {/* RSI */}
                   <td className={`px-2 py-1.5 text-right font-mono ${rsiC}`}>{n(rsi, 0)}</td>
                   {/* MACD Hist */}
