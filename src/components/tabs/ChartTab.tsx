@@ -8,13 +8,6 @@ import {
   Tooltip, ResponsiveContainer, ReferenceLine, Area,
 } from "recharts";
 
-interface TimesfmStPersistence {
-  current_dir: number;
-  persistence_prob: number;
-  flip_risk: string;
-  p50_distances: number[];
-}
-
 interface TimesfmPriceTargets {
   t1: number;
   t2: number;
@@ -22,7 +15,6 @@ interface TimesfmPriceTargets {
   p10: number[];
   p50: number[];
   p90: number[];
-  st_persistence?: TimesfmStPersistence;
   historical?: import("@/types").ForecastHistorical;
 }
 
