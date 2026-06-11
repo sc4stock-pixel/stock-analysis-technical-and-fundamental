@@ -5,7 +5,7 @@ import { StockAnalysisResult, ChartBar, AppConfig } from "@/types";
 import { supertrend } from "@/lib/indicators";
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, ReferenceLine, Area, BarChart, Cell,
+  Tooltip, ResponsiveContainer, ReferenceLine, Area,
 } from "recharts";
 
 interface TimesfmStPersistence {
@@ -128,82 +128,6 @@ const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: 
     </div>
   );
 };
-
-// ── Phase 2: Persistence Histogram ───────────────────────────
-function PersistenceHistogram({ persistence, stDir }: {
-  persistence: TimesfmStPersistence;
-  stDir: number;
-}) {
-  const p50 = Array.isArray(persistence.p50_distances) ? persistence.p50_distances : [];
-
-  const survivalAt = (day: number): number => {
-    const slice = p50.slice(0, Math.min(day, p50.length));
-    if (slice.length === 0) return Math.round(persistence.persistence_prob);
-    const sameSide = slice.filter(v => stDir === 1 ? v > 0 : v < 0).length;
-    return Math.round((sameSide / slice.length) * 100);
-  };
-
-  const bars = [
-    { day: "5d",  prob: survivalAt(5) },
-    { day: "10d", prob: survivalAt(10) },
-    { day: "20d", prob: Math.round(persistence.persistence_prob) },
-  ];
-
-  const riskColor = (prob: number) =>
-    prob >= 70 ? "#00ff88" : prob >= 45 ? "#ffa502" : "#ff4757";
-
-  const riskLabel =
-    persistence.flip_risk === "low"    ? { text: "LOW FLIP RISK",  color: "#00ff88" } :
-    persistence.flip_risk === "medium" ? { text: "MED FLIP RISK",  color: "#ffa502" } :
-                                         { text: "HIGH FLIP RISK", color: "#ff4757" };
-
-  return (
-    <div className="border border-[#1e2d4a] rounded p-2.5 bg-[#080d1a]">
-      <div className="flex items-center justify-between mb-1.5">
-        <div>
-          <div className="text-[#a78bfa] text-[0.65rem] font-bold tracking-widest">🔮 ST PERSISTENCE</div>
-          <div className="text-[#4a6080] text-[0.58rem] mt-0.5">Prob. trend direction holds</div>
-        </div>
-        <div className="text-right">
-          <div className="text-[0.65rem] font-bold font-mono" style={{ color: riskLabel.color }}>{riskLabel.text}</div>
-          <div className={`text-[0.58rem] font-mono ${stDir === 1 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-            {stDir === 1 ? "🟢 BULLISH" : "🔴 BEARISH"}
-          </div>
-        </div>
-      </div>
-
-      <div style={{ height: 80 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={bars} margin={{ top: 2, right: 4, left: 0, bottom: 0 }} barSize={28}>
-            <CartesianGrid strokeDasharray="1 4" stroke="#1e2d4a" vertical={false} />
-            <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#6b85a0" }} tickLine={false} axisLine={{ stroke: "#1e2d4a" }} />
-            <YAxis domain={[0, 100]} tick={{ fontSize: 8, fill: "#4a6080" }} tickLine={false} axisLine={false}
-              width={26} tickFormatter={(v: number) => `${v}%`} />
-            <ReferenceLine y={50} stroke="#4a6080" strokeDasharray="3 3" strokeOpacity={0.6} />
-            <Tooltip
-              contentStyle={{ background: "#0f1629", border: "1px solid #1e2d4a", fontSize: 10 }}
-              formatter={(v: number) => [`${v}%`, "Persist"]}
-            />
-            <Bar dataKey="prob" radius={[3, 3, 0, 0]}>
-              {bars.map((b, i) => (
-                <Cell key={i} fill={riskColor(b.prob)} fillOpacity={0.85} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="flex justify-around mt-1">
-        {bars.map(b => (
-          <div key={b.day} className="text-center">
-            <div className="text-[#4a6080] text-[0.58rem]">{b.day}</div>
-            <div className="font-mono font-bold text-xs" style={{ color: riskColor(b.prob) }}>{b.prob}%</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export default function ChartTab({ result, config, timesfm, kronos }: Props) {
   // ── All hooks first ───────────────────────────────────────────
@@ -396,13 +320,6 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
   const subCount = (showVol ? 1 : 0) + (showRSI ? 1 : 0) + (showMACD ? 1 : 0);
   const priceH   = subCount === 0 ? 290 : subCount === 1 ? 240 : 195;
   const subH     = 70;
-
-  // ── ST status ─────────────────────────────────────────────────
-  const lastOptDir = optStDir.length > 0 ? (optStDir[optStDir.length - 1] ?? -1) : -1;
-  const lastOptST  = optStLine.length > 0 ? (optStLine[optStLine.length - 1] ?? 0) : 0;
-  const stDist     = lastOptST > 0 && lastClose > 0 ? ((lastClose - lastOptST) / lastClose) * 100 : 0;
-  const openRet    = result.st_open_return_pct;
-  const stPersistence = timesfm?.st_persistence;
 
   const Tog = ({ label, active, onClick, activeClass }: {
     label: string; active: boolean; onClick: () => void; activeClass: string;
@@ -670,46 +587,6 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
           <span className="flex items-center gap-1.5"><span className="text-[#00ff88] text-sm leading-none">▲</span> Entry</span>
           <span className="flex items-center gap-1.5"><span className="text-[#ff4757] text-sm leading-none">▼</span> Exit</span>
         </>}
-      </div>
-
-      {/* ── ST Status + Phase 2: Persistence side by side ── */}
-      <div className={`grid gap-2 ${stPersistence ? "grid-cols-2" : "grid-cols-1"}`}>
-
-        {/* ST Status */}
-        <div className={`flex flex-col justify-center px-3 py-2.5 rounded border text-xs font-mono
-          ${lastOptDir === 1 ? "border-[#00ff88]/30 bg-[#00ff88]/5" : "border-[#ff4757]/30 bg-[#ff4757]/5"}`}>
-          <div className="flex items-center gap-2 flex-wrap mb-1.5">
-            <span className={`font-bold ${lastOptDir === 1 ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-              {lastOptDir === 1 ? "🟢 ST BULLISH" : "🔴 ST BEARISH"}
-            </span>
-            {optLabel && (
-              <span className="text-[#ffa502] border border-[#ffa502]/40 rounded px-1.5 py-0.5 text-[0.6rem]">
-                {optLabel}
-              </span>
-            )}
-          </div>
-          {lastOptST > 0 && (
-            <div className="text-[#4a6080]">ST line: <span className="text-[#c8d8f0]">{lastOptST.toFixed(2)}</span></div>
-          )}
-          {lastOptDir === 1 && (
-            <div className="text-[#4a6080]">Dist to stop: <span className="text-[#c8d8f0]">{stDist.toFixed(1)}%</span></div>
-          )}
-          {lastOptDir === 1 && openRet !== null && openRet !== undefined && (
-            <div className="text-[#4a6080]">Open P&L:{" "}
-              <span className={`font-bold ${openRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}`}>
-                {openRet >= 0 ? "+" : ""}{openRet.toFixed(1)}%
-              </span>
-            </div>
-          )}
-          {lastOptDir === -1 && (
-            <div className="text-[#4a6080] text-[0.6rem] mt-1">Wait for bullish flip before entry</div>
-          )}
-        </div>
-
-        {/* Phase 2: Persistence Histogram */}
-        {stPersistence && (
-          <PersistenceHistogram persistence={stPersistence} stDir={lastOptDir} />
-        )}
       </div>
 
       {/* Score Trades */}
