@@ -35,4 +35,10 @@ describe("assembleDigestPrompt", () => {
     const p = assembleDigestPrompt(inputs);
     expect(p).toContain("—");
   });
+  it("includes a column legend disambiguating stop/flip and Kronos/TimesFM", () => {
+    const p = assembleDigestPrompt(inputs);
+    expect(p).toContain("COLUMN LEGEND");
+    expect(p).toContain("NOT an entry or flip trigger");
+    expect(p).toContain("PRIMARY forecast");
+  });
 });

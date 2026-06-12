@@ -10,6 +10,20 @@ export interface DigestInputs {
   timesfm: Record<string, TimesfmRawEntry | { _metadata?: unknown }>;
 }
 
+const COLUMN_LEGEND = [
+  "COLUMN LEGEND — read before interpreting:",
+  "- dir: SuperTrend direction. up = long signal active; down = exited / no long.",
+  "- TT: Trend-Template score 0-7 (structural/fundamental quality; 6-7 = elite).",
+  "- px: latest price.",
+  "- stop: trailing SuperTrend band = the EXIT level for an open long. NOT an entry or flip trigger.",
+  "- flip%: distance from px to the flip trigger (the level that flips dir). ~0% = knife-edge, about to flip. THIS is the actionable trigger to watch, not stop.",
+  "- K20d: Kronos 20-day model projection. NOISY / mean-reverting — weak corroboration only; \"noise\" = discard. A separate model from TimesFM.",
+  "- TF20d: TimesFM 20-day projection = the PRIMARY forecast. Never attribute a K20d value to TimesFM; they are different models.",
+  "- fRisk: TimesFM SuperTrend flip-risk (low/medium/high) = likelihood the current dir flips.",
+  "- #ev: count of recent flip events (whipsaw proxy; high = unreliable, low-follow-through signals).",
+  "- *opt: optimized params; absent = default ATR10 x3.0.",
+].join("\n");
+
 function pad(s: string, n: number): string { return (s + " ".repeat(n)).slice(0, n); }
 
 export function assembleDigestPrompt({ state, kronos, timesfm }: DigestInputs): string {
@@ -43,6 +57,8 @@ export function assembleDigestPrompt({ state, kronos, timesfm }: DigestInputs): 
     DIGEST_EDITORIAL_SPEC,
     "",
     `DATA (KV state v${state.version}, as of ${state.updatedAt}; "*opt" = optimized params, else default ATR10 x3.0):`,
+    COLUMN_LEGEND,
+    "",
     header,
     ...rows,
     "",
