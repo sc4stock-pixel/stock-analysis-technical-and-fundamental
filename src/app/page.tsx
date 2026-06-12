@@ -10,6 +10,7 @@ import InfoTooltip from "@/components/InfoTooltip";
 import StockCard, { TABS, Tab } from "@/components/StockCard";
 import dynamic from "next/dynamic";
 import AlertsPanel from "@/components/AlertsPanel";
+import DigestPrompt from "@/components/DigestPrompt";
 import { UserButton } from "@clerk/nextjs";
 import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 import NavPanel from "@/components/NavPanel";
@@ -510,6 +511,11 @@ export default function Dashboard() {
           <button onClick={() => setTgMsg(null)} className="ml-4 opacity-60 hover:opacity-100 text-[#6b85a0]">✕</button>
         </div>
       )}
+
+      {/* DAILY DIGEST PANEL — top-of-dashboard banner for copy-to-LLM workflow */}
+      <div className="mx-4 mt-4">
+        <DigestPrompt />
+      </div>
 
       {/* CONFIG PANEL */}
       {showConfig && (
