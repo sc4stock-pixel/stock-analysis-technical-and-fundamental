@@ -315,8 +315,10 @@ export function buildEodReport(
     lines.push(...buildForecastSection(ordered, timesfmData, kronosData));
   }
 
-  const errorCount = results.length - valid.length;
-  const errorNote  = errorCount > 0 ? ` · ⚠️ ${errorCount} failed` : "";
+  const failed = results.filter(r => !valid.includes(r));
+  const errorNote = failed.length > 0
+    ? ` · ⚠️ ${failed.length} failed: ${failed.map(r => htmlEscape(r.symbol)).join(", ")}`
+    : "";
   lines.push(`\n<i>${valid.length} stocks monitored · HKT ${timeStr}${errorNote}</i>`);
 
   return lines.join("\n");

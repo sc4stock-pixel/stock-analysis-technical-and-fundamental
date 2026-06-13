@@ -46,7 +46,27 @@ export async function getSTParams(symbol: string): Promise<{ atrPeriod: number; 
   return { atrPeriod: entry.atr_period, multiplier: entry.multiplier };
 }
 
+// Yahoo's chart API occasionally rate-limits/times out a single ticker out of a
+// batch of parallel requests from the same IP. One retry after a short delay
+// recovers most of these without materially slowing the whole batch.
+const YAHOO_FETCH_RETRIES = 1;
+const YAHOO_RETRY_DELAY_MS = 500;
+
 export async function fetchYahooOHLCV(
+  symbol: string,
+  lookbackDays: number
+): Promise<{ bars: RawOHLCV[]; currentPrice: number; changePct: number } | null> {
+  for (let attempt = 0; attempt <= YAHOO_FETCH_RETRIES; attempt++) {
+    const result = await fetchYahooOHLCVOnce(symbol, lookbackDays);
+    if (result) return result;
+    if (attempt < YAHOO_FETCH_RETRIES) {
+      await new Promise(r => setTimeout(r, YAHOO_RETRY_DELAY_MS));
+    }
+  }
+  return null;
+}
+
+async function fetchYahooOHLCVOnce(
   symbol: string,
   lookbackDays: number
 ): Promise<{ bars: RawOHLCV[]; currentPrice: number; changePct: number } | null> {
