@@ -1,5 +1,55 @@
 import { describe, it, expect } from "vitest";
-import { isActionable, type ActionableRow, daysAgo, clientFlip } from "./alert-model";
+import { isActionable, type ActionableRow, daysAgo, clientFlip, buildAlertModel } from "./alert-model";
+import type { WorkerEvent, WorkerTickerState } from "@/types/worker-state";
+
+const NOW = new Date("2026-06-17T12:00:00+08:00");
+
+const wEvents: WorkerEvent[] = [
+  { type: "flip_exit",   ticker: "SPY",     region: "us", session: "eod",      barDate: "2026-06-16", confirmed: true },
+  { type: "flip_exit",   ticker: "MSFT",    region: "us", session: "eod",      barDate: "2026-06-16", confirmed: true },
+  { type: "tt_stripped", ticker: "MSFT",    region: "us", session: "eod",      barDate: "2026-06-16", confirmed: true },
+  { type: "flip_buy",    ticker: "3033.HK", region: "hk", session: "eod",      barDate: "2026-06-15", confirmed: true },
+  { type: "flip_exit",   ticker: "3033.HK", region: "hk", session: "eod",      barDate: "2026-06-14", confirmed: true },
+  { type: "flip_buy",    ticker: "3033.HK", region: "hk", session: "eod",      barDate: "2026-06-12", confirmed: true },
+  { type: "flip_buy",    ticker: "0939.HK", region: "hk", session: "eod",      barDate: "2026-06-17", confirmed: true },
+];
+const wTickers = {
+  "SPY": { dir: "down" }, "MSFT": { dir: "down" },
+  "3033.HK": { dir: "down" }, "0939.HK": { dir: "up" },
+} as unknown as Record<string, WorkerTickerState>;
+
+describe("buildAlertModel — worker actionable rows", () => {
+  const m = buildAlertModel(wEvents, wTickers, [], { now: NOW });
+  const bySym = (s: string) => m.actOnThis.find(r => r.symbol === s)!;
+
+  it("emits one folded row per ticker with a current flip in window", () => {
+    expect(new Set(m.actOnThis.map(r => r.symbol))).toEqual(new Set(["SPY", "MSFT", "3033.HK", "0939.HK"]));
+  });
+  it("uses entered/exited uptrend copy from stance", () => {
+    expect(bySym("0939.HK").change).toBe("entered uptrend");
+    expect(bySym("SPY").change).toBe("exited uptrend");
+    expect(bySym("0939.HK").stance).toBe("long");
+    expect(bySym("SPY").stance).toBe("out");
+  });
+  it("folds a whipsawing ticker into one row with a flip count", () => {
+    const r = bySym("3033.HK");
+    expect(r.whipsaw).toBe(true);
+    expect(r.arrow).toBe("↔");
+    expect(r.change).toBe("whipsawing · 3 flips/2wk");
+    expect(r.rawCount).toBe(3);
+  });
+  it("escalates a coincident TT strip into the flip row", () => {
+    expect(bySym("MSFT").ttFlag).toBe("+ TT 5→4");
+  });
+  it("sorts by severity: double-signal/exits before entries", () => {
+    const order = m.actOnThis.map(r => r.symbol);
+    expect(order.indexOf("MSFT")).toBeLessThan(order.indexOf("0939.HK"));
+    expect(order.indexOf("SPY")).toBeLessThan(order.indexOf("0939.HK"));
+  });
+  it("sets TODAY (barsSince 0) for a same-day flip", () => {
+    expect(bySym("0939.HK").barsSince).toBe(0);
+  });
+});
 import type { StockAnalysisResult } from "@/types";
 
 const row = (symbol: string): ActionableRow => ({
