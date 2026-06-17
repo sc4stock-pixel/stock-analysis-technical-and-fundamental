@@ -1,6 +1,7 @@
 import { StockAnalysisResult, SepaMetadata, TrendTemplateCriteria } from "@/types";
 import { supertrend } from "@/lib/indicators";
 import { holidayStatus } from "@/lib/telegram-report";
+import { buildAlertModel } from "@/lib/alert-model";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -261,8 +262,23 @@ export function buildTelegramMessage(
     return lines;
   };
 
+  // Act-on-this — client-stance (Engine A has no worker events → pass []).
+  const actRows = buildAlertModel([], {}, valid as unknown as StockAnalysisResult[]).actOnThis;
+  let actBlock = "";
+  if (actRows.length > 0) {
+    const rows = actRows.map(r => {
+      const sym = dispSym(r.symbol).padEnd(6);
+      const tag = r.stance === "out" ? "OUT" : "LONG";
+      const when = r.barsSince === 0 ? "today" : `${r.barsSince}d`;
+      const tt = r.ttFlag ? ` ${r.ttFlag.replace("→", "->")}` : "";  // defensive; ttFlag is empty on this surface
+      return `${sym} ${r.change}${tt} (${when}) [${tag}]`;
+    });
+    actBlock = `\n⚡ <b>ACT ON THIS</b>\n${preBlock(rows)}`;
+  }
+
   // ---------- Compose message ----------
   const lines: string[] = [headerLine, dataState];
+  if (actBlock) lines.push(actBlock);
 
   // ACTIONABLE EXITS — top priority
   if (exitSignals.length > 0) {
