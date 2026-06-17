@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { isActionable, type ActionableRow, daysAgo, clientFlip, buildAlertModel } from "./alert-model";
 import type { WorkerEvent, WorkerTickerState } from "@/types/worker-state";
+import { reconcileWorkerEvents } from "@/lib/worker-events";
 
 const NOW = new Date("2026-06-17T12:00:00+08:00");
 
@@ -91,5 +92,42 @@ describe("clientFlip", () => {
     expect(f.flipType).toBe("BULLISH");
     expect(f.barsSince).toBeGreaterThanOrEqual(0);
     expect(f.barsSince).toBeLessThanOrEqual(2);
+  });
+});
+
+const longBars = (dirUpLast: boolean) => {
+  const base = Array.from({ length: 20 }, (_, i) => ({ high: 60 + i, low: 58 + i, close: 59 + i }));
+  const tail = dirUpLast
+    ? [{ high: 95, low: 90, close: 94 }, { high: 110, low: 94, close: 109 }]
+    : [{ high: 60, low: 40, close: 41 }, { high: 50, low: 30, close: 31 }];
+  return [...base, ...tail];
+};
+
+describe("buildAlertModel — client gap-fill + otherAlerts + audit", () => {
+  it("passes the full reconciled list through as auditLog", () => {
+    const m = buildAlertModel(wEvents, wTickers, [], { now: NOW });
+    expect(m.auditLog.length).toBe(reconcileWorkerEvents(wEvents, wTickers).length);
+  });
+
+  it("gap-fills a client flip only for tickers the worker did not report", () => {
+    const results = [
+      { symbol: "NVDA", exchange: "US", chart_bars: longBars(false),
+        st_opt_params: { atrPeriod: 10, multiplier: 3.0 } },
+      { symbol: "SPY", exchange: "US", chart_bars: longBars(false),
+        st_opt_params: { atrPeriod: 10, multiplier: 3.0 } },
+    ] as unknown as StockAnalysisResult[];
+    const m = buildAlertModel(wEvents, wTickers, results, { now: NOW });
+    const syms = m.actOnThis.filter(r => r.source === "client").map(r => r.symbol);
+    expect(syms).toContain("NVDA");
+    expect(syms).not.toContain("SPY");
+  });
+
+  it("routes RSI divergence into otherAlerts", () => {
+    const results = [
+      { symbol: "TSM", exchange: "US",
+        backtest: { rsi_divergence_type: "Bearish" } },
+    ] as unknown as StockAnalysisResult[];
+    const m = buildAlertModel([], {}, results, { now: NOW });
+    expect(m.otherAlerts.some(a => a.alertType === "rsi_div" && a.symbol === "TSM")).toBe(true);
   });
 });

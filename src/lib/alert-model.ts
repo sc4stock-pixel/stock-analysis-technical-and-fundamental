@@ -116,6 +116,68 @@ function workerActionable(
   return rows;
 }
 
+function clientActionable(
+  results: StockAnalysisResult[],
+  reportedTickers: Set<string>,
+  now: Date,
+): ActionableRow[] {
+  const rows: ActionableRow[] = [];
+  for (const r of results) {
+    if (reportedTickers.has(r.symbol)) continue;          // worker is truth — no double-render
+    const { flipType, barsSince } = clientFlip(r);
+    if (!flipType || barsSince > FLIP_ALERT_DAYS) continue;
+    const stance: Stance = flipType === "BULLISH" ? "long" : "out";
+    rows.push({
+      symbol: r.symbol,
+      arrow: stance === "long" ? "▲" : "▼",
+      stance,
+      change: stance === "long" ? "entered uptrend" : "exited uptrend",
+      barsSince, whipsaw: false,
+      severity: severityOf(stance, false, undefined),
+      source: "client",
+    });
+  }
+  return rows;
+}
+
+function extractOtherAlerts(results: StockAnalysisResult[]): InfoAlert[] {
+  const out: InfoAlert[] = [];
+  for (const r of results) {
+    const bt = r.backtest;
+    if (bt?.rsi_divergence_type && bt.rsi_divergence_type !== "None") {
+      out.push({ icon: "⚠️", text: `<strong>${r.symbol}</strong>: RSI ${bt.rsi_divergence_type} Divergence`,
+        alertType: "rsi_div", symbol: r.symbol });
+    }
+    if (r.kelly?.correlated_with) {
+      out.push({ icon: "🔗", text: `<strong>${r.symbol}</strong>: Correlated with ${r.kelly.correlated_with}`,
+        alertType: "correlation", symbol: r.symbol });
+    }
+    const patterns = bt?.candlestick_patterns || [];
+    const recent = patterns.filter(p =>
+      (p.bar_index !== undefined && p.bar_index <= 3) ||
+      (p.label === "Latest" || /^[1-3]d ago/.test(p.label ?? "")));
+    const confirm: Record<string, string[]> = {
+      BUY:  ["Hammer", "Inverted Hammer", "Bull Engulfing", "Bull Marubozu"],
+      SELL: ["Shooting Star", "Bear Engulfing", "Bear Marubozu", "Hanging Man"],
+    };
+    const caution: Record<string, string[]> = {
+      BUY:  ["Shooting Star", "Bear Engulfing", "Bear Marubozu", "Hanging Man"],
+      SELL: ["Hammer", "Inverted Hammer", "Bull Engulfing", "Bull Marubozu"],
+    };
+    for (const p of recent) {
+      const label = p.label === "Latest" ? "Today" : p.label || "";
+      if ((confirm[r.signal] || []).includes(p.pattern)) {
+        out.push({ icon: "✅", text: `<strong>${r.symbol}</strong>: ${p.pattern} (${label}) - Confirms ${r.signal}`,
+          alertType: "candlestick", symbol: r.symbol });
+      } else if ((caution[r.signal] || []).includes(p.pattern)) {
+        out.push({ icon: "⚠️", text: `<strong>${r.symbol}</strong>: ${p.pattern} (${label}) - Caution on ${r.signal}`,
+          alertType: "candlestick", symbol: r.symbol });
+      }
+    }
+  }
+  return out;
+}
+
 export function buildAlertModel(
   workerEvents: WorkerEvent[],
   tickers: Record<string, WorkerTickerState>,
@@ -126,12 +188,17 @@ export function buildAlertModel(
   const now = opts.now ?? new Date();
   const reconciled = reconcileWorkerEvents(workerEvents, tickers);
 
-  let actOnThis = workerActionable(reconciled, tickers, window, now);
-  actOnThis = actOnThis
-    .filter(r => isActionable(r, opts.heldSet))
+  const workerRows = workerActionable(reconciled, tickers, window, now)
+    .filter(r => isActionable(r, opts.heldSet));
+
+  const reportedTickers = new Set(workerEvents.map(e => e.ticker));
+  const clientRows = clientActionable(clientResults, reportedTickers, now)
+    .filter(r => isActionable(r, opts.heldSet));
+
+  const actOnThis = [...workerRows, ...clientRows]
     .sort((a, b) => a.severity - b.severity || a.barsSince - b.barsSince);
 
-  return { actOnThis, auditLog: reconciled, otherAlerts: [] };
+  return { actOnThis, auditLog: reconciled, otherAlerts: extractOtherAlerts(clientResults) };
 }
 
 /** Most-recent SuperTrend flip from a result's own bars (client-stance gap-fill).
