@@ -62,11 +62,13 @@ export interface ClientFlip {
 
 const FLIP_SET = new Set<WorkerEvent["type"]>(["flip_buy", "flip_exit"]);
 
+// Trend Template passes at criteria_met >= 5 (see CLAUDE.md). Derive the escalation
+// label from the threshold so it can't silently go stale if the threshold changes.
+const TT_PASS = 5;
+
 function ttFlagFor(events: ReconciledEvent[]): string | undefined {
-  const stripped = events.find(e => e.type === "tt_stripped");
-  if (stripped) return "+ TT 5→4";
-  const regained = events.find(e => e.type === "tt_regained");
-  if (regained) return "+ TT 4→5";
+  if (events.some(e => e.type === "tt_stripped")) return `+ TT ${TT_PASS}→${TT_PASS - 1}`;
+  if (events.some(e => e.type === "tt_regained")) return `+ TT ${TT_PASS - 1}→${TT_PASS}`;
   return undefined;
 }
 
