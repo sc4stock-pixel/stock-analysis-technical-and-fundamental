@@ -1,5 +1,9 @@
 import { SepaMetadata, TrendTemplateCriteria, KronosForecasts, TimesfmForecasts } from "@/types";
 import { htmlEscape } from "@/lib/telegram";
+import { buildAlertModel } from "@/lib/alert-model";
+import type { StockAnalysisResult } from "@/types";
+
+const dispSymForReport = (s: string) => s.replace(".HK", "");
 
 type Flip = { flipType: "BULLISH" | "BEARISH" | null; barsSince: number };
 
@@ -107,7 +111,7 @@ function groupedInline(stocks: SlimResult[], perLine = 3): string[] {
       const chunk = group.slice(i, i + perLine);
       const flag  = flagFor(chunk[0].exchange);
       const parts = chunk.map(r =>
-        `<b>${htmlEscape(r.symbol)}</b> (${fmtChg(r.change_pct)})`
+        `<b>${htmlEscape(dispSymForReport(r.symbol))}</b> (${fmtChg(r.change_pct)})`
       );
       lines.push(`  ${flag} ${parts.join(" · ")}`);
     }
@@ -211,6 +215,8 @@ export function buildEodReport(
 ): string {
   const valid = results.filter(r => !r.error && r.current_price > 0);
 
+  const actRows = buildAlertModel([], {}, valid as unknown as StockAnalysisResult[]).actOnThis;
+
   const now = new Date();
   const dateStr = now.toLocaleDateString("en-US", {
     weekday: "short", month: "short", day: "numeric", year: "numeric",
@@ -247,10 +253,6 @@ export function buildEodReport(
     .sort((a, b) => (b.sepa_metadata?.sepa_score ?? 0) - (a.sepa_metadata?.sepa_score ?? 0));
   const bearish = ordered.filter(r => r.st_direction !== 1);
 
-  const recentFlips = valid
-    .filter(r => r._flip?.flipType && (r._flip?.barsSince ?? 999) <= 2)
-    .sort((a, b) => (a._flip?.barsSince ?? 0) - (b._flip?.barsSince ?? 0));
-
   const proximity = detectProximity(valid);
 
   const lines: string[] = [header];
@@ -263,14 +265,14 @@ export function buildEodReport(
     lines.push(`⚠️ <b>${which}</b> (${htmlEscape(holiday.label)})`);
   }
 
-  // RECENT FLIPS — moved up top per refined template
-  if (recentFlips.length > 0) {
-    lines.push(`\n⚡ <b>RECENT FLIPS</b> (≤2 bars)`);
-    recentFlips.forEach(r => {
-      const flip = r._flip!;
-      const when = flip.barsSince === 0 ? "today" : `${flip.barsSince} bar${flip.barsSince > 1 ? "s" : ""} ago`;
-      const icon = flip.flipType === "BULLISH" ? "📈" : "📉";
-      lines.push(`  • <b>${htmlEscape(r.symbol)}</b> → ${icon} ${flip.flipType} (${when})`);
+  // ACT ON THIS — replaces the old RECENT FLIPS block
+  if (actRows.length > 0) {
+    lines.push(`\n⚡ <b>ACT ON THIS</b>`);
+    actRows.forEach(r => {
+      const tag = r.stance === "out" ? "🔴 OUT" : "🟢 LONG";
+      const when = r.barsSince === 0 ? "today" : `${r.barsSince}d ago`;
+      const tt = r.ttFlag ? ` ${htmlEscape(r.ttFlag.replace("→", "->"))}` : "";
+      lines.push(`  • <b>${htmlEscape(dispSymForReport(r.symbol))}</b> ${r.change}${tt} (${when}) — ${tag}`);
     });
   }
 

@@ -2,27 +2,14 @@
 import { useState, useMemo } from "react";
 import InfoTooltip from "@/components/InfoTooltip";
 import { StockAnalysisResult } from "@/types";
-import { supertrend, ema, sma } from "@/lib/indicators";
 import type { WorkerState } from "@/types/worker-state";
-import { reconcileWorkerEvents, type ReconciledEvent } from "@/lib/worker-events";
+import type { ReconciledEvent } from "@/lib/worker-events";
+import { buildAlertModel, type ActionableRow } from "@/lib/alert-model";
 
 interface Props {
   results: StockAnalysisResult[];
   workerState?: WorkerState | null;
 }
-
-interface Alert {
-  icon: string;
-  text: string;
-  priority: number; // lower = higher priority
-  // Automation metadata — exposed as data-* attributes for external tooling
-  alertType: "reentry" | "flip" | "score_buy" | "rsi_div" | "candlestick" | "correlation";
-  symbol?: string;
-  flipType?: "BULLISH" | "BEARISH";
-  barsSince?: number;
-}
-
-const FLIP_ALERT_DAYS = 3;
 
 const EVENT_META: Record<string, { icon: string; label: string; cls: string }> = {
   flip_buy:    { icon: "⬆", label: "SuperTrend FLIP BUY",  cls: "border-[#00ff88]/25 bg-[#00ff88]/5" },
@@ -61,331 +48,67 @@ function workerEventRow(ev: ReconciledEvent, idx: number) {
   );
 }
 
-function computeOptimizedFlip(
-  result: StockAnalysisResult
-): { flipType: "BULLISH" | "BEARISH" | null; barsSince: number; stopAtFlip: number | null; closeAtFlip: number | null } {
-  const bars = result.chart_bars;
-  if (!bars || bars.length < 2) return { flipType: null, barsSince: 999, stopAtFlip: null, closeAtFlip: null };
-
-  const optAtr = result.st_opt_params?.atrPeriod ?? 10;
-  const optMul = result.st_opt_params?.multiplier ?? 3.0;
-
-  const highs  = bars.map(b => b.high);
-  const lows   = bars.map(b => b.low);
-  const closes = bars.map(b => b.close);
-
-  const [stArr, dir] = supertrend(highs, lows, closes, optAtr, optMul);
-  if (dir.length < 2) return { flipType: null, barsSince: 999, stopAtFlip: null, closeAtFlip: null };
-
-  for (let i = dir.length - 1; i >= 1; i--) {
-    if (dir[i] !== dir[i - 1]) {
-      const barsSince   = dir.length - 1 - i;
-      const stopAtFlip  = stArr[i - 1] ?? null;  // bullish stop from bar before flip
-      const closeAtFlip = bars[i].close;          // close on the flip bar
-      if (dir[i] === 1)  return { flipType: "BULLISH", barsSince, stopAtFlip, closeAtFlip };
-      if (dir[i] === -1) return { flipType: "BEARISH", barsSince, stopAtFlip, closeAtFlip };
-    }
-  }
-  return { flipType: null, barsSince: 999, stopAtFlip: null, closeAtFlip: null };
-}
-
-function computeSMA50Reentry(
-  result: StockAnalysisResult
-): { reentry: boolean; barsSince: number } {
-  const bars = result.chart_bars;
-  if (!bars || bars.length < 52) return { reentry: false, barsSince: 999 };
-
-  const optAtr = result.st_opt_params?.atrPeriod ?? 10;
-  const optMul = result.st_opt_params?.multiplier ?? 3.0;
-
-  const highs  = bars.map(b => b.high);
-  const lows   = bars.map(b => b.low);
-  const closes = bars.map(b => b.close);
-
-  const [, dir] = supertrend(highs, lows, closes, optAtr, optMul);
-
-  const currentDir = dir[dir.length - 1] ?? -1;
-  if (currentDir !== 1) return { reentry: false, barsSince: 999 };
-
-  const sma50arr = sma(closes, 50);
-
-  const n = closes.length;
-  for (let lookback = 1; lookback <= 2; lookback++) {
-    const i = n - 1 - (lookback - 1);
-    if (i < 1) continue;
-    const curClose  = closes[i];
-    const prevClose = closes[i - 1];
-    const curSMA50  = sma50arr[i];
-    const prevSMA50 = sma50arr[i - 1];
-    if (
-      curClose  != null && prevClose != null &&
-      curSMA50  != null && prevSMA50 != null &&
-      !isNaN(curSMA50) && !isNaN(prevSMA50) &&
-      curClose > curSMA50 && prevClose <= prevSMA50
-    ) {
-      return { reentry: true, barsSince: lookback - 1 };
-    }
-  }
-
-  return { reentry: false, barsSince: 999 };
-}
-
-function generateAlerts(results: StockAnalysisResult[]): Alert[] {
-  const alerts: Alert[] = [];
-
-  for (const r of results) {
-    const bt = r.backtest;
-    const comparison = r.comparison;
-
-    // 1. RSI divergence
-    if (bt?.rsi_divergence_type && bt.rsi_divergence_type !== "None") {
-      alerts.push({
-        icon: "⚠️",
-        text: `<strong>${r.symbol}</strong>: RSI ${bt.rsi_divergence_type} Divergence`,
-        priority: 5,
-        alertType: "rsi_div",
-        symbol: r.symbol,
-      });
-    }
-
-    // 2. Correlation
-    if (r.kelly?.correlated_with) {
-      alerts.push({
-        icon: "🔗",
-        text: `<strong>${r.symbol}</strong>: Correlated with ${r.kelly.correlated_with}`,
-        priority: 8,
-        alertType: "correlation",
-        symbol: r.symbol,
-      });
-    }
-
-    const stReturn500    = comparison?.supertrend?.total_return ?? 0;
-    const stReturn250    = comparison?.supertrend?.total_return_250d ?? 0;
-    const scoreReturn500 = comparison?.score?.total_return ?? bt?.total_return ?? 0;
-    const scoreReturn250 = comparison?.score?.total_return_250d ?? 0;
-    const scoreSignal    = r.signal;
-
-    // 3. SMA50 crossover re-entry (HIGHEST PRIORITY — actionable BUY signal)
-    const { reentry, barsSince: reentryBars } = computeSMA50Reentry(r);
-    if (reentry) {
-      const daysText = reentryBars === 0 ? "TODAY" : `${reentryBars}d ago`;
-      const stOut500 = stReturn500 > scoreReturn500;
-      const stOut250 = stReturn250 > scoreReturn250;
-      if (stOut500 || stOut250) {
-        const period = stOut500 ? "500d" : "250d";
-        const stRet  = stOut500 ? stReturn500 : stReturn250;
-        const scRet  = stOut500 ? scoreReturn500 : scoreReturn250;
-        alerts.push({
-          icon: "🚀",
-          text: `<strong>${r.symbol}</strong>: ST RE-ENTRY ✅ Price crossed above SMA50 (${daysText}) — ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% vs Sc: ${scRet >= 0 ? "+" : ""}${scRet.toFixed(1)}%`,
-          priority: 1,
-          alertType: "reentry",
-          symbol: r.symbol,
-          flipType: "BULLISH",
-          barsSince: reentryBars,
-        });
-      } else {
-        alerts.push({
-          icon: "🚀",
-          text: `<strong>${r.symbol}</strong>: ST RE-ENTRY ✅ Price crossed above SMA50 (${daysText}) — ST bullish re-entry triggered`,
-          priority: 1,
-          alertType: "reentry",
-          symbol: r.symbol,
-          flipType: "BULLISH",
-          barsSince: reentryBars,
-        });
-      }
-    }
-
-    // 4. SuperTrend flip alerts (optimized)
-    const { flipType, barsSince, stopAtFlip, closeAtFlip } = computeOptimizedFlip(r);
-
-    if (flipType === "BULLISH" && barsSince <= FLIP_ALERT_DAYS) {
-      const daysText = barsSince === 0 ? "TODAY" : `${barsSince}d ago`;
-      const stOut500 = stReturn500 > scoreReturn500;
-      const stOut250 = stReturn250 > scoreReturn250;
-
-      if (!reentry) {
-        if (stOut500 || stOut250) {
-          const period = stOut500 ? "500d" : "250d";
-          const stRet  = stOut500 ? stReturn500 : stReturn250;
-          const scRet  = stOut500 ? scoreReturn500 : scoreReturn250;
-          alerts.push({
-            icon: "🟢",
-            text: `<strong>${r.symbol}</strong>: ST FLIPPED BULLISH 📈 (${daysText}) - ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% vs Sc: ${scRet >= 0 ? "+" : ""}${scRet.toFixed(1)}%`,
-            priority: 2,
-            alertType: "flip",
-            symbol: r.symbol,
-            flipType: "BULLISH",
-            barsSince,
-          });
-        } else if (scoreSignal !== "BUY") {
-          alerts.push({
-            icon: "🟢",
-            text: `<strong>${r.symbol}</strong>: SuperTrend FLIPPED BULLISH 📈 (${daysText})`,
-            priority: 2,
-            alertType: "flip",
-            symbol: r.symbol,
-            flipType: "BULLISH",
-            barsSince,
-          });
-        }
-      }
-    } else if (flipType === "BEARISH" && barsSince <= FLIP_ALERT_DAYS) {
-      const daysText = barsSince === 0 ? "TODAY" : `${barsSince}d ago`;
-      const stOut500 = stReturn500 > scoreReturn500;
-      const stOut250 = stReturn250 > scoreReturn250;
-
-      // Stop/violation detail — same data as Telegram exit block
-      const isHK = r.exchange === "HK";
-      const fmtPx = (n: number) => n.toFixed(2);
-      let stopDetail = "";
-      if (stopAtFlip !== null && stopAtFlip > 0 && closeAtFlip !== null) {
-        const violated = ((closeAtFlip - stopAtFlip) / stopAtFlip) * 100;
-        const violatedStr = violated >= 0 ? `+${violated.toFixed(1)}%` : `${violated.toFixed(1)}%`;
-        stopDetail = ` | ST Stop: ${fmtPx(stopAtFlip)}${isHK ? "" : ""} | Violated by ${violatedStr} | Close: ${fmtPx(closeAtFlip)}`;
-      }
-
-      if (stOut500 || stOut250) {
-        const period = stOut500 ? "500d" : "250d";
-        const stRet  = stOut500 ? stReturn500 : stReturn250;
-        alerts.push({
-          icon: "🔴",
-          text: `<strong>${r.symbol}</strong>: ST FLIPPED BEARISH 📉 (${daysText}) - ST ${period}: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}% outperforms${stopDetail}`,
-          priority: 2,
-          alertType: "flip",
-          symbol: r.symbol,
-          flipType: "BEARISH",
-          barsSince,
-        });
-      } else {
-        alerts.push({
-          icon: "🔴",
-          text: `<strong>${r.symbol}</strong>: ST FLIPPED BEARISH 📉 (${daysText})${stopDetail}`,
-          priority: 2,
-          alertType: "flip",
-          symbol: r.symbol,
-          flipType: "BEARISH",
-          barsSince,
-        });
-      }
-    }
-
-    // 5. Score BUY signal
-    const recentBullishFlip = flipType === "BULLISH" && barsSince <= FLIP_ALERT_DAYS;
-    if (scoreSignal === "BUY" && !recentBullishFlip) {
-      const scOut500 = scoreReturn500 > stReturn500;
-      const scOut250 = scoreReturn250 > stReturn250;
-
-      if (scOut500 || scOut250) {
-        const period = scOut500 ? "500d" : "250d";
-        const scRet  = scOut500 ? scoreReturn500 : scoreReturn250;
-        const stRet  = scOut500 ? stReturn500 : stReturn250;
-        alerts.push({
-          icon: "✅",
-          text: `<strong>${r.symbol}</strong>: Score BUY Signal (Sc ${period}: ${scRet >= 0 ? "+" : ""}${scRet.toFixed(1)}% vs ST: ${stRet >= 0 ? "+" : ""}${stRet.toFixed(1)}%)`,
-          priority: 3,
-          alertType: "score_buy",
-          symbol: r.symbol,
-        });
-      }
-    }
-
-    // 6. Candlestick patterns
-    const patterns = bt?.candlestick_patterns || [];
-    const signal = r.signal;
-    const recentPatterns = patterns.filter(p => {
-      if (p.bar_index !== undefined && p.bar_index <= 3) return true;
-      if (p.label && (p.label === "Latest" || /^[1-3]d ago/.test(p.label))) return true;
-      return false;
-    });
-
-    const confirmBay: Record<string, string[]> = {
-      BUY:  ["Hammer", "Inverted Hammer", "Bull Engulfing", "Bull Marubozu"],
-      SELL: ["Shooting Star", "Bear Engulfing", "Bear Marubozu", "Hanging Man"],
-    };
-    const cautionBay: Record<string, string[]> = {
-      BUY:  ["Shooting Star", "Bear Engulfing", "Bear Marubozu", "Hanging Man"],
-      SELL: ["Hammer", "Inverted Hammer", "Bull Engulfing", "Bull Marubozu"],
-    };
-
-    for (const p of recentPatterns) {
-      const label = p.label === "Latest" ? "Today" : p.label || "";
-      const curConfirm = confirmBay[signal] || [];
-      const curCaution = cautionBay[signal] || [];
-      if (curConfirm.includes(p.pattern)) {
-        alerts.push({
-          icon: "✅",
-          text: `<strong>${r.symbol}</strong>: ${p.pattern} (${label}) - Confirms ${signal}`,
-          priority: 4,
-          alertType: "candlestick",
-          symbol: r.symbol,
-        });
-      } else if (curCaution.includes(p.pattern)) {
-        alerts.push({
-          icon: "⚠️",
-          text: `<strong>${r.symbol}</strong>: ${p.pattern} (${label}) - Caution on ${signal}`,
-          priority: 5,
-          alertType: "candlestick",
-          symbol: r.symbol,
-        });
-      }
-    }
-  }
-
-  alerts.sort((a, b) => a.priority - b.priority);
-  return alerts;
-}
-
-// Flip and reentry alerts get visually distinct rows; all others use the standard row.
-function alertRowStyle(alert: Alert): string {
-  if (alert.alertType === "reentry") {
-    return "flex items-start gap-2 text-[0.7rem] rounded px-2 py-1.5 mb-1 border border-[#00ff88]/30 bg-[#00ff88]/5";
-  }
-  if (alert.alertType === "flip" && alert.flipType === "BULLISH") {
-    return "flex items-start gap-2 text-[0.7rem] rounded px-2 py-1.5 mb-1 border border-[#00d4ff]/25 bg-[#00d4ff]/5";
-  }
-  if (alert.alertType === "flip" && alert.flipType === "BEARISH") {
-    return "flex items-start gap-2 text-[0.7rem] rounded px-2 py-1.5 mb-1 border border-[#ff4757]/25 bg-[#ff4757]/5";
-  }
-  return "flex items-start gap-2 text-[0.7rem] border-b border-[#1e2d4a]/30 pb-1 last:border-0";
-}
-
-function renderText(text: string) {
-  return text.split(/(<strong>.*?<\/strong>)/g).map((part, i) =>
-    part.startsWith("<strong>") ? (
-      <strong key={i}>{part.replace(/<\/?strong>/g, "")}</strong>
-    ) : part
+function ActRow({ r }: { r: ActionableRow }) {
+  const out = r.stance === "out";
+  const border = r.whipsaw ? "border-[#ffa502]/34 bg-[#ffa502]/5"
+    : out ? (r.ttFlag ? "border-[#ff4757]/55 bg-[#ff4757]/8" : "border-[#ff4757]/30 bg-[#ff4757]/5")
+    : "border-[#00ff88]/30 bg-[#00ff88]/5";
+  const arrowColor = r.whipsaw ? "text-[#ffa502]" : out ? "text-[#ff4757]" : "text-[#00ff88]";
+  const pill = out ? "bg-[#ff4757]/15 text-[#ff6b78]" : "bg-[#00ff88]/14 text-[#3affa0]";
+  return (
+    <div>
+      <div className={`flex items-center gap-2 text-[0.7rem] rounded px-2 py-1.5 ${r.whipsaw ? "mb-0.5" : "mb-1.5"} border ${border}`}
+           data-alert-type="flip" data-symbol={r.symbol} data-stance={r.stance} data-bars-since={r.barsSince}>
+        <span className={`shrink-0 ${arrowColor}`}>{r.arrow}</span>
+        <span className="font-mono font-bold text-[#e6edf5]">{r.symbol.replace(".HK", "")}</span>
+        <span className="text-[#8aa0bd]">
+          {r.change}
+          {r.ttFlag && <span className="ml-1 font-mono text-[0.6rem] px-1 py-0.5 rounded bg-[#ffa502]/18 border border-[#ffa502]/45 text-[#ffa502]">{r.ttFlag}</span>}
+        </span>
+        <span className="flex-1" />
+        {r.barsSince === 0
+          ? <span className="font-mono text-[0.55rem] font-bold px-1 py-0.5 rounded bg-[#f59e0b]/20 border border-[#f59e0b]/40 text-[#f59e0b]">TODAY</span>
+          : <span className="font-mono text-[0.6rem] text-[#6b82a3]">{r.barsSince}d</span>}
+        <span className={`font-mono text-[0.6rem] font-medium px-1.5 py-0.5 rounded ${pill}`}>
+          {out ? "OUT · ST↓" : "LONG · ST↑"}
+        </span>
+      </div>
+      {r.whipsaw && r.rawCount != null && (
+        <div className="font-mono text-[0.6rem] text-[#4a6080] pl-7 pb-1.5">{r.rawCount} raw events folded → see audit log</div>
+      )}
+    </div>
   );
 }
 
 export default function AlertsPanel({ results, workerState }: Props) {
   const [collapsed, setCollapsed] = useState(false);
-  const alerts = useMemo(() => generateAlerts(results), [results]);
-
-  // Split into action alerts (flip/reentry) and informational
-  const actionAlerts = alerts.filter(a => a.alertType === "flip" || a.alertType === "reentry");
-  const infoAlerts   = alerts.filter(a => a.alertType !== "flip" && a.alertType !== "reentry");
-  const workerEvents = useMemo(
-    () => reconcileWorkerEvents(workerState?.events ?? [], workerState?.tickers ?? {}),
-    [workerState],
+  const model = useMemo(
+    () => buildAlertModel(
+      workerState?.events ?? [],
+      workerState?.tickers ?? {},
+      results,
+    ),
+    [results, workerState],
   );
+  const { actOnThis, auditLog, otherAlerts } = model;
+  const total = actOnThis.length + auditLog.length + otherAlerts.length;
+  if (total === 0) return null;
 
-  if (alerts.length === 0 && workerEvents.length === 0) return null;
+  const hasExit = actOnThis.some(r => r.stance === "out");
+  const pillCls = hasExit
+    ? "bg-[#ff4757]/15 border-[#ff4757]/40 text-[#ff6b78]"
+    : "bg-[#f59e0b]/15 border-[#f59e0b]/40 text-[#f59e0b]";
 
   return (
     <div className="bg-[#0f1629] border border-[#1e2d4a] rounded p-3 my-3">
-      <div
-        className="flex items-center justify-between cursor-pointer select-none"
-        onClick={() => setCollapsed(!collapsed)}
-      >
+      <div className="flex items-center justify-between cursor-pointer select-none" onClick={() => setCollapsed(!collapsed)}>
         <div className="flex items-center gap-2">
           <span className="text-[#f59e0b] text-sm font-bold">⚡ ALERTS</span>
           <InfoTooltip id="alerts" />
-          <span className="text-[#4a6080] text-xs">({alerts.length + workerEvents.length})</span>
-          {(actionAlerts.length + workerEvents.length) > 0 && (
-            <span className="text-[0.6rem] font-mono font-bold px-1.5 py-0.5 rounded bg-[#f59e0b]/15 border border-[#f59e0b]/30 text-[#f59e0b]">
-              {actionAlerts.length + workerEvents.length} SIGNAL{(actionAlerts.length + workerEvents.length) > 1 ? "S" : ""}
+          <span className="text-[#4a6080] text-xs">({total})</span>
+          {actOnThis.length > 0 && (
+            <span className={`text-[0.6rem] font-mono font-bold px-1.5 py-0.5 rounded border ${pillCls}`}>
+              {actOnThis.length} TO ACT
             </span>
           )}
         </div>
@@ -394,61 +117,32 @@ export default function AlertsPanel({ results, workerState }: Props) {
 
       {!collapsed && (
         <div className="mt-2">
-          {/* ── Autopilot worker signals — overlay from KV state ── */}
-          {workerEvents.length > 0 && (
+          {actOnThis.length > 0 && (
             <div className="mb-3">
-              <div className="text-[0.6rem] font-mono text-[#00d4ff] tracking-widest mb-1.5">
-                AUTOPILOT SIGNALS
-              </div>
-              {workerEvents.map((ev, i) => workerEventRow(ev, i))}
+              <div className="text-[0.6rem] font-mono text-[#e6edf5] tracking-widest mb-1.5">ACT ON THIS</div>
+              {actOnThis.map((r, i) => <ActRow key={`act-${i}`} r={r} />)}
             </div>
           )}
 
-          {/* ── Action alerts: flip + reentry — prominent section ── */}
-          {actionAlerts.length > 0 && (
-            <div className="mb-3">
-              <div className="text-[0.6rem] font-mono text-[#4a6080] tracking-widest mb-1.5">
-                SIGNAL ALERTS
-              </div>
-              {actionAlerts.map((alert, idx) => (
-                <div
-                  key={`action-${idx}`}
-                  className={alertRowStyle(alert)}
-                  data-alert-type={alert.alertType}
-                  data-symbol={alert.symbol ?? ""}
-                  data-flip-type={alert.flipType ?? ""}
-                  data-bars-since={alert.barsSince ?? ""}
-                >
-                  <span className="shrink-0 mt-0.5">{alert.icon}</span>
-                  <span className="flex-1">{renderText(alert.text)}</span>
-                  {alert.barsSince === 0 && (
-                    <span className="shrink-0 text-[0.55rem] font-mono font-bold px-1 py-0.5 rounded bg-[#f59e0b]/20 border border-[#f59e0b]/40 text-[#f59e0b] self-center">
-                      TODAY
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
+          {auditLog.length > 0 && (
+            <details className="mb-3">
+              <summary className="text-[0.6rem] font-mono text-[#00d4ff] tracking-widest cursor-pointer">
+                RECENT DETECTIONS — full audit log ({auditLog.length})
+              </summary>
+              <div className="mt-1.5">{auditLog.map((ev, i) => workerEventRow(ev, i))}</div>
+            </details>
           )}
 
-          {/* ── Informational alerts ── */}
-          {infoAlerts.length > 0 && (
+          {otherAlerts.length > 0 && (
             <div>
-              {actionAlerts.length > 0 && (
-                <div className="text-[0.6rem] font-mono text-[#4a6080] tracking-widest mb-1.5">
-                  OTHER ALERTS
-                </div>
-              )}
+              <div className="text-[0.6rem] font-mono text-[#4a6080] tracking-widest mb-1.5">OTHER ALERTS</div>
               <div className="space-y-1.5">
-                {infoAlerts.map((alert, idx) => (
-                  <div
-                    key={`info-${idx}`}
-                    className={alertRowStyle(alert)}
-                    data-alert-type={alert.alertType}
-                    data-symbol={alert.symbol ?? ""}
-                  >
-                    <span className="shrink-0 mt-0.5">{alert.icon}</span>
-                    <span>{renderText(alert.text)}</span>
+                {otherAlerts.map((a, i) => (
+                  <div key={`info-${i}`} className="flex items-start gap-2 text-[0.7rem] border-b border-[#1e2d4a]/30 pb-1 last:border-0"
+                       data-alert-type={a.alertType} data-symbol={a.symbol ?? ""}>
+                    <span className="shrink-0 mt-0.5">{a.icon}</span>
+                    <span>{a.text.split(/(<strong>.*?<\/strong>)/g).map((p, j) =>
+                      p.startsWith("<strong>") ? <strong key={j}>{p.replace(/<\/?strong>/g, "")}</strong> : p)}</span>
                   </div>
                 ))}
               </div>
