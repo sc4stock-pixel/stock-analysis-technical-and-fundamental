@@ -103,6 +103,23 @@ const longBars = (dirUpLast: boolean) => {
   return [...base, ...tail];
 };
 
+describe("clientFlip — precomputed _flip fallback", () => {
+  it("uses result._flip when chart_bars is absent (cron payloads strip bars)", () => {
+    const r = { symbol: "AAPL", _flip: { flipType: "BEARISH", barsSince: 1 } } as unknown as StockAnalysisResult;
+    const f = clientFlip(r);
+    expect(f.flipType).toBe("BEARISH");
+    expect(f.barsSince).toBe(1);
+  });
+  it("still computes from chart_bars when no _flip is present", () => {
+    const bars = [
+      ...Array.from({ length: 20 }, (_, i) => ({ high: 100 - i, low: 98 - i, close: 99 - i })),
+      { high: 95, low: 90, close: 94 }, { high: 110, low: 94, close: 109 }, { high: 120, low: 108, close: 119 },
+    ];
+    const r = { chart_bars: bars, st_opt_params: { atrPeriod: 10, multiplier: 3.0 } } as unknown as StockAnalysisResult;
+    expect(clientFlip(r).flipType).toBe("BULLISH");
+  });
+});
+
 describe("buildAlertModel — client gap-fill + otherAlerts + audit", () => {
   it("passes the full reconciled list through as auditLog", () => {
     const m = buildAlertModel(wEvents, wTickers, [], { now: NOW });

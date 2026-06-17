@@ -204,6 +204,10 @@ export function buildAlertModel(
 /** Most-recent SuperTrend flip from a result's own bars (client-stance gap-fill).
  *  Ported from the former computeOptimizedFlip in AlertsPanel. */
 export function clientFlip(result: StockAnalysisResult): ClientFlip {
+  const pre = (result as { _flip?: { flipType: "BULLISH" | "BEARISH" | null; barsSince: number } })._flip;
+  if (pre && (pre.flipType === "BULLISH" || pre.flipType === "BEARISH" || pre.flipType === null)) {
+    return { flipType: pre.flipType, barsSince: pre.barsSince ?? 999 };
+  }
   const bars = result.chart_bars;
   if (!bars || bars.length < 2) return { flipType: null, barsSince: 999 };
   const atr = result.st_opt_params?.atrPeriod ?? 10;
