@@ -12,9 +12,12 @@ describe("digest metrics", () => {
     expect(downsideToStopPct({ dir: "up", price: 421.07, stop: 395.9 } as any)).toBeCloseTo(5.98, 1);
     expect(downsideToStopPct({ dir: "down", price: 100, stop: 110 } as any)).toBeNull();
   });
-  it("distanceToFlipPct: (price-flipPx)/price", () => {
-    expect(distanceToFlipPct({ price: 737.76, flipPx: 737.55 } as any)).toBeCloseTo(0.028, 2);
-    expect(distanceToFlipPct({ price: 100, flipPx: 0 } as any)).toBeNull();
+  it("distanceToFlipPct: (stop-price)/price, 1dp — uses the live ST line, NOT flipPx", () => {
+    // down name: stop (228.48) is above px → must rally +11.6% to flip up (the real trigger)
+    expect(distanceToFlipPct({ price: 204.65, stop: 228.48 } as any)).toBeCloseTo(11.6, 5);
+    // open long: stop (395.9) below px → −6.0% (must fall to flip down)
+    expect(distanceToFlipPct({ price: 421.07, stop: 395.9 } as any)).toBeCloseTo(-6.0, 5);
+    expect(distanceToFlipPct({ price: 100, stop: 0 } as any)).toBeNull();
   });
   it("eventCount tallies events for a ticker", () => {
     const ev = [{ ticker: "3033.HK" }, { ticker: "3033.HK" }, { ticker: "TSM" }] as any;
