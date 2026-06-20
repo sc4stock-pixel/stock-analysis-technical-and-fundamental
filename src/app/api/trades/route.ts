@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import type { TradeLogRecord } from "@/types/trade-log";
+import { stripNaN } from "@/lib/fill-command";
 
 export const dynamic = "force-dynamic";
 
 // Reader NaN guardrail (CLAUDE.md): bare NaN parses in Python json but throws
-// in JS JSON.parse. Strip to null before parsing.
+// in JS JSON.parse. Strip to null before parsing. stripNaN is single-sourced
+// in fill-command.ts so the read/write strip regexes can't drift.
 function parseTradeLog(raw: string): TradeLogRecord[] {
-  const safe = raw.replace(/\bNaN\b/g, "null").replace(/-?Infinity\b/g, "null");
-  return JSON.parse(safe) as TradeLogRecord[];
+  return JSON.parse(stripNaN(raw)) as TradeLogRecord[];
 }
 
 export async function GET() {
