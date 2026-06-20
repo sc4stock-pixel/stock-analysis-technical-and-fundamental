@@ -19,13 +19,18 @@ export default function TradeLogPanel({ records }: Props) {
   const sorted = useMemo(() => {
     const copy = [...records];
     copy.sort((a, b) => {
+      if (sortKey === "slippage") {
+        // Unfilled rows always sort to the bottom, regardless of direction.
+        const sa = computeSlippage(a)?.slippagePct ?? null;
+        const sb = computeSlippage(b)?.slippagePct ?? null;
+        if (sa === null && sb === null) return 0;
+        if (sa === null) return 1;
+        if (sb === null) return -1;
+        return asc ? sa - sb : sb - sa;
+      }
       let cmp = 0;
       if (sortKey === "ticker") cmp = a.ticker.localeCompare(b.ticker);
-      else if (sortKey === "slippage") {
-        const sa = computeSlippage(a)?.slippagePct ?? -Infinity;
-        const sb = computeSlippage(b)?.slippagePct ?? -Infinity;
-        cmp = sa - sb;
-      } else cmp = a.date.localeCompare(b.date) || a.ticker.localeCompare(b.ticker);
+      else cmp = a.date.localeCompare(b.date) || a.ticker.localeCompare(b.ticker);
       return asc ? cmp : -cmp;
     });
     return copy;
