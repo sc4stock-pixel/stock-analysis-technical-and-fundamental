@@ -14,6 +14,7 @@ import DigestPrompt from "@/components/DigestPrompt";
 import { UserButton } from "@clerk/nextjs";
 import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 import NavPanel from "@/components/NavPanel";
+import TradeLogPanel from "@/components/TradeLogPanel";
 import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import { fetchKronosForecasts } from "@/lib/kronos";
 import { supertrend } from "@/lib/indicators";
@@ -103,6 +104,7 @@ export default function Dashboard() {
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
 
   useEffect(() => {
     const onScroll = () => setShowScrollTop(window.scrollY > 300);
@@ -574,6 +576,9 @@ export default function Dashboard() {
       <div className="mx-4">
         <NavPanel />
       </div>
+
+      {/* TRADE LOG PANEL */}
+      <TradeLogPanel />
 
       {/* STOCK CARDS */}
       <main className="p-4">

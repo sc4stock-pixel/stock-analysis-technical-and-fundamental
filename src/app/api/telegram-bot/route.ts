@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { parseFillCommand, selectFillTarget, applyFill, stripNaN } from "@/lib/fill-command";
+import { slippageLabel } from "@/lib/slippage";
+import type { TradeLogRecord } from "@/types/trade-log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -100,6 +103,85 @@ async function handlePortfolio(token: string, chatId: number): Promise<void> {
   }
 }
 
+async function readTradeLog(kvUrl: string, kvToken: string): Promise<TradeLogRecord[]> {
+  const res = await fetch(`${kvUrl}/get/trade_log`, {
+    headers: { Authorization: `Bearer ${kvToken}` }, cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`KV get ${res.status}`);
+  const { result } = (await res.json()) as { result: string | null };
+  return result ? (JSON.parse(stripNaN(result)) as TradeLogRecord[]) : [];
+}
+
+async function writeTradeLog(kvUrl: string, kvToken: string, log: TradeLogRecord[]): Promise<void> {
+  const body = JSON.stringify(log);
+  if (/\bNaN\b|Infinity/.test(body)) throw new Error("refusing to write non-finite to trade_log");
+  const res = await fetch(`${kvUrl}/set/trade_log`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${kvToken}`, "Content-Type": "application/json" },
+    body,
+  });
+  if (!res.ok) throw new Error(`KV set ${res.status}`);
+}
+
+function todayHKT(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+}
+
+async function handleFill(token: string, chatId: number, text: string): Promise<void> {
+  const kvUrl = process.env.KV_REST_API_URL;
+  const kvToken = process.env.KV_REST_API_TOKEN;
+  if (!kvUrl || !kvToken) { await replyTo(token, chatId, "KV not configured."); return; }
+
+  const cmd = parseFillCommand(text);
+  if (cmd.mode === "error") {
+    const msg = cmd.reason === "price" ? "Invalid price."
+      : cmd.reason === "date" ? "Invalid date (use YYYY-MM-DD)."
+      : "Usage: <code>/fill TICKER PRICE [YYYY-MM-DD]</code>";
+    await replyTo(token, chatId, msg); return;
+  }
+
+  try {
+    const log = await readTradeLog(kvUrl, kvToken);
+
+    if (cmd.mode === "list") {
+      const unfilled = log.filter((r) => r.actual_fill_price == null);
+      if (unfilled.length === 0) { await replyTo(token, chatId, "No unfilled records."); return; }
+      const lines = unfilled.map(
+        (r, i) => `${i + 1}. <code>${r.id.replace(/\.HK/g, "")}</code> @ ${r.signal_price}`);
+      await replyTo(token, chatId,
+        ["<b>Unfilled records</b>", ...lines, "", "Reply: <code>/fill TICKER PRICE [date]</code>"].join("\n"));
+      return;
+    }
+
+    const target = selectFillTarget(log, cmd.selector);
+    if (target.kind === "none") {
+      await replyTo(token, chatId, "No matching unfilled record. Try <code>/fill</code> to list.");
+      return;
+    }
+    if (target.kind === "ambiguous") {
+      const lines = target.ids.map((id) => `<code>${id.replace(/\.HK/g, "")}</code>`);
+      await replyTo(token, chatId, ["Multiple unfilled records — specify the id:", ...lines].join("\n"));
+      return;
+    }
+
+    const date = cmd.date ?? todayHKT();
+    const updated = applyFill(log, target.id, cmd.price, date);
+    await writeTradeLog(kvUrl, kvToken, updated);
+
+    const rec = updated.find((r) => r.id === target.id)!;
+    const label = slippageLabel(rec);
+    await replyTo(token, chatId, [
+      `Filled <b>${rec.ticker.replace(/\.HK/g, "")}</b> ${rec.type}`,
+      `signal ${rec.signal_price} → fill ${rec.actual_fill_price} (${date})`,
+      `slippage: ${label}`,
+    ].join("\n"));
+  } catch (e) {
+    await replyTo(token, chatId, `⚠️ Error: ${String(e)}`);
+  }
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // Validate Telegram webhook secret
   const secret         = req.headers.get("x-telegram-bot-api-secret-token");
@@ -138,6 +220,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     await handleCheck(token, chatId, ticker).catch(() => {});
   } else if (cmd === "/portfolio") {
     await handlePortfolio(token, chatId).catch(() => {});
+  } else if (cmd === "/fill") {
+    const adminId = process.env.TELEGRAM_ADMIN_CHAT_ID;
+    if (!adminId || String(chatId) !== adminId) {
+      await replyTo(token, chatId, "⛔ Not authorized.").catch(() => {});
+    } else {
+      await handleFill(token, chatId, text).catch(() => {});
+    }
   }
 
   return NextResponse.json({ ok: true });
