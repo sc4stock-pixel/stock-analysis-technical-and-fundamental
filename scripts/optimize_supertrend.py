@@ -7,7 +7,8 @@ Produces the shared st_params.json consumed by both:
   - The local Python script (fetched from GitHub URL; local file as fallback)
 
 Grid  : ATR periods [10, 12, 14] × Multipliers [2.5, 2.75, 3.0, 3.25, 3.5]
-Metric: Sharpe ratio  (fallback: total_return when < 2 trades)
+Metric: total_return (matches local analyzer.py metric='total_return';
+        Sharpe is kept in the output for the wf efficiency-ratio check)
 
 Indicator logic:  exact port of Python indicators.py (Wilder's EWM ATR)
 Backtest logic:   matches Python BacktestEngine (strategy_type='supertrend')
@@ -16,6 +17,7 @@ Backtest logic:   matches Python BacktestEngine (strategy_type='supertrend')
 Dependencies: yfinance pandas numpy   (no local package imports)
 """
 import json
+import math
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
@@ -23,7 +25,18 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
+
+
+def _json_safe(obj):
+    """Recursively replace non-finite floats (NaN/Inf) with None so the output
+    is standards-valid JSON that JS JSON.parse accepts. See OUTPUT_PATH write."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
 
 # ─── Portfolio — loaded from portfolio.json; hardcoded list is the fallback ───
 _PORTFOLIO_FALLBACK = [
@@ -68,6 +81,14 @@ COMMISSION    = 0.001     # 0.1% — matches Python config commissionRate
 SLIPPAGE      = 0.0005    # 0.05% — matches Python config slippageRate
 INITIAL_CAP   = 10_000
 TRAIN_RATIO   = 0.7       # AUDIT FIX C2 (2026-05-20): 70% train, 30% test for OOS WFO
+
+# A1 WALK-FORWARD GATE (2026-06-10): when the honest OOS walk-forward fails,
+# trading the in-sample grid winner is value-destroying (OOS replay over
+# 15 tickers x 23 months: gated +56.4%/Sharpe 1.62 vs ungated +48.5%/1.46).
+# On failure we publish robust defaults instead; the rejected winner is kept
+# in grid_* fields for transparency.
+DEFAULT_ATR_PERIOD = 10
+DEFAULT_MULTIPLIER = 3.0
 
 # Output: repo root/st_params.json  (script lives in repo root/scripts/)
 OUTPUT_PATH = Path(__file__).parent.parent / "st_params.json"
@@ -166,11 +187,11 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
             Signal generated at bar i-1: ST BUY flip AND close > SMA50
                                       OR ST bullish AND SMA50 cross-up
     Stop:   ST line at signal bar; trails upward, never down
-    Exit:   Low ≤ trailing stop → exit at min(stop, open)
+    Exit:   Low ≤ trailing stop AND ST direction bearish → deferred to next open
          OR SELL entry signal (ST flipped bearish previous bar) → exit at open
-    Costs:  SLIPPAGE + COMMISSION at entry and exit.
-    Metric: Sharpe ratio from daily equity curve (annualised × √252).
-            Falls back to total_return when < 2 trades.
+    Costs:  SLIPPAGE + COMMISSION at entry and exit (netted in PnL).
+    Returns total_return (selection metric), Sharpe (MtM curve, annualised
+    × √252, truncated at last closed trade), and num_trades.
     """
     high  = df["High"]
     low   = df["Low"]
@@ -208,6 +229,14 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
     equity_curve = [equity]
     trades       = []
 
+    def _close_position(pos, exit_open):
+        """Net-of-cost exit — mirrors canonical backtest.py (entry_cost_per_share
+        includes buy commission; exit nets slippage + sell commission)."""
+        net_exit = exit_open * (1 - SLIPPAGE) * (1 - COMMISSION)
+        pnl      = (net_exit - pos["cost_per"]) * pos["shares"]
+        trades.append((net_exit - pos["cost_per"]) / pos["cost_per"])
+        return pos["entry_equity"] + pnl
+
     for i in range(1, n):
         sig = entry_sigs[i]
 
@@ -215,12 +244,16 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
             if sig == "BUY":
                 raw_entry  = opens_a[i] * (1 + SLIPPAGE)
                 cost_per   = raw_entry  * (1 + COMMISSION)
-                shares     = int(equity / cost_per)
+                # Sizing matches canonical backtest.py: 99.8% buffer over the
+                # slippage-adjusted entry price (commission netted in PnL).
+                shares     = int((equity * 0.998) / raw_entry)
                 if shares > 0:
                     # Initial stop: ST line at signal bar (previous bar)
                     position = {
                         "entry": raw_entry,
+                        "cost_per": cost_per,
                         "shares": shares,
+                        "entry_equity": equity,
                         "stop": st_vals[i - 1],
                     }
         else:
@@ -235,10 +268,7 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
             # and TS quickSTBacktest. Without this the cron's monthly cache
             # selected different winners than the production engine.
             if position.get("pending_st_exit"):
-                net_exit = opens_a[i] * (1 - SLIPPAGE) * (1 - COMMISSION)
-                pnl      = (net_exit - position["entry"]) * position["shares"]
-                equity  += pnl
-                trades.append((net_exit - position["entry"]) / position["entry"])
+                equity   = _close_position(position, opens_a[i])
                 position = None
             else:
                 stop_hit    = (lows_a[i] <= position["stop"]) and (st_dirs[i] == -1)
@@ -247,21 +277,43 @@ def _run_st_backtest(df: pd.DataFrame, atr_period: int, multiplier: float) -> di
                     # Defer to next bar — can't act on close-derived direction at today's open
                     position["pending_st_exit"] = True
                 elif signal_exit:
-                    net_exit = opens_a[i] * (1 - SLIPPAGE) * (1 - COMMISSION)
-                    pnl      = (net_exit - position["entry"]) * position["shares"]
-                    equity  += pnl
-                    trades.append((net_exit - position["entry"]) / position["entry"])
+                    equity   = _close_position(position, opens_a[i])
                     position = None
 
-        equity_curve.append(equity)
+        # Mark-to-market equity — mirrors canonical backtest.py (cash spent =
+        # cost_per × shares; open position valued at the bar close). The old
+        # realized-only curve produced Sharpe values incomparable to the
+        # dashboard's runSupertrendBacktest / quickSTBacktest.
+        if position is not None:
+            cur_value = (position["entry_equity"]
+                         - position["cost_per"] * position["shares"]
+                         + closes_a[i] * position["shares"])
+        else:
+            cur_value = equity
+        equity_curve.append(cur_value)
 
     # ── Metrics ───────────────────────────────────────────────────────────────
     total_return = (equity - INITIAL_CAP) / INITIAL_CAP * 100
     num_trades   = len(trades)
 
-    daily_rets = np.diff(equity_curve) / np.array(equity_curve[:-1])
-    std_r      = float(np.std(daily_rets))
-    sharpe     = float(np.mean(daily_rets)) / std_r * np.sqrt(252) if std_r > 0 else 0.0
+    # AUDIT FIX Sharpe (mirrors backtest.py + TS quickSTBacktest): if the run
+    # ends with an open position, MtM bars for the unclosed trade inflate the
+    # curve while contributing nothing to total_return (realized-cash-only).
+    # Truncate the daily-return series at the last bar where equity was flat.
+    last_closed = len(equity_curve) - 1
+    if position is not None and trades:
+        for j in range(len(equity_curve) - 1, -1, -1):
+            if abs(equity_curve[j] - equity) < 0.01:
+                last_closed = j
+                break
+
+    curve = np.array(equity_curve[: last_closed + 1])
+    if len(curve) > 1:
+        daily_rets = np.diff(curve) / curve[:-1]
+        std_r      = float(np.std(daily_rets))
+        sharpe     = float(np.mean(daily_rets)) / std_r * np.sqrt(252) if std_r > 0 else 0.0
+    else:
+        sharpe = 0.0
 
     return {"total_return": total_return, "sharpe": sharpe, "num_trades": num_trades}
 
@@ -354,7 +406,41 @@ def _compute_oos_wfo(df: pd.DataFrame) -> dict:
     }
 
 
+def _apply_wf_gate(best_params: dict, oos: dict, rerun_backtest, symbol: str = "?") -> dict:
+    """Merge wf_* fields and apply the A1 gate.
+
+    rerun_backtest(atr_period, multiplier) -> backtest result dict; called only
+    on fallback so the published stats describe the params actually written.
+    """
+    out = dict(best_params)
+    out.update(oos)
+    if not oos or oos.get("wf_passed"):
+        out["params_source"] = "optimized"
+        return out
+    out["grid_atr_period"]   = best_params["atr_period"]
+    out["grid_multiplier"]   = best_params["multiplier"]
+    out["grid_total_return"] = best_params["total_return"]
+    out["grid_sharpe"]       = best_params["sharpe"]
+    try:
+        r = rerun_backtest(DEFAULT_ATR_PERIOD, DEFAULT_MULTIPLIER)
+    except Exception as e:
+        print(f"    ⚠  {symbol}: default-fallback rerun failed — {e}; keeping grid winner")
+        out["params_source"] = "optimized"   # fail open: keep grid winner
+        return out
+    out.update({
+        "atr_period":    DEFAULT_ATR_PERIOD,
+        "multiplier":    DEFAULT_MULTIPLIER,
+        "total_return":  round(r["total_return"], 2),
+        "sharpe":        round(r["sharpe"], 2),
+        "num_trades":    r["num_trades"],
+        "params_source": "default_fallback",
+    })
+    return out
+
+
 def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
+    import yfinance as yf  # deferred: keeps module importable for unit tests
+
     symbol = stock["symbol"]
     print(f"  Optimizing {symbol} ({stock['name']})...", flush=True)
 
@@ -375,7 +461,9 @@ def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
 
     # Step 2: True OOS walk-forward → wf_* fields for dashboard
     oos = _compute_oos_wfo(df)
-    best_params.update(oos)
+    best_params = _apply_wf_gate(best_params, oos,
+                                 lambda a, m: _run_st_backtest(df, a, m),
+                                 symbol=symbol)
 
     bp = best_params
     oos_str = ""
@@ -383,7 +471,8 @@ def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
         oos_str = (f" | OOS Sharpe={oos['wf_test_sharpe']:.2f}, "
                    f"Return={oos['wf_test_return']:.1f}%, "
                    f"eff={oos['wf_efficiency_ratio']:.2f} ({oos['wf_efficiency_quality']})")
-    print(f"    ✅ {symbol}: ATR={bp['atr_period']}, Mult={bp['multiplier']} "
+    src_tag = " [DEF-FALLBACK]" if bp.get("params_source") == "default_fallback" else ""
+    print(f"    ✅ {symbol}: ATR={bp['atr_period']}, Mult={bp['multiplier']}{src_tag} "
           f"→ Return={bp['total_return']:.1f}%, Sharpe={bp['sharpe']:.2f}, "
           f"Trades={bp['num_trades']}{oos_str}")
     return symbol, best_params
@@ -406,7 +495,7 @@ def main() -> None:
     combos = len(ATR_PERIODS) * len(MULTIPLIERS)
     print(f"SuperTrend Optimizer (Python) — {today.isoformat()}")
     print(f"Grid: ATR={ATR_PERIODS} × Mult={MULTIPLIERS} = {combos} combos/stock")
-    print(f"Metric: Sharpe (fallback total_return if <2 trades)\n")
+    print(f"Metric: total_return (Sharpe kept for wf efficiency check)\n")
 
     stocks_out: dict = {}
     errors:     list = []
@@ -427,7 +516,10 @@ def main() -> None:
         "optimization_count": opt_count + 1,
         "stocks":             stocks_out,
     }
-    OUTPUT_PATH.write_text(json.dumps(output, indent=2))
+    # Emit STRICT JSON: a bare NaN/Infinity (e.g. wf_test_return with no OOS
+    # trades) is valid for Python's json.load but breaks JS JSON.parse, which
+    # silently nukes every consumer's params. Sanitize non-finite floats → null.
+    OUTPUT_PATH.write_text(json.dumps(_json_safe(output), indent=2))
 
     print(f"\n✅ Wrote {len(stocks_out)}/{len(PORTFOLIO)} stocks → {OUTPUT_PATH}")
     if errors:

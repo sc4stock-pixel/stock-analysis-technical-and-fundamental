@@ -94,7 +94,7 @@ async function fetchFundamentals(symbol: string): Promise<Fundamentals> {
 // Tier 1 — US:  Alpha Vantage EARNINGS endpoint, frequency='Q'
 // Tier 2 — HK:  Akshare/Eastmoney, frequency='Q' or 'H' (semi-annual)
 // AV is never called directly from this route — only the cache file is read.
-interface AvQuarter  { fiscalDateEnding: string; reportedEPS: string; }
+export interface AvQuarter { fiscalDateEnding: string; reportedEPS: string; }
 interface SymbolData { frequency: "Q" | "H"; quarters: AvQuarter[]; }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -124,35 +124,65 @@ async function getAvCache(): Promise<Record<string, any> | null> {
 // Handles both cache formats for backward compatibility:
 //   Old format (US only):  symbol → AvQuarter[]          (array, frequency assumed 'Q')
 //   New format (US + HK):  symbol → {frequency, quarters} (object, 'Q' or 'H')
-// HK semi-annual step=2, quarterly step=4.
 // ETFs / cache missing / insufficient data → null → badge shows "—"
-async function fetchCode33(symbol: string, _exchange: string): Promise<boolean | null> {
-  const cache = await getAvCache();
-  const raw = cache?.[symbol];
-  if (!raw) return null;
+//
+// AUDIT FIX (2026-06-10): YoY lookup is DATE-aware, not positional. The cache
+// builder drops invalid/zero-EPS quarters (US) and FY-only years (HK
+// semi-annual), so quarters[i + step] could be a different period entirely —
+// silently comparing mismatched quarters. Now the year-ago period is matched
+// by fiscalDateEnding (~365d back, ±45d), and the 3 recent periods must be
+// genuinely consecutive (~91d apart for Q, ~182d for H). Any gap → null
+// ("—" badge) instead of a wrong answer.
+const MS_PER_DAY = 86_400_000;
 
-  // Normalise both cache formats into {frequency, quarters}
-  let frequency: "Q" | "H" = "Q";
-  let quarters: AvQuarter[];
-  if (Array.isArray(raw)) {
-    quarters = raw as AvQuarter[];            // old format — US quarterly array
-  } else {
-    const entry = raw as SymbolData;
-    frequency = entry.frequency ?? "Q";
-    quarters  = entry.quarters  ?? [];
+function periodTime(q: AvQuarter): number {
+  return new Date(`${q.fiscalDateEnding}T00:00:00Z`).getTime();
+}
+
+/** Period ending ~1 year before quarters[i] (±45 days), or null if absent.
+ *  ±45d absorbs fiscal-calendar drift (4-4-5 calendars, HK report-date wobble)
+ *  while staying well clear of the adjacent period (91d for Q, 182d for H).
+ *  Exported for unit tests. */
+export function findYearAgo(quarters: AvQuarter[], i: number): AvQuarter | null {
+  const target = periodTime(quarters[i]) - 365 * MS_PER_DAY;
+  let best: AvQuarter | null = null;
+  let bestDiff = Infinity;
+  for (const q of quarters) {
+    const diff = Math.abs(periodTime(q) - target);
+    if (diff < bestDiff) { bestDiff = diff; best = q; }
   }
+  return bestDiff <= 45 * MS_PER_DAY ? best : null;
+}
 
-  // step=4 for quarterly (compare same quarter YoY), step=2 for semi-annual
-  const step   = frequency === "H" ? 2 : 4;
-  const needed = step + 3; // 7 for Q, 5 for H
+function normalizeCacheEntry(raw: unknown): { frequency: "Q" | "H"; quarters: AvQuarter[] } {
+  if (Array.isArray(raw)) {
+    return { frequency: "Q", quarters: raw as AvQuarter[] }; // old format — US quarterly array
+  }
+  const entry = raw as SymbolData;
+  return { frequency: entry.frequency ?? "Q", quarters: entry.quarters ?? [] };
+}
 
-  if (quarters.length < needed) return null;
+/** Pure Code 33 evaluation — exported for unit tests. */
+export function evaluateCode33(frequency: "Q" | "H", quarters: AvQuarter[]): boolean | null {
+  // Need 3 recent periods + their year-ago matches (4 per year for Q, 2 for H)
+  const perYear = frequency === "H" ? 2 : 4;
+  if (quarters.length < perYear + 3) return null;
+
+  // The 3 most recent periods must be consecutive — a dropped period in the
+  // cache must not silently shift the acceleration window.
+  const periodDays = frequency === "H" ? 182 : 91;
+  for (let i = 0; i < 2; i++) {
+    const gapDays = (periodTime(quarters[i]) - periodTime(quarters[i + 1])) / MS_PER_DAY;
+    if (gapDays < periodDays * 0.5 || gapDays > periodDays * 1.5) return null;
+  }
 
   // quarters sorted newest-first
   const growthRates: number[] = [];
   for (let i = 0; i < 3; i++) {
     const recent  = parseFloat(quarters[i].reportedEPS);
-    const yearAgo = parseFloat(quarters[i + step].reportedEPS);
+    const yearAgoQ = findYearAgo(quarters, i);
+    if (!yearAgoQ) return null;
+    const yearAgo = parseFloat(yearAgoQ.reportedEPS);
     if (isNaN(recent) || isNaN(yearAgo) || Math.abs(yearAgo) < 0.001) return null;
     growthRates.push((recent - yearAgo) / Math.abs(yearAgo));
   }
@@ -160,6 +190,14 @@ async function fetchCode33(symbol: string, _exchange: string): Promise<boolean |
   // growthRates[0]=most recent, [1]=prior, [2]=oldest
   // Acceleration: each period's YoY rate must be higher than the one before it
   return growthRates[0] > growthRates[1] && growthRates[1] > growthRates[2];
+}
+
+async function fetchCode33(symbol: string, _exchange: string): Promise<boolean | null> {
+  const cache = await getAvCache();
+  const raw = cache?.[symbol];
+  if (!raw) return null;
+  const { frequency, quarters } = normalizeCacheEntry(raw);
+  return evaluateCode33(frequency, quarters);
 }
 
 // ─── EPS quarters for OverviewTab chart ───────────────────────
@@ -172,24 +210,16 @@ async function buildEpsQuarters(symbol: string): Promise<EpsQuarter[]> {
   const raw   = cache?.[symbol];
   if (!raw) return [];
 
-  let frequency: "Q" | "H" = "Q";
-  let quarters: AvQuarter[];
-  if (Array.isArray(raw)) {
-    quarters = raw as AvQuarter[];
-  } else {
-    const entry = raw as SymbolData;
-    frequency = entry.frequency ?? "Q";
-    quarters  = entry.quarters  ?? [];
-  }
-
-  const step  = frequency === "H" ? 2 : 4;
+  const { quarters } = normalizeCacheEntry(raw);
   const count = Math.min(4, quarters.length);
 
   return quarters.slice(0, count).map((q, i) => {
     const eps     = parseFloat(q.reportedEPS);
-    const yaIdx   = i + step;
-    const yaRaw   = yaIdx < quarters.length ? parseFloat(quarters[yaIdx].reportedEPS) : null;
-    const yoy     = yaRaw !== null && Math.abs(yaRaw) >= 0.001
+    // Date-aware year-ago lookup (same rationale as fetchCode33 above):
+    // positional i+step breaks whenever the cache has a dropped period.
+    const yaQ     = findYearAgo(quarters, i);
+    const yaRaw   = yaQ ? parseFloat(yaQ.reportedEPS) : null;
+    const yoy     = yaRaw !== null && !isNaN(yaRaw) && Math.abs(yaRaw) >= 0.001
       ? (eps - yaRaw) / Math.abs(yaRaw)
       : null;
 

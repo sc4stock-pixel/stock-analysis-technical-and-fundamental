@@ -22,11 +22,22 @@ export async function getSTParams(symbol: string): Promise<{ atrPeriod: number; 
     try {
       const res = await fetch(ST_PARAMS_URL, { cache: "no-store" });
       if (res.ok) {
-        const data = await res.json();
+        // Defend against bare NaN/Infinity tokens: the Python optimizer can
+        // emit them (valid for json.load, invalid for JSON.parse), and a single
+        // one would otherwise throw here and silently default EVERY symbol to
+        // (14, 3). Coerce non-finite literals → null before parsing.
+        const text = await res.text();
+        const data = JSON.parse(
+          text.replace(/\bNaN\b/g, "null").replace(/-?\bInfinity\b/g, "null")
+        );
         _stParamsCache = data?.stocks ?? {};
         _stParamsFetchedAt = now;
+      } else {
+        // Fail loud — never let a bad fetch masquerade as "no params".
+        console.error(`[getSTParams] st_params fetch failed: HTTP ${res.status} — falling back to default params`);
       }
-    } catch {
+    } catch (e) {
+      console.error("[getSTParams] st_params fetch/parse error — falling back to default params:", e);
       _stParamsCache = _stParamsCache ?? {}; // keep stale on error
     }
   }
@@ -35,7 +46,27 @@ export async function getSTParams(symbol: string): Promise<{ atrPeriod: number; 
   return { atrPeriod: entry.atr_period, multiplier: entry.multiplier };
 }
 
+// Yahoo's chart API occasionally rate-limits/times out a single ticker out of a
+// batch of parallel requests from the same IP. One retry after a short delay
+// recovers most of these without materially slowing the whole batch.
+const YAHOO_FETCH_RETRIES = 1;
+const YAHOO_RETRY_DELAY_MS = 500;
+
 export async function fetchYahooOHLCV(
+  symbol: string,
+  lookbackDays: number
+): Promise<{ bars: RawOHLCV[]; currentPrice: number; changePct: number } | null> {
+  for (let attempt = 0; attempt <= YAHOO_FETCH_RETRIES; attempt++) {
+    const result = await fetchYahooOHLCVOnce(symbol, lookbackDays);
+    if (result) return result;
+    if (attempt < YAHOO_FETCH_RETRIES) {
+      await new Promise(r => setTimeout(r, YAHOO_RETRY_DELAY_MS));
+    }
+  }
+  return null;
+}
+
+async function fetchYahooOHLCVOnce(
   symbol: string,
   lookbackDays: number
 ): Promise<{ bars: RawOHLCV[]; currentPrice: number; changePct: number } | null> {
@@ -87,17 +118,28 @@ export async function fetchYahooOHLCV(
     // NOT yesterday. bars[-2].close = prior trading day's close is the reliable source.
     let changePct = 0;
 
+    const metaChangePct = (): number | null => {
+      if (meta.regularMarketChange == null || lastBar.close <= 0) return null;
+      const impliedPrev = currentPrice - (meta.regularMarketChange as number);
+      return impliedPrev > 0
+        ? ((meta.regularMarketChange as number) / impliedPrev) * 100
+        : null;
+    };
+
     if (secondLast && secondLast.close > 0 && currentPrice > 0) {
       changePct = ((currentPrice - secondLast.close) / secondLast.close) * 100;
-    } else if (meta.regularMarketChange != null && lastBar.close > 0) {
-      const impliedPrev = currentPrice - (meta.regularMarketChange as number);
-      if (impliedPrev > 0) {
-        changePct = ((meta.regularMarketChange as number) / impliedPrev) * 100;
-      }
+    } else {
+      changePct = metaChangePct() ?? 0;
     }
 
-    // Clamp: no stock moves > 50% in a single day (catches any remaining bad data)
-    if (Math.abs(changePct) > 50) changePct = 0;
+    // Sanity gate: a computed move > 50% almost always means a bad prev-close
+    // bar, not a real move. Before zeroing (the old behavior, which also hid
+    // genuine large moves), cross-check against Yahoo's own quote change —
+    // if both agree it's > 50%, trust it; otherwise prefer the meta figure.
+    if (Math.abs(changePct) > 50) {
+      const mc = metaChangePct();
+      changePct = mc !== null && Math.abs(mc) <= Math.abs(changePct) ? mc : 0;
+    }
 
     return { bars, currentPrice, changePct };
   } catch {

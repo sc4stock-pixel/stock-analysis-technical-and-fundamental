@@ -1,6 +1,6 @@
 import { StockAnalysisResult, SepaMetadata, TrendTemplateCriteria } from "@/types";
-import { supertrend } from "@/lib/indicators";
 import { holidayStatus } from "@/lib/telegram-report";
+import { buildAlertModel, clientFlip } from "@/lib/alert-model";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -88,23 +88,8 @@ type ResultWithFlip = StockAnalysisResult & {
   };
 };
 
-// Returns flipType and barsSince — uses precomputed _flip if chart_bars was stripped.
-function detectFlip(r: ResultWithFlip): { flipType: "BULLISH" | "BEARISH" | null; barsSince: number } {
-  if (r._flip) return r._flip;
-  const bars = r.chart_bars;
-  if (!bars || bars.length < 2) return { flipType: null, barsSince: 999 };
-  const atr = r.st_opt_params?.atrPeriod ?? 10;
-  const mul = r.st_opt_params?.multiplier ?? 3.0;
-  const [, dir] = supertrend(bars.map(b => b.high), bars.map(b => b.low), bars.map(b => b.close), atr, mul);
-  if (dir.length < 2) return { flipType: null, barsSince: 999 };
-  for (let i = dir.length - 1; i >= 1; i--) {
-    if (dir[i] !== dir[i - 1]) {
-      const barsSince = dir.length - 1 - i;
-      return { flipType: dir[i] === 1 ? "BULLISH" : "BEARISH", barsSince };
-    }
-  }
-  return { flipType: null, barsSince: 999 };
-}
+// Flip detection is single-sourced in alert-model.ts (clientFlip) — it honors a
+// precomputed _flip when chart_bars was stripped, identical to the old local helper.
 
 // ---------- Trend Template failure labels (the 7 real Minervini criteria) ----------
 // Display labels use ">" which is HTML-unsafe; entire fails-list string is htmlEscape'd
@@ -159,7 +144,7 @@ export function buildTelegramMessage(
 
   // ---------- ST flips (recent, ≤2 bars) ----------
   const todayFlips = valid
-    .map(r => ({ r, ...detectFlip(r) }))
+    .map(r => ({ r, ...clientFlip(r) }))
     .filter(x => x.flipType !== null && x.barsSince <= 2);
 
   // Actionable exits: bearish ST flips within 2 bars
@@ -261,8 +246,23 @@ export function buildTelegramMessage(
     return lines;
   };
 
+  // Act-on-this — client-stance (Engine A has no worker events → pass []).
+  const actRows = buildAlertModel([], {}, valid as unknown as StockAnalysisResult[]).actOnThis;
+  let actBlock = "";
+  if (actRows.length > 0) {
+    const rows = actRows.map(r => {
+      const sym = dispSym(r.symbol).padEnd(6);
+      const tag = r.stance === "out" ? "OUT" : "LONG";
+      const when = r.barsSince === 0 ? "today" : `${r.barsSince}d`;
+      const tt = r.ttFlag ? ` ${r.ttFlag.replace("→", "->")}` : "";  // defensive; ttFlag is empty on this surface
+      return `${sym} ${r.change}${tt} (${when}) [${tag}]`;
+    });
+    actBlock = `\n⚡ <b>ACT ON THIS</b>\n${preBlock(rows)}`;
+  }
+
   // ---------- Compose message ----------
   const lines: string[] = [headerLine, dataState];
+  if (actBlock) lines.push(actBlock);
 
   // ACTIONABLE EXITS — top priority
   if (exitSignals.length > 0) {

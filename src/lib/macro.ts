@@ -147,29 +147,49 @@ async function getVixStructure(): Promise<MacroFactor> {
   }
 }
 
-// ── 3. Yield Spread (10Y ‑ 2Y) via FRED ──────────────────────
+// ── 3. Yield Spread (10Y ‑ 2Y) via U.S. Treasury ──────────────────────
+// NOTE: FRED's fredgraph.csv endpoint is unreachable from Vercel's egress
+// (verified: TimeoutError at 12s), which is why this panel showed "unavailable".
+// The U.S. Treasury daily par-yield feed responds in ~55ms from Vercel, needs no
+// API key, and exposes the same constant-maturity 2Y/10Y yields.
+async function fetchTreasuryYields(month: string): Promise<{ y2: number; y10: number } | null> {
+  const url = `https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value_month=${month}`;
+  const res = await fetch(url, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Treasury fetch failed: HTTP ${res.status}`);
+  const xml = await res.text();
+  // Namespaced tags: <d:BC_2YEAR>…</d:BC_2YEAR>, <d:BC_10YEAR>…. Entries are in
+  // chronological order; take the most recent where both are present.
+  const extract = (re: RegExp): number[] => {
+    const out: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml)) !== null) out.push(parseFloat(m[1]));
+    return out;
+  };
+  const y2s = extract(/<d:BC_2YEAR[^>]*>([\d.]+)<\/d:BC_2YEAR>/g);
+  const y10s = extract(/<d:BC_10YEAR[^>]*>([\d.]+)<\/d:BC_10YEAR>/g);
+  const n = Math.min(y2s.length, y10s.length);
+  if (n === 0) return null;
+  const y2 = y2s[n - 1], y10 = y10s[n - 1];
+  if (isNaN(y2) || isNaN(y10)) return null;
+  return { y2, y10 };
+}
+
 async function getYieldSpread(): Promise<MacroFactor> {
   try {
-    // FRED CSV endpoint for DGS10 and DGS2 (daily, last 5 observations)
-    const url = "https://fred.stlouisfed.org/graph/fredgraph.csv?bgcolor=%23e1e9f0&chart_type=line&drp=0&fo=open%20sans&graph_bgcolor=%23ffffff&height=450&mode=fred&recession_bars=on&txtcolor=%23444444&ts=12&tts=12&width=1168&ntick=0&thu=0&trc=0&show_legend=yes&show_axis_titles=yes&show_tooltip=yes&id=DGS10,DGS2&scale=left&cosd=2020-01-02&coed=9999-12-31&line_color=%234572a7&link_values=false&line_style=solid&mark_type=none&mw=3&lw=2&ost=-99999&oet=99999&mma=0&fml=a&fq=Daily&fam=avg&fgst=lin&fgsnd=2020-02-01&line_index=1&transformation=lin&vintage_date=2026-01-01&revision_date=2026-01-01&nd=2020-01-02";
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) throw new Error("FRED fetch failed");
-    const csv = await res.text();
-    const lines = csv.trim().split("\n");
-    if (lines.length < 2) throw new Error("empty FRED data");
-    // Last line is the most recent observation
-    const lastLine = lines[lines.length - 1];
-    const cols = lastLine.split(",");
-    if (cols.length < 3) throw new Error("unexpected CSV columns");
-    const dgs10 = parseFloat(cols[1]); // 10-year
-    const dgs2 = parseFloat(cols[2]);  // 2-year
-    if (isNaN(dgs10) || isNaN(dgs2)) throw new Error("invalid FRED data");
+    const now = new Date();
+    const thisMonth = now.toISOString().slice(0, 7).replace("-", "");
+    // Early in a month (or over a holiday gap) the current feed may be empty —
+    // fall back to the previous month so the latest reading is always found.
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonth = `${prev.getFullYear()}${String(prev.getMonth() + 1).padStart(2, "0")}`;
+    const data = (await fetchTreasuryYields(thisMonth)) ?? (await fetchTreasuryYields(prevMonth));
+    if (!data) throw new Error("no Treasury yield observation found");
 
-    const spread = dgs10 - dgs2;
+    const spread = data.y10 - data.y2;
     let score: number;
     let signal: MacroFactor["signal"];
     let detail: string;
@@ -189,7 +209,8 @@ async function getYieldSpread(): Promise<MacroFactor> {
       signal,
       detail,
     };
-  } catch {
+  } catch (e) {
+    console.warn("[getYieldSpread] FRED 10Y-2Y unavailable — falling back to neutral:", e);
     return { label: "10Y-2Y Spread", value: "—", score: 5, signal: "neutral", detail: "unavailable" };
   }
 }

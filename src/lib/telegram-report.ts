@@ -1,5 +1,9 @@
 import { SepaMetadata, TrendTemplateCriteria, KronosForecasts, TimesfmForecasts } from "@/types";
 import { htmlEscape } from "@/lib/telegram";
+import { buildAlertModel } from "@/lib/alert-model";
+import type { StockAnalysisResult } from "@/types";
+
+const dispSymForReport = (s: string) => s.replace(".HK", "");
 
 type Flip = { flipType: "BULLISH" | "BEARISH" | null; barsSince: number };
 
@@ -107,7 +111,7 @@ function groupedInline(stocks: SlimResult[], perLine = 3): string[] {
       const chunk = group.slice(i, i + perLine);
       const flag  = flagFor(chunk[0].exchange);
       const parts = chunk.map(r =>
-        `<b>${htmlEscape(r.symbol)}</b> (${fmtChg(r.change_pct)})`
+        `<b>${htmlEscape(dispSymForReport(r.symbol))}</b> (${fmtChg(r.change_pct)})`
       );
       lines.push(`  ${flag} ${parts.join(" · ")}`);
     }
@@ -154,11 +158,16 @@ function buildForecastSection(
     const kro = kronosData?.[r.symbol];
     const tfm = timesfmData?.[r.symbol];
     if (!kro && !tfm) continue;
-    const last = kro?.last_price ?? null;
-    const kPct = (kro && last && Array.isArray(kro.forward.p50) && kro.forward.p50.length >= 20)
-      ? ((kro.forward.p50[19] - last) / last) * 100 : null;
-    const tPct = (tfm && last && Array.isArray(tfm.p50) && tfm.p50.length >= 20)
-      ? ((tfm.p50[19] - last) / last) * 100 : null;
+    // Each model's % move uses its OWN baseline close. Borrowing Kronos's
+    // last_price for TimesFM mixed baselines when one file was staler, and
+    // hid TimesFM entirely whenever Kronos lacked the symbol. Kronos baseline
+    // stays as fallback for older TimesFM files without last_price.
+    const kLast = kro?.last_price ?? null;
+    const tLast = tfm?.last_price ?? kLast;
+    const kPct = (kro && kLast && Array.isArray(kro.forward.p50) && kro.forward.p50.length >= 20)
+      ? ((kro.forward.p50[19] - kLast) / kLast) * 100 : null;
+    const tPct = (tfm && tLast && Array.isArray(tfm.p50) && tfm.p50.length >= 20)
+      ? ((tfm.p50[19] - tLast) / tLast) * 100 : null;
     const isHK = r.symbol.endsWith(".HK");
     rows.push({
       // strip ".HK" for HK names — shorter AND stops Telegram auto-linking "9988.HK" as a URL
@@ -206,6 +215,8 @@ export function buildEodReport(
 ): string {
   const valid = results.filter(r => !r.error && r.current_price > 0);
 
+  const actRows = buildAlertModel([], {}, valid as unknown as StockAnalysisResult[]).actOnThis;
+
   const now = new Date();
   const dateStr = now.toLocaleDateString("en-US", {
     weekday: "short", month: "short", day: "numeric", year: "numeric",
@@ -242,10 +253,6 @@ export function buildEodReport(
     .sort((a, b) => (b.sepa_metadata?.sepa_score ?? 0) - (a.sepa_metadata?.sepa_score ?? 0));
   const bearish = ordered.filter(r => r.st_direction !== 1);
 
-  const recentFlips = valid
-    .filter(r => r._flip?.flipType && (r._flip?.barsSince ?? 999) <= 2)
-    .sort((a, b) => (a._flip?.barsSince ?? 0) - (b._flip?.barsSince ?? 0));
-
   const proximity = detectProximity(valid);
 
   const lines: string[] = [header];
@@ -258,14 +265,14 @@ export function buildEodReport(
     lines.push(`⚠️ <b>${which}</b> (${htmlEscape(holiday.label)})`);
   }
 
-  // RECENT FLIPS — moved up top per refined template
-  if (recentFlips.length > 0) {
-    lines.push(`\n⚡ <b>RECENT FLIPS</b> (≤2 bars)`);
-    recentFlips.forEach(r => {
-      const flip = r._flip!;
-      const when = flip.barsSince === 0 ? "today" : `${flip.barsSince} bar${flip.barsSince > 1 ? "s" : ""} ago`;
-      const icon = flip.flipType === "BULLISH" ? "📈" : "📉";
-      lines.push(`  • <b>${htmlEscape(r.symbol)}</b> → ${icon} ${flip.flipType} (${when})`);
+  // ACT ON THIS — replaces the old RECENT FLIPS block
+  if (actRows.length > 0) {
+    lines.push(`\n⚡ <b>ACT ON THIS</b>`);
+    actRows.forEach(r => {
+      const tag = r.stance === "out" ? "🔴 OUT" : "🟢 LONG";
+      const when = r.barsSince === 0 ? "today" : `${r.barsSince}d ago`;
+      const tt = r.ttFlag ? ` ${htmlEscape(r.ttFlag.replace("→", "->"))}` : "";
+      lines.push(`  • <b>${htmlEscape(dispSymForReport(r.symbol))}</b> ${r.change}${tt} (${when}) — ${tag}`);
     });
   }
 
@@ -310,8 +317,10 @@ export function buildEodReport(
     lines.push(...buildForecastSection(ordered, timesfmData, kronosData));
   }
 
-  const errorCount = results.length - valid.length;
-  const errorNote  = errorCount > 0 ? ` · ⚠️ ${errorCount} failed` : "";
+  const failed = results.filter(r => !valid.includes(r));
+  const errorNote = failed.length > 0
+    ? ` · ⚠️ ${failed.length} failed: ${failed.map(r => htmlEscape(r.symbol)).join(", ")}`
+    : "";
   lines.push(`\n<i>${valid.length} stocks monitored · HKT ${timeStr}${errorNote}</i>`);
 
   return lines.join("\n");

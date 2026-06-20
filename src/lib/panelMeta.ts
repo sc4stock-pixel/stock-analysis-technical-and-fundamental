@@ -53,7 +53,7 @@ export const PANEL_META: PanelMeta[] = [
       "Signal — BUY / SELL / HOLD (score + confirmation logic)",
       "ST — current SuperTrend direction (↑ long / ↓ short)",
       "SEPA — Minervini SEPA conditions met, 0–3 (display-only overlay; HK shows —)",
-      "TFM 10d — TimesFM 10-day forecast vs current price, % (display-only)",
+      "TFM 20d / K 20d — TimesFM & Kronos 20-day forecast vs current price, %. Hover a cell for each model's accuracy (direction hits / 20) and their 20d agreement. Display-only.",
       "RSI · MACD H — momentum indicators",
       "Backtest, header-colored: SC (cyan)=Score · ST (amber)=SuperTrend · TFM (purple)=TimesFM — each 2Y%/1Y% return, Sharpe, Alpha",
     ],
@@ -81,6 +81,19 @@ export const PANEL_META: PanelMeta[] = [
     cadence: "Kronos & TimesFM regenerate daily (staggered).",
     detail: [
       "Kronos / TimesFM are display-only overlays with a track record (direction-hit rate + MAE). They never feed signals, scoring, or execution.",
+    ],
+  },
+  {
+    id: "nav",
+    label: "Autopilot Realized NAV",
+    meaning: "Realized NAV of the published Autopilot signals (equal-weight, prev-EOD SuperTrend longs, others cash) vs benchmark (SPY / HSI).",
+    cadence: "Accrues one entry per region per EOD Autopilot run.",
+    detail: [
+      "NAV — compounded daily returns of the published signal portfolio, normalized to 1.0 at inception",
+      "Benchmark — SPY (US) / ^HSI (HK), same compounding; line absent while benchmark data is missing",
+      "Return % — total compounded return · Ann. Sharpe — daily mean/sd × √252 · Max DD — worst peak-to-trough",
+      "Alpha / Beta — OLS regression vs benchmark, annualized; appear after 60 paired observations",
+      "Buy & Hold — always-long equal-weight of the same ticker universe, same compounding; the strategy-vs-B&H gap isolates the timing contribution (line/chip absent until all entries carry B&H data)",
     ],
   },
   {

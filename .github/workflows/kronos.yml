@@ -37,6 +37,9 @@ jobs:
       - name: Run predictor
         run: python scripts/kronos_predict.py
 
+      - name: Rebase on latest main (avoid concurrent-push races)
+        run: git pull --rebase --autostash origin main || true
+
       - name: Commit updated JSON
         uses: stefanzweifel/git-auto-commit-action@v7
         with:

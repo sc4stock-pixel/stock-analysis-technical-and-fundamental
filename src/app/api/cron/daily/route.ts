@@ -28,15 +28,18 @@ export async function POST(req: NextRequest) {
   };
 
   // Fire both sequentially. Each one runs its own in-process portfolio
-  // analysis (analyzeStock), so back-to-back calls add ~5-8s total, well under
-  // the 60s maxDuration budget.
+  // analysis (analyzeStock), so back-to-back calls add ~5-8s total. Per-call
+  // timeout is 27s so BOTH calls fit inside this route's 60s maxDuration —
+  // the old 55s allowed a slow analyze to starve report of wall-clock, and
+  // Vercel would kill the route mid-flight instead of returning a clean
+  // partial-failure status to cron-job.org.
   const callRoute = async (path: string) => {
     try {
       const res = await fetch(`${baseUrl}${path}`, {
         method:  "POST",
         headers,
         body:    "{}",
-        signal:  AbortSignal.timeout(55000),
+        signal:  AbortSignal.timeout(27000),
       });
       const body = await res.json().catch(() => ({}));
       return { ok: res.ok, status: res.status, body };

@@ -196,9 +196,9 @@ export function runPipeline(
     closeArr: closes, sma20Arr, sma50Arr, rsiArr,
   });
 
-  const [rsiDivScalar, rsiDivTypeScalar] = detectRsiDivergence(closes, rsiArr, config.analysis.divergenceLookback);
-  const rsiDivArr     = closes.map(() => rsiDivScalar);
-  const rsiDivTypeArr = closes.map(() => rsiDivTypeScalar);
+  // Per-bar causal divergence (mirrors Python AUDIT FIX C1) — no more
+  // broadcasting today's reading onto every historical bar.
+  const [rsiDivArr, rsiDivTypeArr] = detectRsiDivergence(closes, rsiArr, config.analysis.divergenceLookback);
 
   const barScores = calculateScores({
     rsiArr, macdArr: macdLine, macdSignalArr: macdSignal, macdHistArr: macdHist,
