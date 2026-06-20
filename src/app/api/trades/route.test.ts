@@ -27,6 +27,15 @@ describe("/api/trades GET", () => {
     expect(await res.json()).toEqual([{ id: "a", signal_price: null }]);
   });
 
+  it("strips bare -Infinity before parse", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ result: '[{"id":"a","signal_price":-Infinity}]' }), { status: 200 })));
+    const { GET } = await import("./route");
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([{ id: "a", signal_price: null }]);
+  });
+
   it("returns [] when key empty", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(JSON.stringify({ result: null }), { status: 200 })));

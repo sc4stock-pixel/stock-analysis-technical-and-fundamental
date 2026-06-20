@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 // Reader NaN guardrail (CLAUDE.md): bare NaN parses in Python json but throws
 // in JS JSON.parse. Strip to null before parsing.
 function parseTradeLog(raw: string): TradeLogRecord[] {
-  const safe = raw.replace(/\bNaN\b/g, "null").replace(/\b-?Infinity\b/g, "null");
+  const safe = raw.replace(/\bNaN\b/g, "null").replace(/-?Infinity\b/g, "null");
   return JSON.parse(safe) as TradeLogRecord[];
 }
 
