@@ -148,11 +148,19 @@ export default function TradeLogPanel() {
                   return (
                     <tr
                       key={r.id}
-                      className={`border-b border-[#1e2d4a]/40 ${idx % 2 === 0 ? "bg-[#0a0e1a]" : "bg-[#0f1629]"}`}
+                      className={`border-b border-[#1e2d4a]/40 ${idx % 2 === 0 ? "bg-[#0a0e1a]" : "bg-[#0f1629]"} ${r.confirmed ? "" : "opacity-60"}`}
                     >
                       <td className="px-2 py-1.5 text-[#6b85a0]">{r.date}</td>
                       <td className="px-2 py-1.5 text-[#00d4ff] font-bold">{r.ticker}</td>
-                      <td className="px-2 py-1.5 text-[#c8d8f0]">{r.type}</td>
+                      <td className="px-2 py-1.5 text-[#c8d8f0]">
+                        {r.type}
+                        {!r.confirmed && (
+                          <span
+                            className="ml-1 px-1 rounded bg-[#3a2d1a] text-[#caa15a] text-[0.55rem] align-middle"
+                            title="Provisional intraday flip — unconfirmed, not fillable"
+                          >prov</span>
+                        )}
+                      </td>
                       <td className="px-2 py-1.5 text-right text-[#c8d8f0]">
                         {r.signal_price ?? "—"}
                       </td>
@@ -177,7 +185,7 @@ export default function TradeLogPanel() {
 
           {/* Footer note */}
           <div className="mt-2 text-[0.6rem] text-[#2a3d5a]">
-            Slippage = (fill ÷ signal − 1) · Red = adverse fill · Green = favorable · Unfilled rows show —
+            Slippage = (fill ÷ signal − 1) · Red = adverse fill · Green = favorable · Unfilled rows show — · <span className="text-[#caa15a]">prov</span> = provisional intraday flip (unconfirmed, not fillable)
           </div>
         </div>
       )}
