@@ -24,11 +24,18 @@ Two deferred builds, now in scope:
 2. **Telegram `/fill`** — record `actual_fill_price`/`actual_fill_date` against a record
    id (`ticker|date|type`) → signal-vs-execution **slippage**.
 
-### Verified-state notes (carried from inspection)
-- "Mirror the NAV panel pattern" (original deferral note) is **stale**: there is no
-  `NavPanel` and no `/api/nav` route in the web app. The patterns actually mirrored here
-  are `src/app/api/state/route.ts` (KV read) and the read-only panels
-  `OpenPositionsPanel` / `AlertsPanel`.
+### Verified-state notes (corrected 2026-06-20)
+- **CORRECTION:** an earlier draft of this spec claimed "no `NavPanel` / no `/api/nav`
+  exists, so the deferral note is stale." That was **wrong** — it was based on a local
+  checkout that was 98 commits behind `origin/main`. `src/components/NavPanel.tsx` and
+  `src/app/api/nav/route.ts` **do exist** on `origin/main`, and the "mirror the NAV panel
+  pattern" deferral note was correct. The implementation now follows that pattern:
+  `TradeLogPanel` self-fetches `/api/trades` in a `useEffect` (no props) and is rendered
+  as bare `<TradeLogPanel />`, exactly like `NavPanel`. The `/api/trades` route mirrors
+  `/api/nav` (KV read, NaN-sanitize, `force-dynamic`). Slippage math stays in the shared
+  `slippage.ts` (not computed server-side as `/api/nav` does for its stats) **because the
+  same math is reused by the Telegram `/fill` echo** — a shared lib is the correct
+  single-source here.
 - `/fill` is the **first write-capable bot command**. The webhook is gated only by
   `TELEGRAM_WEBHOOK_SECRET` (covers all commands). `/fill` adds a per-message admin
   check on top.
@@ -73,10 +80,10 @@ read-modify-write of the array.
   diverge.
 
 ### 2. `src/app/api/trades/route.ts` (new)
-- Mirrors `src/app/api/state/route.ts`: `export const dynamic = "force-dynamic"`,
-  `GET`, `KV_REST_API_URL` + `KV_REST_API_TOKEN` (same vars `/api/state` uses — proven
-  present in Vercel; the read-only token's presence in Vercel is unverified, so reuse the
-  proven var to avoid a 503), `cache: "no-store"`, 503 when unconfigured, 502 on KV error.
+- Mirrors `src/app/api/nav/route.ts` (and `/api/state`): `export const dynamic =
+  "force-dynamic"`, `GET`, `KV_REST_API_URL` + `KV_REST_API_TOKEN` (the vars both existing
+  routes use — proven present in Vercel), `cache: "no-store"`, 503 when unconfigured,
+  502 on KV error.
 - **Reader NaN guardrail (CLAUDE.md):** strip `\bNaN\b` → `null` on the raw string
   before `JSON.parse`; drop any record that is still non-finite where it matters.
 - Returns the `trade_log` array (or `[]` when key empty).

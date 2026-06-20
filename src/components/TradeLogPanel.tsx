@@ -1,18 +1,23 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { TradeLogRecord } from "@/types/trade-log";
 import { computeSlippage, summarize } from "@/lib/slippage";
 
-interface Props {
-  records: TradeLogRecord[];
-}
-
 type SortKey = "date" | "ticker" | "slippage";
 
-export default function TradeLogPanel({ records }: Props) {
+// Self-contained like NavPanel: fetches its own data from /api/trades.
+export default function TradeLogPanel() {
+  const [records, setRecords] = useState<TradeLogRecord[]>([]);
   const [collapsed, setCollapsed] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [asc, setAsc] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/trades")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setRecords(Array.isArray(d) ? d : []))
+      .catch(() => setRecords([]));
+  }, []);
 
   const summary = useMemo(() => summarize(records), [records]);
 

@@ -15,7 +15,6 @@ import { UserButton } from "@clerk/nextjs";
 import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 import NavPanel from "@/components/NavPanel";
 import TradeLogPanel from "@/components/TradeLogPanel";
-import type { TradeLogRecord } from "@/types/trade-log";
 import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import { fetchKronosForecasts } from "@/lib/kronos";
 import { supertrend } from "@/lib/indicators";
@@ -78,7 +77,6 @@ export default function Dashboard() {
   const [backtestLoading, setBacktestLoading]           = useState(false);
 
   const [workerState, setWorkerState] = useState<WorkerState | null>(null);
-  const [tradeLog, setTradeLog] = useState<TradeLogRecord[]>([]);
 
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -107,14 +105,6 @@ export default function Dashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load trade log on mount — execution attribution panel
-  useEffect(() => {
-    fetch("/api/trades")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((d) => setTradeLog(Array.isArray(d) ? d : []))
-      .catch(() => setTradeLog([]));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     const onScroll = () => setShowScrollTop(window.scrollY > 300);
@@ -588,9 +578,7 @@ export default function Dashboard() {
       </div>
 
       {/* TRADE LOG PANEL */}
-      <div className="mx-4">
-        <TradeLogPanel records={tradeLog} />
-      </div>
+      <TradeLogPanel />
 
       {/* STOCK CARDS */}
       <main className="p-4">
