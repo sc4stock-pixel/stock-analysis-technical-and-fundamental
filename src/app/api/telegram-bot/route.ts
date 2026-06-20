@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseFillCommand, selectFillTarget, applyFill, stripNaN } from "@/lib/fill-command";
+import { parseFillCommand, selectFillTarget, applyFill, stripNaN, isFillable } from "@/lib/fill-command";
 import { slippageLabel } from "@/lib/slippage";
 import type { TradeLogRecord } from "@/types/trade-log";
 
@@ -146,18 +146,36 @@ async function handleFill(token: string, chatId: number, text: string): Promise<
     const log = await readTradeLog(kvUrl, kvToken);
 
     if (cmd.mode === "list") {
-      const unfilled = log.filter((r) => r.actual_fill_price == null);
-      if (unfilled.length === 0) { await replyTo(token, chatId, "No unfilled records."); return; }
-      const lines = unfilled.map(
-        (r, i) => `${i + 1}. <code>${r.id.replace(/\.HK/g, "")}</code> @ ${r.signal_price}`);
-      await replyTo(token, chatId,
-        ["<b>Unfilled records</b>", ...lines, "", "Reply: <code>/fill TICKER PRICE [date]</code>"].join("\n"));
+      const fillable = log.filter(isFillable);
+      const provisional = log.filter((r) => r.actual_fill_price == null && !r.confirmed);
+      if (fillable.length === 0 && provisional.length === 0) {
+        await replyTo(token, chatId, "No unfilled records."); return;
+      }
+      const out: string[] = [];
+      if (fillable.length) {
+        out.push("<b>Fillable records</b>");
+        fillable.forEach((r, i) =>
+          out.push(`${i + 1}. <code>${r.id.replace(/\.HK/g, "")}</code> @ ${r.signal_price}`));
+        out.push("", "Reply: <code>/fill TICKER PRICE [date]</code>");
+      }
+      if (provisional.length) {
+        if (out.length) out.push("");
+        out.push("⏳ <b>Provisional — not fillable</b> (unconfirmed intraday flips)");
+        provisional.forEach((r) =>
+          out.push(`• <code>${r.id.replace(/\.HK/g, "")}</code> @ ${r.signal_price}`));
+      }
+      await replyTo(token, chatId, out.join("\n"));
       return;
     }
 
     const target = selectFillTarget(log, cmd.selector);
     if (target.kind === "none") {
       await replyTo(token, chatId, "No matching unfilled record. Try <code>/fill</code> to list.");
+      return;
+    }
+    if (target.kind === "provisional") {
+      await replyTo(token, chatId,
+        `⏳ <code>${target.id.replace(/\.HK/g, "")}</code> is a provisional (unconfirmed intraday) flip — not fillable. It may never have executed.`);
       return;
     }
     if (target.kind === "ambiguous") {

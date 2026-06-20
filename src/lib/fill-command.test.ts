@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseFillCommand, selectFillTarget, applyFill, stripNaN } from "./fill-command";
+import { parseFillCommand, selectFillTarget, applyFill, stripNaN, isFillable } from "./fill-command";
 import type { TradeLogRecord } from "@/types/trade-log";
 
 function rec(p: Partial<TradeLogRecord>): TradeLogRecord {
@@ -62,6 +62,29 @@ describe("selectFillTarget", () => {
   });
   it("ticker all filled → none", () => {
     expect(selectFillTarget(log, { kind: "ticker", ticker: "B" })).toEqual({ kind: "none" });
+  });
+  it("ticker with only a provisional (unconfirmed) unfilled record → none", () => {
+    const prov = [rec({ id: "P|2026-06-12|entry", ticker: "P", confirmed: false })];
+    expect(selectFillTarget(prov, { kind: "ticker", ticker: "P" })).toEqual({ kind: "none" });
+  });
+  it("ticker ignores provisional, infers the confirmed unfilled one", () => {
+    const mix = [
+      rec({ id: "Q|2026-06-12|entry", ticker: "Q", date: "2026-06-12", confirmed: false }),
+      rec({ id: "Q|2026-06-10|entry", ticker: "Q", date: "2026-06-10", confirmed: true }),
+    ];
+    expect(selectFillTarget(mix, { kind: "ticker", ticker: "Q" })).toEqual({ kind: "one", id: "Q|2026-06-10|entry" });
+  });
+  it("explicit id on a provisional record → provisional", () => {
+    const prov = [rec({ id: "P|2026-06-12|entry", ticker: "P", confirmed: false })];
+    expect(selectFillTarget(prov, { kind: "id", id: "P|2026-06-12|entry" })).toEqual({ kind: "provisional", id: "P|2026-06-12|entry" });
+  });
+});
+
+describe("isFillable", () => {
+  it("true only for confirmed + unfilled", () => {
+    expect(isFillable(rec({ confirmed: true, actual_fill_price: null }))).toBe(true);
+    expect(isFillable(rec({ confirmed: false, actual_fill_price: null }))).toBe(false);
+    expect(isFillable(rec({ confirmed: true, actual_fill_price: 5 }))).toBe(false);
   });
 });
 

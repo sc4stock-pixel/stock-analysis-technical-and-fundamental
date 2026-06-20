@@ -29,21 +29,33 @@ export function parseFillCommand(text: string): FillCommand {
   return { mode: "fill", selector, price, date: dateStr ?? null };
 }
 
+// A record is fillable only when it's a CONFIRMED (EOD-ratified) flip that isn't
+// filled yet. Provisional intraday flips (confirmed === false) may never have
+// executed — a same-day SuperTrend re-cross that the EOD bar didn't sustain — so
+// they must not be filled.
+export function isFillable(r: TradeLogRecord): boolean {
+  return r.confirmed === true && r.actual_fill_price == null;
+}
+
 export type TargetResult =
   | { kind: "one"; id: string }
   | { kind: "none" }
+  | { kind: "provisional"; id: string }
   | { kind: "ambiguous"; ids: string[] };
 
 export function selectFillTarget(log: TradeLogRecord[], sel: FillSelector): TargetResult {
   if (sel.kind === "id") {
-    return log.some((r) => r.id === sel.id) ? { kind: "one", id: sel.id } : { kind: "none" };
+    const rec = log.find((r) => r.id === sel.id);
+    if (!rec) return { kind: "none" };
+    if (!rec.confirmed) return { kind: "provisional", id: sel.id };
+    return { kind: "one", id: sel.id };
   }
-  const unfilled = log
-    .filter((r) => r.ticker.toUpperCase() === sel.ticker && r.actual_fill_price == null)
+  const fillable = log
+    .filter((r) => r.ticker.toUpperCase() === sel.ticker && isFillable(r))
     .sort((a, b) => b.date.localeCompare(a.date));
-  if (unfilled.length === 0) return { kind: "none" };
-  if (unfilled.length === 1) return { kind: "one", id: unfilled[0].id };
-  return { kind: "ambiguous", ids: unfilled.map((r) => r.id) };
+  if (fillable.length === 0) return { kind: "none" };
+  if (fillable.length === 1) return { kind: "one", id: fillable[0].id };
+  return { kind: "ambiguous", ids: fillable.map((r) => r.id) };
 }
 
 export function applyFill(
