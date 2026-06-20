@@ -2,9 +2,13 @@ import type { WorkerTickerState, WorkerEvent } from "@/types/worker-state";
 
 export const KRONOS_NOISE_THRESHOLD = 25;
 
+// 20-day forecast % move vs the model's own baseline. Address bar 20 BY POSITION
+// (index 19), matching forecastBox.ts (p[19]/t3) and telegram-report.ts (p50[19]).
+// Using p50[p50.length-1] would silently read the wrong horizon if the generator ever
+// emits more than 20 bars — a future flipPx-class divergence. Requires a full 20-bar array.
 export function pct20d(p50: number[] | undefined, lastPrice: number | undefined): number | null {
-  if (!p50 || p50.length === 0 || !lastPrice) return null;
-  return Math.round((p50[p50.length - 1] / lastPrice - 1) * 1000) / 10;
+  if (!p50 || p50.length < 20 || !lastPrice) return null;
+  return Math.round((p50[19] / lastPrice - 1) * 1000) / 10;
 }
 export function downsideToStopPct(t: Pick<WorkerTickerState, "dir" | "price" | "stop">): number | null {
   if (t.dir !== "up" || !t.stop || !t.price) return null;

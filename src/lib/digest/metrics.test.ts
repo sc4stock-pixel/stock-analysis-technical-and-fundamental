@@ -2,10 +2,14 @@ import { describe, it, expect } from "vitest";
 import { pct20d, downsideToStopPct, distanceToFlipPct, eventCount, isDefaultParams, fmtPct, fmtKronos } from "./metrics";
 
 describe("digest metrics", () => {
-  it("pct20d: last/last_price - 1 as percent, 1dp", () => {
-    expect(pct20d([100, 102, 110], 100)).toBeCloseTo(10, 5);
+  it("pct20d: bar-20 (index 19)/last_price - 1 as percent, 1dp", () => {
+    // index 19 is the 20d horizon; trailing elements beyond bar 20 must be ignored
+    const p50 = [...Array(19).fill(105), 110];        // p50[19] = 110
+    expect(pct20d(p50, 100)).toBeCloseTo(10, 5);
+    expect(pct20d([...p50, 999, 999], 100)).toBeCloseTo(10, 5); // longer array → still bar 20
+    expect(pct20d([100, 102, 110], 100)).toBeNull();  // <20 bars → null (incomplete horizon)
     expect(pct20d([], 100)).toBeNull();
-    expect(pct20d([110], 0)).toBeNull();
+    expect(pct20d(p50, 0)).toBeNull();
     expect(pct20d(undefined, 100)).toBeNull();
   });
   it("downsideToStopPct: only for dir up", () => {
