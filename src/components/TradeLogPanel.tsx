@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import type { TradeLogRecord } from "@/types/trade-log";
 import { computeSlippage, summarize } from "@/lib/slippage";
+import InfoTooltip from "@/components/InfoTooltip";
 
 type SortKey = "date" | "ticker" | "slippage";
 
@@ -67,6 +68,7 @@ export default function TradeLogPanel() {
           <span className="text-[#00d4ff] text-xs font-bold tracking-widest">
             📒 TRADE LOG — EXECUTION ATTRIBUTION
           </span>
+          <InfoTooltip id="trades" />
           <span className="text-[#4a6080] text-xs">
             ({summary.filled}/{summary.filled + summary.unfilled} filled)
           </span>
