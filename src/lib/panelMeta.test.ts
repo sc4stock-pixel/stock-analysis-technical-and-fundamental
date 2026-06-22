@@ -3,11 +3,11 @@ import { PANEL_META, FRESHNESS, getPanelMeta } from "./panelMeta";
 
 const EXPECTED_IDS = [
   "alerts", "macro-us", "macro-hk", "portfolio",
-  "positions", "stock", "chart", "nav", "config",
+  "positions", "stock", "chart", "nav", "trades", "config",
 ];
 
 describe("panelMeta", () => {
-  it("has exactly the 9 expected panel ids", () => {
+  it("has exactly the 10 expected panel ids", () => {
     expect(PANEL_META.map((p) => p.id)).toEqual(EXPECTED_IDS);
   });
 

@@ -97,6 +97,19 @@ export const PANEL_META: PanelMeta[] = [
     ],
   },
   {
+    id: "trades",
+    label: "Trade Log",
+    meaning: "Signal-vs-execution slippage per Autopilot trade. To record your real fill, message the Telegram bot: /fill TICKER PRICE [date] — e.g. /fill 0939 8.95 (date defaults to today, HKT). Bare /fill lists fillable records.",
+    cadence: "A record appears when the worker logs a flip; fills are entered manually via Telegram /fill.",
+    detail: [
+      "Slippage = (fill ÷ signal − 1) × 100 · Red = adverse fill · Green = favorable · unfilled rows show —",
+      "Adverse is direction-aware: entry filled above signal, or exit filled below signal",
+      "Summary splits avg slippage by params_source (optimized vs default_fallback) to audit execution quality",
+      "prov = provisional intraday flip (confirmed:false) — may never have executed, so it is NOT fillable",
+      "/fill TICKER PRICE [YYYY-MM-DD] infers the record; /fill <id> PRICE for an exact id; admin-gated",
+    ],
+  },
+  {
     id: "config",
     label: "Settings",
     meaning: "Analysis & display configuration controls.",
