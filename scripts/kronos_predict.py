@@ -28,7 +28,12 @@ from model import Kronos, KronosTokenizer, KronosPredictor  # noqa: E402
 from forecast_metrics import dir_hits, mae  # noqa: E402
 
 PRED_LEN = 20
-SAMPLE_COUNT = 5
+# Kronos is generative/stochastic — each draw is a random path; the point forecast
+# is the median over SAMPLE_COUNT draws. The validated demo (kronos_demo.py) used 30
+# paths for a stable median; 5 was under-sampled and gave a noisy point forecast.
+# Bumped to 30 for the 4-week probation (through 2026-07-22) so the model is judged at
+# full strength. ~6x the per-stock CPU; well within the GHA job timeout.
+SAMPLE_COUNT = 30
 # Context bars fed to the model. Kronos normalizes each input to zero-mean/unit-std
 # over this window and mean-reverts toward it. A long window (e.g. 400) puts a
 # strongly-trending stock's current price many sigma above the window mean, causing
