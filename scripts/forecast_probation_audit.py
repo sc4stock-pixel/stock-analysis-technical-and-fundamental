@@ -19,8 +19,14 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 FILES = {"KRONOS": "kronos_forecasts.json", "TIMESFM": "timesfm_forecasts.json"}
-HORIZONS = {"5d": 5, "10d": 10, "20d": 20}   # business-day offsets -> p50 index h-1
+HORIZONS = {"2d": 2, "5d": 5, "10d": 10, "15d": 15, "20d": 20}  # bday offset -> p50[h-1]
 MATCH_TOL_DAYS = 4                           # realized-day match tolerance (holidays)
+# Conviction buckets for the 5d horizon. The 2026-06-24 audit found Kronos's 5d
+# directional accuracy is driven by the SIZE of the predicted move, not the horizon:
+# small predicted moves are noise, large ones carry signal. The probation keep/kill
+# test (2026-07-22) is whether the high-conviction bucket holds, NOT the 20d number.
+CONVICTION_HORIZON = 5
+CONVICTION_BUCKETS = [("|f|<2%", 0.0, 2.0), ("2-5%", 2.0, 5.0), (">5%", 5.0, 1e9)]
 
 
 def sh(*args):
@@ -112,6 +118,8 @@ def audit():
         realized = build_realized(model)
         # stats[horizon] = [dir_hits, n, sum_abs_pct_err]
         stats = {h: [0, 0, 0.0] for h in HORIZONS}
+        mkt = {h: {"US": [0, 0], "HK": [0, 0]} for h in HORIZONS}  # per-market hits
+        conv = {b[0]: [0, 0] for b in CONVICTION_BUCKETS}          # 5d conviction buckets
         snaps = 0
         for sha, fdate in commits_for(path):
             d = load_blob(sha, path)
@@ -138,24 +146,52 @@ def audit():
                     _, rclose = r
                     if sign(rclose - base) == 0:
                         continue
-                    stats[hname][0] += sign(fc - base) == sign(rclose - base)
+                    hit = sign(fc - base) == sign(rclose - base)
+                    stats[hname][0] += hit
                     stats[hname][1] += 1
                     stats[hname][2] += abs(fc - rclose) / base * 100
+                    m = "HK" if tkr.endswith(".HK") else "US"
+                    mkt[hname][m][0] += hit
+                    mkt[hname][m][1] += 1
+                    if hbd == CONVICTION_HORIZON:
+                        pm = abs(fc - base) / base * 100  # predicted move size
+                        for bname, lo, hi in CONVICTION_BUCKETS:
+                            if lo <= pm < hi:
+                                conv[bname][0] += hit
+                                conv[bname][1] += 1
+                                break
 
         print(f"========== {model}  ({snaps} daily snapshots in history) ==========")
-        print(f"  {'horizon':<8}{'hit-rate':>16}{'95% CI':>16}{'p vs50%':>10}{'MAE%':>9}")
+        print(f"  {'horizon':<8}{'hit-rate':>16}{'95% CI':>16}{'p vs50%':>10}{'MAE%':>9}"
+              f"{'US':>11}{'HK':>11}")
         for hname in HORIZONS:
             hits, n, errsum = stats[hname]
             if n == 0:
                 print(f"  {hname:<8}{'(not matured yet)':>16}")
                 continue
             lo, hi = wilson(hits, n)
+            uk, un = mkt[hname]["US"]; hk, hn = mkt[hname]["HK"]
+            us_s = f"{uk/un*100:.0f}%({un})" if un else "-"
+            hk_s = f"{hk/hn*100:.0f}%({hn})" if hn else "-"
             print(f"  {hname:<8}{f'{hits}/{n} ({hits/n*100:.0f}%)':>16}"
                   f"{f'[{lo*100:.0f},{hi*100:.0f}]':>16}{binom_p(hits, n):>10.2f}"
-                  f"{errsum/n:>8.1f}%")
+                  f"{errsum/n:>8.1f}%{us_s:>11}{hk_s:>11}")
+        # Conviction buckets at the 5d horizon — the probation keep/kill criterion.
+        print(f"  {CONVICTION_HORIZON}d conditioned on predicted move size (CONVICTION):")
+        for bname, _, _ in CONVICTION_BUCKETS:
+            k, n = conv[bname]
+            if n == 0:
+                print(f"     {bname:<8} (none)")
+                continue
+            lo, hi = wilson(k, n)
+            edge = " <-- EDGE" if (lo > 0.5 and binom_p(k, n) < 0.05) else ""
+            print(f"     {bname:<8} {k}/{n} = {k/n*100:.0f}%  "
+                  f"CI[{lo*100:.0f},{hi*100:.0f}]  p={binom_p(k, n):.2f}{edge}")
         print()
-    print("Read: hit-rate >50% with p<0.05 and CI lower-bound >50% = real edge.")
-    print("Anything spanning 50% = no detectable skill (coin flip).")
+    print("KEEP/KILL (probation): a model earns KEEP only if some horizon OR the")
+    print(">5% conviction bucket shows >50% with p<0.05 AND CI lower-bound >50%.")
+    print("Caveat: daily forecasts overlap, so effective n << reported n — treat a")
+    print("lone significant bucket as a hypothesis, weight by breadth across tickers.")
 
 
 if __name__ == "__main__":
