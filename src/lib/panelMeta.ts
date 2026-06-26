@@ -53,9 +53,9 @@ export const PANEL_META: PanelMeta[] = [
       "Signal — BUY / SELL / HOLD (score + confirmation logic)",
       "ST — current SuperTrend direction (↑ long / ↓ short)",
       "SEPA — Minervini SEPA conditions met, 0–3 (display-only overlay; HK shows —)",
-      "TFM 20d / K 20d — TimesFM & Kronos 20-day forecast vs current price, %. Hover a cell for each model's accuracy (direction hits / 20) and their 20d agreement. Display-only.",
+      "K 5d / naive 5d — Kronos 5-day forecast vs current price, %, with a ✦ when it's a high-conviction (>5%) call; naive 5d is the drift benchmark Kronos must beat. Display-only.",
       "RSI · MACD H — momentum indicators",
-      "Backtest, header-colored: SC (cyan)=Score · ST (amber)=SuperTrend · TFM (purple)=TimesFM — each 2Y%/1Y% return, Sharpe, Alpha",
+      "Backtest, header-colored: SC (cyan)=Score · ST (amber)=SuperTrend — each 2Y%/1Y% return, Sharpe, Alpha",
     ],
   },
   {
@@ -77,10 +77,10 @@ export const PANEL_META: PanelMeta[] = [
   {
     id: "chart",
     label: "Forecast Chart",
-    meaning: "Price chart + display-only Kronos / TimesFM forecast overlay & track-record scorecard.",
-    cadence: "Kronos & TimesFM regenerate daily (staggered).",
+    meaning: "Price chart + display-only Kronos forecast overlay & track-record scorecard.",
+    cadence: "Kronos regenerates daily.",
     detail: [
-      "Kronos / TimesFM are display-only overlays with a track record (direction-hit rate + MAE). They never feed signals, scoring, or execution.",
+      "Kronos is a display-only overlay with a track record (direction-hit rate + MAE). It never feeds signals, scoring, or execution.",
     ],
   },
   {
@@ -122,7 +122,6 @@ export const FRESHNESS: ReadonlyArray<readonly [string, string]> = [
   ["Execution alerts", "HK 10:00·14:00·16:30 / US 08:55"],
   ["EOD breadth report", "HK 16:30 / US 08:55"],
   ["Kronos forecast", "daily (staggered)"],
-  ["TimesFM forecast", "daily (staggered)"],
 ];
 
 export function getPanelMeta(id: string): PanelMeta | undefined {

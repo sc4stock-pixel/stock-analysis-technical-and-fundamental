@@ -35,11 +35,13 @@ describe("assembleDigestPrompt", () => {
     const p = assembleDigestPrompt(inputs);
     expect(p).toContain("—");
   });
-  it("includes a column legend disambiguating stop/flip and Kronos/TimesFM", () => {
+  it("includes a column legend disambiguating stop/flip and Kronos horizons", () => {
     const p = assembleDigestPrompt(inputs);
     expect(p).toContain("COLUMN LEGEND");
     expect(p).toContain("the BUY / flip-up trigger");
     expect(p).toContain("flip line (stop)");
-    expect(p).toContain("PRIMARY forecast");
+    expect(p).toContain("K5d");
+    expect(p).toContain("high-conviction");
+    expect(p).not.toContain("TimesFM");
   });
 });

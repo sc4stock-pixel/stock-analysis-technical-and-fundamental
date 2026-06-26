@@ -2,7 +2,6 @@ import type { WorkerState } from "@/types/worker-state";
 import { assembleDigestPrompt } from "./assemble";
 
 const KRONOS_URL = "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/kronos_forecasts.json";
-const TIMESFM_URL = "https://raw.githubusercontent.com/sc4stock-pixel/stock-analysis-technical-and-fundamental/main/timesfm_forecasts.json";
 
 export interface DigestPromptResult { prompt: string; fetchedAt: string; dataAsOf: string | null; }
 
@@ -24,13 +23,12 @@ async function fetchWorkerState(): Promise<WorkerState> {
 }
 
 export async function generateDigestPrompt(): Promise<DigestPromptResult> {
-  const [state, kronos, timesfm] = await Promise.all([
+  const [state, kronos] = await Promise.all([
     fetchWorkerState(),
     fetchJson(KRONOS_URL),
-    fetchJson(TIMESFM_URL),
   ]);
   return {
-    prompt: assembleDigestPrompt({ state, kronos: kronos ?? {}, timesfm: timesfm ?? {} }),
+    prompt: assembleDigestPrompt({ state, kronos: kronos ?? {} }),
     fetchedAt: new Date().toISOString(),
     dataAsOf: state.updatedAt,
   };
