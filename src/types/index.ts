@@ -476,6 +476,25 @@ export interface ForecastHistorical {
   mae: number;
 }
 
+export type ForecastVerdict =
+  | "EDGE_HIGH_CONVICTION" | "EDGE_BROAD" | "NO_EDGE" | "INSUFFICIENT" | "BASELINE";
+
+export interface SkillStat {
+  hits: number; n: number; rate: number; ci_lo: number; ci_hi: number; p: number;
+}
+export interface ModelSkill {
+  horizons: Record<string, SkillStat | null>;
+  conviction_5d: Record<"lt2" | "2to5" | "gt5", SkillStat | null>;
+  verdict: ForecastVerdict;
+}
+export interface ForecastSkill {
+  _metadata: {
+    conviction_pct: number; drift_window: number; generated_at_hk: string;
+    history_days: number; match_tol_days: number;
+  };
+  KRONOS: ModelSkill; NAIVE: ModelSkill; TIMESFM: ModelSkill;
+}
+
 export interface KronosForecast {
   last_price: number;
   last_date: string;
