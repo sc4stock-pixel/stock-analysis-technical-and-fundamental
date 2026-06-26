@@ -348,11 +348,7 @@ export default function StockCard({ result, config, timesfm, kronos, forecastSki
         return (
           <div className="mx-3 mb-3 border border-[#ff8c42]/40 rounded p-3 text-xs">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[#ff8c42] font-bold flex items-center gap-1.5">
-                🔮 KRONOS PREDICTION
-                {flags.high && <span className="text-[#00ff88]" title="High conviction (|5d| &gt; 5%)">✦</span>}
-                {flags.unreliable && <span className="text-[#ffa502]" title="High recent MAE — low reliability">⚠</span>}
-              </div>
+              <div className="text-[#ff8c42] font-bold">🔮 KRONOS PREDICTION</div>
             </div>
             {/* Hero 5d cell */}
             <div className="text-center bg-[#0f1629] rounded p-3 mb-2">
@@ -363,6 +359,22 @@ export default function StockCard({ result, config, timesfm, kronos, forecastSki
                   <div className={`font-mono ${c5d.pct >= 0 ? "text-green-400" : "text-red-400"}`}>
                     {c5d.pct >= 0 ? "+" : ""}{c5d.pct.toFixed(1)}%
                   </div>
+                  {(flags.high || flags.unreliable) && (
+                    <div className="flex items-center justify-center gap-1.5 mt-1.5">
+                      {flags.high && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-bold tracking-wide text-[#00ff88] border border-[#00ff88]/50 bg-[#00ff88]/10"
+                          title="Kronos predicts a >5% move — its high-conviction regime">
+                          ✦ HIGH CONVICTION
+                        </span>
+                      )}
+                      {flags.unreliable && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-bold tracking-wide text-[#ffa502] border border-[#ffa502]/50 bg-[#ffa502]/10"
+                          title="High recent forecast error (relative MAE) — treat this path as unreliable">
+                          ⚠ LOW RELIABILITY
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="text-[#3a4a64]">—</div>
