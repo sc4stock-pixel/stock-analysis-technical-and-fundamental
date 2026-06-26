@@ -1,4 +1,4 @@
-import { KronosForecast, TimesfmPriceTargets, ModelSkill } from "@/types";
+import { KronosForecast, ModelSkill } from "@/types";
 
 export interface ForecastCell {
   price: number;
@@ -8,11 +8,7 @@ export interface ForecastCell {
 export interface ForecastRowData {
   /** [5d, 10d, 20d] — each null when that horizon is unavailable. */
   cells: (ForecastCell | null)[];
-  /** historical 20-session direction hits (out of 20); null if absent. */
-  dirHits: number | null;
 }
-
-export type Agreement = "agree-up" | "agree-down" | "diverge" | null;
 
 const finite = (v: number | null | undefined): v is number =>
   v != null && Number.isFinite(v);
@@ -34,42 +30,14 @@ export function kronosRow(k: KronosForecast | undefined): ForecastRowData | null
   const base = k.last_price;
   return {
     cells: [p[4], p[9], p[19]].map((v) => cell(v, base)),
-    dirHits: k.historical?.dir_hits ?? null,
   };
 }
 
-/** TimesFM: t1/t2/t3 for 5/10/20d, % vs its own last_price (fallback to currentPrice). */
-export function timesfmRow(
-  t: TimesfmPriceTargets | undefined,
-  currentPrice: number,
-): ForecastRowData | null {
-  if (!t) return null;
-  const base = finite(t.last_price) && t.last_price! > 0 ? t.last_price! : currentPrice;
-  return {
-    cells: [t.t1, t.t2, t.t3].map((v) => cell(v, base)),
-    dirHits: t.historical?.dir_hits ?? null,
-  };
-}
+// --- 5d conviction helpers ---
 
-/** 20d directional agreement between two model rows. null if either 20d cell is missing. */
-export function agreement20(
-  a: ForecastRowData | null,
-  b: ForecastRowData | null,
-): Agreement {
-  const ca = a?.cells[2];
-  const cb = b?.cells[2];
-  if (!ca || !cb) return null;
-  const aUp = ca.pct >= 0;
-  const bUp = cb.pct >= 0;
-  if (aUp === bUp) return aUp ? "agree-up" : "agree-down";
-  return "diverge";
-}
-
-// --- 5d conviction helpers (parity with scripts/naive_baseline.py) ---
-
-export const CONVICTION_PCT = 5.0; // PARITY with scripts/naive_baseline.py + harness
+export const CONVICTION_PCT = 5.0; // PARITY: keep in lockstep with report/forecast_display.py
 export const REL_MAE_WARN = 15.0; // % relative MAE -> low-reliability flag
-const DRIFT_WINDOW = 60,
+const DRIFT_WINDOW = 60, // PARITY: keep in lockstep with report/forecast_display.py
   HORIZON = 5;
 
 /** Naive drift baseline from a close series (oldest->newest). cells:[5d,null,null]. */
@@ -85,7 +53,7 @@ export function naiveRow(
   const drift = rets.reduce((a, b) => a + b, 0) / rets.length;
   const last = w[w.length - 1];
   const price = last * Math.exp(drift * HORIZON);
-  return { cells: [cell(price, last), null, null], dirHits: null };
+  return { cells: [cell(price, last), null, null] };
 }
 
 export interface Flags {

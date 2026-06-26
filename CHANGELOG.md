@@ -2,6 +2,21 @@
 
 All notable changes to the web app are documented here. Dates are HKT.
 
+## 2026-06-26 — 5d-primary forecast display redesign + dead code cleanup
+
+Replaced the broken `dir_hits/20` forecast display with a 5d-primary layout featuring:
+- **Conviction flags**: ✦ high-conviction (>5% predicted move), ⚠ low-reliability (shown together, not mutually exclusive)
+- **Naive 60d-drift benchmark** column in portfolio bar and stock card
+- **Model-level true-OOS skill badge** from `forecast_skill.json` (emitted by probation harness + daily GHA)
+- **TimesFM removed from all display** (generation + probation harness intentionally kept through 2026-07-22)
+- **Morning Digest** repointed to Kronos 5d
+
+Dead code removed: `ForecastModelRow` component, `timesfmRow`/`agreement20` exports + tests,
+`dirHits` field on `ForecastRowData`, `Agreement` type.
+
+Key files: `src/lib/forecastBox.ts`, `src/components/StockCard.tsx`,
+`src/components/PortfolioSummaryBar.tsx`, `src/lib/forecastBox.test.ts`.
+
 ## 2026-06-23 — Trade Log feature (viewer + Telegram /fill + provisional handling + legend)
 
 Shipped via PRs #21, #22, #23 (all squash-merged to main). Surfaces the autopilot

@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, TimesfmPriceTargets, ForecastSkill } from "@/types";
 import { regimeColor } from "@/lib/regime";
-import { kronosRow, timesfmRow, agreement20, ForecastRowData, naiveRow, convictionFlags, skillBadge } from "@/lib/forecastBox";
+import { kronosRow, naiveRow, convictionFlags, skillBadge } from "@/lib/forecastBox";
 import OverviewTab    from "./tabs/OverviewTab";
 import BacktestTab   from "./tabs/BacktestTab";
 import MonteCarloTab from "./tabs/MonteCarloTab";
@@ -122,37 +122,6 @@ function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
   return { ...result, backtest: stBt };
 }
 
-const FORECAST_LABELS = ["5d", "10d", "20d"];
-
-function ForecastModelRow({ name, nameColor, row }: {
-  name: string; nameColor: string; row: ForecastRowData | null;
-}) {
-  return (
-    <div className="grid grid-cols-[64px_1fr_1fr_1fr] gap-2 items-center">
-      <div className="text-[0.7rem]">
-        <div className="font-bold" style={{ color: nameColor }}>{name}</div>
-        {row?.dirHits != null
-          ? <div className="text-[#6b85a0] text-[0.6rem]">{row.dirHits}/20 dir</div>
-          : <div className="text-[#3a4a64] text-[0.6rem]">no data</div>}
-      </div>
-      {FORECAST_LABELS.map((lbl, i) => {
-        const c = row?.cells[i] ?? null;
-        if (!c) {
-          return <div key={lbl} className="text-center bg-[#0c1322] rounded p-2 text-[#3a4a64]">—</div>;
-        }
-        return (
-          <div key={lbl} className="text-center bg-[#0f1629] rounded p-2">
-            <div className="text-[#4a6080] text-[0.6rem]">{lbl}</div>
-            <div className="text-white font-bold">{c.price.toFixed(2)}</div>
-            <div className={c.pct >= 0 ? "text-green-400" : "text-red-400"}>
-              {c.pct >= 0 ? "+" : ""}{c.pct.toFixed(1)}%
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 export default function StockCard({ result, config, timesfm, kronos, forecastSkill, forcedTab }: Props) {
   const [tab, setTab] = useState<Tab>("OVERVIEW");
