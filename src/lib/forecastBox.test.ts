@@ -71,3 +71,45 @@ describe("agreement20", () => {
     expect(agreement20(null, up)).toBeNull();
   });
 });
+
+// --- 5d conviction helpers ---
+import { naiveRow, convictionFlags, skillBadge, CONVICTION_PCT } from "@/lib/forecastBox";
+
+describe("naiveRow", () => {
+  it("computes 5d drift % from 60d window", () => {
+    const closes = Array.from({ length: 80 }, (_, i) => 100 * 1.001 ** i);
+    const r = naiveRow(closes)!;
+    expect(r.cells[0]!.pct).toBeCloseTo((Math.exp(0.001 * 5) - 1) * 100, 1);
+  });
+  it("returns null when series too short", () => {
+    expect(naiveRow(Array(10).fill(100))).toBeNull();
+  });
+});
+
+describe("convictionFlags", () => {
+  it("HIGH when |5d%| > 5", () => {
+    expect(convictionFlags({ pct: 6.3, price: 1 } as any, 2).high).toBe(true);
+  });
+  it("low when |5d%| <= 5", () => {
+    expect(convictionFlags({ pct: 2.1, price: 1 } as any, 2).high).toBe(false);
+  });
+  it("warns when relMae large; flags coexist (do not override)", () => {
+    const f = convictionFlags({ pct: -8.1, price: 1 } as any, 30);
+    expect(f.high).toBe(true);
+    expect(f.unreliable).toBe(true);
+  });
+});
+
+describe("skillBadge", () => {
+  it("provisional edge text for EDGE_HIGH_CONVICTION", () => {
+    const b = skillBadge({ verdict: "EDGE_HIGH_CONVICTION",
+      conviction_5d: { gt5: { rate: 0.81 } } } as any,
+      { conviction_5d: { gt5: { rate: 0.52 } } } as any);
+    expect(b.label).toMatch(/provisional/i);
+    expect(b.detail).toMatch(/81%/);
+    expect(b.detail).toMatch(/52%/);
+  });
+  it("muted no-edge label for NO_EDGE", () => {
+    expect(skillBadge({ verdict: "NO_EDGE" } as any, null).tone).toBe("muted");
+  });
+});
