@@ -45,3 +45,14 @@ jobs:
         with:
           commit_message: "Update Kronos forecasts"
           file_pattern: "kronos_forecasts.json"
+
+      - name: Update forecast_skill.json
+        run: |
+          python3 scripts/forecast_probation_audit.py --emit-skill-json forecast_skill.json
+          if ! git diff --quiet forecast_skill.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add forecast_skill.json
+            git commit -m "Update forecast_skill from probation audit"
+            git push
+          fi
