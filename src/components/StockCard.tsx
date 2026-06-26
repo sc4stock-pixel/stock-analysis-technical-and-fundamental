@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
-import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, TimesfmPriceTargets } from "@/types";
+import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, TimesfmPriceTargets, ForecastSkill } from "@/types";
 import { regimeColor } from "@/lib/regime";
-import { kronosRow, timesfmRow, agreement20, ForecastRowData } from "@/lib/forecastBox";
+import { kronosRow, timesfmRow, agreement20, ForecastRowData, naiveRow, convictionFlags, skillBadge } from "@/lib/forecastBox";
 import OverviewTab    from "./tabs/OverviewTab";
 import BacktestTab   from "./tabs/BacktestTab";
 import MonteCarloTab from "./tabs/MonteCarloTab";
@@ -15,6 +15,7 @@ interface Props {
   config: AppConfig;
   timesfm?: TimesfmPriceTargets;
   kronos?: import("@/types").KronosForecast;
+  forecastSkill?: ForecastSkill | null;
   forcedTab?: Tab;
 }
 
@@ -153,7 +154,7 @@ function ForecastModelRow({ name, nameColor, row }: {
   );
 }
 
-export default function StockCard({ result, config, timesfm, kronos, forcedTab }: Props) {
+export default function StockCard({ result, config, timesfm, kronos, forecastSkill, forcedTab }: Props) {
   const [tab, setTab] = useState<Tab>("OVERVIEW");
   const [strategy, setStrategy] = useState<Strategy>("score");
 
@@ -358,29 +359,74 @@ export default function StockCard({ result, config, timesfm, kronos, forcedTab }
         )}
       </div>
 
-      {/* ── KRONOS & TIMESFM PREDICTIONS (display-only) ── */}
-      {(timesfm || kronos) && (() => {
+      {/* ── KRONOS PREDICTION (5d-primary, display-only) ── */}
+      {kronos && (() => {
         const kRow = kronosRow(kronos);
-        const tRow = timesfmRow(timesfm, result.current_price);
-        const agree = agreement20(kRow, tRow);
-        const badge =
-          agree === "agree-up"   ? { text: "✓ AGREE · 20d",   cls: "text-[#00ff88] border-[#00ff88]/40 bg-[#00ff88]/10" } :
-          agree === "agree-down" ? { text: "✓ AGREE · 20d",   cls: "text-[#ff4757] border-[#ff4757]/40 bg-[#ff4757]/10" } :
-          agree === "diverge"    ? { text: "✗ DIVERGE · 20d", cls: "text-[#ffa502] border-[#ffa502]/40 bg-[#ffa502]/10" } :
-          null;
+        const c5d = kRow?.cells[0] ?? null;
+        const c10d = kRow?.cells[1] ?? null;
+        const c20d = kRow?.cells[2] ?? null;
+        const relMae = kronos.historical?.mae != null && kronos.last_price > 0
+          ? (kronos.historical.mae / kronos.last_price) * 100
+          : null;
+        const flags = convictionFlags(c5d, relMae);
+        const closes = result.chart_bars?.map(b => b.close);
+        const nRow = naiveRow(closes);
+        const naive5d = nRow?.cells[0] ?? null;
+        const badge = skillBadge(forecastSkill?.KRONOS ?? null, forecastSkill?.NAIVE ?? null);
+        const badgeCls =
+          badge.tone === "edge"   ? "text-[#00ff88] border-[#00ff88]/40 bg-[#00ff88]/10" :
+                                    "text-[#4a6080] border-[#1e2d4a] bg-[#0c1322]";
         return (
-          <div className="mx-3 mb-3 border border-[#a78bfa]/40 rounded p-3 text-xs">
+          <div className="mx-3 mb-3 border border-[#ff8c42]/40 rounded p-3 text-xs">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[#a78bfa] font-bold">🔮 KRONOS &amp; TIMESFM PREDICTION</div>
-              {badge && (
-                <span className={`text-[0.6rem] font-mono px-1.5 py-0.5 rounded border ${badge.cls}`}>
-                  {badge.text}
-                </span>
+              <div className="text-[#ff8c42] font-bold flex items-center gap-1.5">
+                🔮 KRONOS PREDICTION
+                {flags.high && <span className="text-[#00ff88]" title="High conviction (|5d| &gt; 5%)">✦</span>}
+                {flags.unreliable && <span className="text-[#ffa502]" title="High recent MAE — low reliability">⚠</span>}
+              </div>
+            </div>
+            {/* Hero 5d cell */}
+            <div className="text-center bg-[#0f1629] rounded p-3 mb-2">
+              <div className="text-[#4a6080] text-[0.6rem]">5d</div>
+              {c5d ? (
+                <>
+                  <div className="text-white font-bold text-lg font-mono">{c5d.price.toFixed(2)}</div>
+                  <div className={`font-mono ${c5d.pct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {c5d.pct >= 0 ? "+" : ""}{c5d.pct.toFixed(1)}%
+                  </div>
+                </>
+              ) : (
+                <div className="text-[#3a4a64]">—</div>
+              )}
+              {/* Naive 5d benchmark */}
+              {naive5d && (
+                <div className="text-[#4a6080] text-[0.6rem] font-mono mt-1">
+                  naive {naive5d.pct >= 0 ? "+" : ""}{naive5d.pct.toFixed(1)}%
+                </div>
               )}
             </div>
-            <div className="space-y-2">
-              <ForecastModelRow name="Kronos"  nameColor="#ff8c42" row={kRow} />
-              <ForecastModelRow name="TimesFM" nameColor="#a78bfa" row={tRow} />
+            {/* Secondary 10d / 20d */}
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              {[{ lbl: "10d", c: c10d }, { lbl: "20d", c: c20d }].map(({ lbl, c }) => (
+                <div key={lbl} className="text-center bg-[#0c1322] rounded p-2">
+                  <div className="text-[#3a4a64] text-[0.55rem]">{lbl}</div>
+                  {c ? (
+                    <>
+                      <div className="text-[#6b85a0] font-mono text-[0.7rem]">{c.price.toFixed(2)}</div>
+                      <div className={`text-[0.65rem] font-mono ${c.pct >= 0 ? "text-green-400/60" : "text-red-400/60"}`}>
+                        {c.pct >= 0 ? "+" : ""}{c.pct.toFixed(1)}%
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-[#3a4a64] text-[0.7rem]">—</div>
+                  )}
+                </div>
+              ))}
+            </div>
+            {/* Skill badge */}
+            <div className={`text-[0.6rem] font-mono px-2 py-1 rounded border ${badgeCls}`}>
+              <span>{badge.tone === "edge" ? "⚡ " : ""}{badge.label}</span>
+              {badge.detail && <span className="text-[#4a6080] ml-1">· {badge.detail}</span>}
             </div>
           </div>
         );
