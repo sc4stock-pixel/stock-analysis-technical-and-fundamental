@@ -35,9 +35,9 @@ export function kronosRow(k: KronosForecast | undefined): ForecastRowData | null
 
 // --- 5d conviction helpers ---
 
-export const CONVICTION_PCT = 5.0; // PARITY: keep in lockstep with report/forecast_display.py
+export const CONVICTION_PCT = 5.0; // PARITY: keep in lockstep with scripts/naive_baseline.py + report/forecast_display.py
 export const REL_MAE_WARN = 15.0; // % relative MAE -> low-reliability flag
-const DRIFT_WINDOW = 60, // PARITY: keep in lockstep with report/forecast_display.py
+const DRIFT_WINDOW = 60, // PARITY: keep in lockstep with scripts/naive_baseline.py + report/forecast_display.py
   HORIZON = 5;
 
 /** Naive drift baseline from a close series (oldest->newest). cells:[5d,null,null]. */
