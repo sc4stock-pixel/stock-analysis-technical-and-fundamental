@@ -232,18 +232,22 @@ export function buildEodReport(
   // Header — swaps to "Holiday Status" when both markets closed
   const header = `<b>${reportHeaderLabel(market, !!bothClosed)}</b> [${dateStr}]`;
 
-  // Breadth: count stocks where close > SMA50
-  const aboveSma50 = valid.filter(r =>
-    r.sepa_metadata?.trend_template_criteria?.c5_price_above_sma50 === true
-  );
+  // Region splits (used by breadth + ordering)
+  const hkStocks = valid.filter(r => r.exchange === "HK");
+  const usStocks = valid.filter(r => r.exchange !== "HK");
+
+  // Breadth: count stocks where close > SMA50, split by region
+  const isAboveSma50 = (r: typeof valid[number]) =>
+    r.sepa_metadata?.trend_template_criteria?.c5_price_above_sma50 === true;
+  const aboveSma50 = valid.filter(isAboveSma50);
   const breadthPct = valid.length > 0
     ? Math.round((aboveSma50.length / valid.length) * 100)
     : 0;
   const breadthEmoji = breadthPct >= 70 ? "🟢" : breadthPct >= 40 ? "🟡" : "🔴";
+  const usAbove = usStocks.filter(isAboveSma50).length;
+  const hkAbove = hkStocks.filter(isAboveSma50).length;
 
   // Order by exchange of interest first
-  const hkStocks = valid.filter(r => r.exchange === "HK");
-  const usStocks = valid.filter(r => r.exchange !== "HK");
   const ordered  = market === "hk"
     ? [...hkStocks, ...usStocks]
     : [...usStocks, ...hkStocks];
@@ -290,6 +294,7 @@ export function buildEodReport(
 
   // Market breadth
   lines.push(`\n${breadthEmoji} <b>MARKET BREADTH:</b> ${aboveSma50.length}/${valid.length} above SMA50 (${breadthPct}%)`);
+  lines.push(`  US ${usAbove}/${usStocks.length} · HK ${hkAbove}/${hkStocks.length}`);
 
   // ST BULLISH — monospace block for column alignment
   if (bullish.length > 0) {
