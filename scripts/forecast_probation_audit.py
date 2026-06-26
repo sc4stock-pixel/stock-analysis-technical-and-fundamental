@@ -18,6 +18,30 @@ import json, math, subprocess, sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+import yfinance as yf
+from naive_baseline import naive_5d_pct, naive_dir, DRIFT_WINDOW
+
+_PRICE_CACHE = {}
+
+
+def price_history(ticker):
+    """2y daily closes as a sorted list of (date_str, close). Cached per run."""
+    if ticker in _PRICE_CACHE:
+        return _PRICE_CACHE[ticker]
+    try:
+        raw = yf.Ticker(ticker).history(period="2y")
+        hist = [(idx.strftime("%Y-%m-%d"), round(float(c), 4))
+                for idx, c in raw["Close"].items()]
+    except Exception as e:
+        print(f"  price_history({ticker}) failed: {e}")
+        hist = []
+    _PRICE_CACHE[ticker] = hist
+    return hist
+
+
+def closes_upto(ticker, date_str):
+    return [c for d, c in price_history(ticker) if d <= date_str]
+
 FILES = {"KRONOS": "kronos_forecasts.json", "TIMESFM": "timesfm_forecasts.json"}
 HORIZONS = {"2d": 2, "5d": 5, "10d": 10, "15d": 15, "20d": 20}  # bday offset -> p50[h-1]
 MATCH_TOL_DAYS = 4                           # realized-day match tolerance (holidays)
@@ -114,6 +138,8 @@ def binom_p(k, n, p=0.5):
 def audit():
     print("FORECAST PROBATION AUDIT — true out-of-sample, from git history")
     print(f"(run {datetime.now():%Y-%m-%d %H:%M})  match tol = +/-{MATCH_TOL_DAYS}d\n")
+    # Collect Kronos 5d scored pairs for the naive baseline pass.
+    kronos_5d_pairs = []   # [(ticker, ld, base, rclose), ...]
     for model, path in FILES.items():
         realized = build_realized(model)
         # stats[horizon] = [dir_hits, n, sum_abs_pct_err]
@@ -154,6 +180,8 @@ def audit():
                     mkt[hname][m][0] += hit
                     mkt[hname][m][1] += 1
                     if hbd == CONVICTION_HORIZON:
+                        if model == "KRONOS":
+                            kronos_5d_pairs.append((tkr, ld, base, rclose))
                         pm = abs(fc - base) / base * 100  # predicted move size
                         for bname, lo, hi in CONVICTION_BUCKETS:
                             if lo <= pm < hi:
@@ -188,6 +216,45 @@ def audit():
             print(f"     {bname:<8} {k}/{n} = {k/n*100:.0f}%  "
                   f"CI[{lo*100:.0f},{hi*100:.0f}]  p={binom_p(k, n):.2f}{edge}")
         print()
+    # --- NAIVE drift baseline, scored on the exact same (ticker, date) pairs as Kronos 5d ---
+    naive_h5 = [0, 0]
+    naive_conv = {b[0]: [0, 0] for b in CONVICTION_BUCKETS}
+    naive_skip = 0
+    for tkr, ld, base, rclose in kronos_5d_pairs:
+        closes = closes_upto(tkr, ld)
+        nd = naive_dir(closes)
+        if nd is None:
+            naive_skip += 1
+            continue
+        hit = nd == sign(rclose - base)
+        naive_h5[0] += hit
+        naive_h5[1] += 1
+        npct = naive_5d_pct(closes)
+        pm = abs(npct) if npct is not None else 0.0
+        for bname, blo, bhi in CONVICTION_BUCKETS:
+            if blo <= pm < bhi:
+                naive_conv[bname][0] += hit
+                naive_conv[bname][1] += 1
+                break
+    print(f"========== NAIVE DRIFT BASELINE  (same {len(kronos_5d_pairs)} Kronos 5d pairs, "
+          f"{naive_skip} skipped for <{DRIFT_WINDOW} closes) ==========")
+    k, n = naive_h5
+    if n:
+        lo, hi = wilson(k, n)
+        print(f"  5d       {f'{k}/{n} ({k/n*100:.0f}%)':>16}"
+              f"{f'[{lo*100:.0f},{hi*100:.0f}]':>16}{binom_p(k, n):>10.2f}")
+    else:
+        print("  5d       (no scorable pairs)")
+    print(f"  5d conditioned on naive predicted move size (CONVICTION):")
+    for bname, _, _ in CONVICTION_BUCKETS:
+        bk, bn = naive_conv[bname]
+        if bn == 0:
+            print(f"     {bname:<8} (none)")
+            continue
+        lo, hi = wilson(bk, bn)
+        print(f"     {bname:<8} {bk}/{bn} = {bk/bn*100:.0f}%  "
+              f"CI[{lo*100:.0f},{hi*100:.0f}]  p={binom_p(bk, bn):.2f}")
+    print()
     print("KEEP/KILL (probation): a model earns KEEP only if some horizon OR the")
     print(">5% conviction bucket shows >50% with p<0.05 AND CI lower-bound >50%.")
     print("Caveat: daily forecasts overlap, so effective n << reported n — treat a")
