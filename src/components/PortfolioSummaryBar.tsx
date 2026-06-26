@@ -67,7 +67,7 @@ const numColor = (v: number | null | undefined, good = 0) =>
 
 type ColKey =
   | "symbol" | "price" | "change_pct" | "regime" | "grade" | "score"
-  | "signal" | "st_status" | "sepa" | "naive_5d" | "k_5d" | "rsi" | "macd_hist"
+  | "signal" | "st_status" | "sepa" | "k_5d" | "naive_5d" | "rsi" | "macd_hist"
   | "sc_500d" | "st_500d" | "sc_250d" | "st_250d"
   | "sc_sharpe" | "sc_alpha" | "st_sharpe" | "st_alpha";
 
@@ -93,10 +93,10 @@ const COLS: ColDef[] = [
   { key: "signal",     label: "Signal",     align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
   { key: "st_status",  label: "ST",         align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
   { key: "sepa",       label: "SEPA",       align: "center", sortVal: r => r.sepa_metadata?.sepa_score ?? -1 },
-  { key: "naive_5d",   label: "naive 5d",   labelColor: "text-[#6b85a0]", align: "right",
-    sortVal: (r) => naiveRow(r.chart_bars?.map(b => b.close))?.cells[0]?.pct ?? -999 },
   { key: "k_5d",       label: "K 5d",       labelColor: K_HDR, align: "right",
     sortVal: (r, _tfm, kro) => kronosRow(kro?.[r.symbol])?.cells[0]?.pct ?? -999 },
+  { key: "naive_5d",   label: "naive 5d",   labelColor: "text-[#6b85a0]", align: "right",
+    sortVal: (r) => naiveRow(r.chart_bars?.map(b => b.close))?.cells[0]?.pct ?? -999 },
   { key: "rsi",        label: "RSI",        align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
   { key: "macd_hist",  label: "MACD H",     align: "right",  sortVal: r => r.backtest?.macd_hist ?? 0 },
   { key: "sc_500d",    label: "SC 2Y%",     labelColor: SC_HDR, align: "right", sortVal: r => r.backtest?.total_return_500d ?? 0 },
@@ -346,11 +346,11 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData, 
                       );
                     })()}
                   </td>
-                  {/* naive 5d */}
-                  <Forecast5dTd row={nRow} modelLabel="Naive" muted />
-                  {/* K 5d */}
+                  {/* K 5d (primary) */}
                   <Forecast5dTd row={kRow} modelLabel="Kronos" tint
-                    badge={flags.high ? "✦" : flags.unreliable ? "⚠" : ""} />
+                    badge={`${flags.high ? "✦" : ""}${flags.unreliable ? "⚠" : ""}`} />
+                  {/* naive 5d (benchmark) */}
+                  <Forecast5dTd row={nRow} modelLabel="Naive" muted />
                   {/* RSI */}
                   <td className={`px-2 py-1.5 text-right font-mono ${rsiC}`}>{n(rsi, 0)}</td>
                   {/* MACD Hist */}
