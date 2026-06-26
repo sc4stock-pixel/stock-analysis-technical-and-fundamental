@@ -18,6 +18,12 @@ function normalizeTicker(t: string): string {
   return BARE_HK_RE.test(t) ? `${t}.HK` : t;
 }
 
+function normalizeId(id: string): string {
+  const [ticker, ...rest] = id.split("|");
+  if (rest.length && BARE_HK_RE.test(ticker)) return `${ticker}.HK|${rest.join("|")}`;
+  return id;
+}
+
 export function parseFillCommand(text: string): FillCommand {
   const parts = text.trim().split(/\s+/);
   // parts[0] is the command token (e.g. "/fill")
@@ -29,7 +35,7 @@ export function parseFillCommand(text: string): FillCommand {
   if (!Number.isFinite(price) || price <= 0) return { mode: "error", reason: "price" };
   if (dateStr !== undefined && !DATE_RE.test(dateStr)) return { mode: "error", reason: "date" };
   const selector: FillSelector = target.includes("|")
-    ? { kind: "id", id: target }
+    ? { kind: "id", id: normalizeId(target) }
     : { kind: "ticker", ticker: normalizeTicker(target.toUpperCase()) };
   return { mode: "fill", selector, price, date: dateStr ?? null };
 }
