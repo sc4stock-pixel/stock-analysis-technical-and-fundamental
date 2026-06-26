@@ -12,6 +12,11 @@ export type FillCommand =
   | { mode: "fill"; selector: FillSelector; price: number; date: string | null };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const BARE_HK_RE = /^\d{4}$/;
+
+function normalizeTicker(t: string): string {
+  return BARE_HK_RE.test(t) ? `${t}.HK` : t;
+}
 
 export function parseFillCommand(text: string): FillCommand {
   const parts = text.trim().split(/\s+/);
@@ -25,7 +30,7 @@ export function parseFillCommand(text: string): FillCommand {
   if (dateStr !== undefined && !DATE_RE.test(dateStr)) return { mode: "error", reason: "date" };
   const selector: FillSelector = target.includes("|")
     ? { kind: "id", id: target }
-    : { kind: "ticker", ticker: target.toUpperCase() };
+    : { kind: "ticker", ticker: normalizeTicker(target.toUpperCase()) };
   return { mode: "fill", selector, price, date: dateStr ?? null };
 }
 

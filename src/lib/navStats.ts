@@ -16,16 +16,17 @@ export const MIN_OBS_FOR_REGRESSION = 60;
 export function computeRegionStats(entries: NavEntry[]): RegionStats {
   const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
   let nav = 1, benchNav = 1, bhNav = 1, peak = 1, maxDD = 0;
-  let benchOk = true, bhOk = true;
   const navSeries: RegionStats["navSeries"] = [];
   for (const e of sorted) {
     nav *= 1 + e.ret;
-    if (e.bench_ret === null) benchOk = false; else benchNav *= 1 + e.bench_ret;
-    if (e.bh_ret === null || e.bh_ret === undefined) bhOk = false; else bhNav *= 1 + e.bh_ret;
+    benchNav *= 1 + (e.bench_ret ?? 0);
+    bhNav *= 1 + (e.bh_ret ?? 0);
     peak = Math.max(peak, nav);
     maxDD = Math.min(maxDD, nav / peak - 1);
-    navSeries.push({ date: e.date, nav, benchNav: benchOk ? benchNav : null, bhNav: bhOk ? bhNav : null });
+    navSeries.push({ date: e.date, nav, benchNav, bhNav });
   }
+  const hasBench = sorted.some(e => e.bench_ret !== null);
+  const hasBh = sorted.some(e => e.bh_ret != null);
   const rets = sorted.map(e => e.ret);
   const n = rets.length;
   const mean = n ? rets.reduce((a, b) => a + b, 0) / n : 0;
@@ -42,6 +43,6 @@ export function computeRegionStats(entries: NavEntry[]): RegionStats {
     if (varB > 0) { beta = cov / varB; alpha = (pMean - beta * bMean) * 252; }
   }
   return { navSeries, totalReturnPct: (nav - 1) * 100,
-           bhTotalReturnPct: bhOk && n > 0 ? (bhNav - 1) * 100 : null, annSharpe,
+           bhTotalReturnPct: hasBh && n > 0 ? (bhNav - 1) * 100 : null, annSharpe,
            maxDrawdownPct: maxDD * 100, alpha, beta, observations: n };
 }
