@@ -110,6 +110,9 @@ HIGH conviction  ⇔  |5d forecast %| > conviction_pct (5.0)
 - Cell renders `✦` + full color when HIGH; greyed/muted when LOW.
 - Also a low-reliability `⚠` flag when the model's recent relative MAE is large (teleport guard,
   e.g. AMD) — threshold reused from the harness MAE.
+- **The two flags are independent and shown together** when both apply (e.g. AMD `−8.1% ✦ ⚠`):
+  reliability does NOT override conviction. `✦` = "model is confident", `⚠` = "model has been
+  imprecise lately" — the reader sees both signals.
 - TS constant in `forecastBox.ts`; Python mirror in `forecast_display.py`; both carry the parity
   comment. Threshold also rides in `forecast_skill.json._metadata.conviction_pct` so display and
   scoring cannot diverge.
