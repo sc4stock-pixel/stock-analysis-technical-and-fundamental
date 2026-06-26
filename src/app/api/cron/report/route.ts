@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildEodReport } from "@/lib/telegram-report";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { fetchKronosForecasts } from "@/lib/kronos";
-import { fetchTimesfmForecasts } from "@/lib/timesfm";
+import { fetchForecastSkill } from "@/lib/forecastSkill";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import { analyzeStock } from "@/lib/analyze-stock";
 import { detectFlip, type ChartBar } from "@/lib/flip";
@@ -40,14 +40,14 @@ export async function POST(req: NextRequest) {
   }
 
   // Fetch forecast data in parallel (best-effort — failures don't block the report)
-  const [kronosData, timesfmData] = await Promise.all([
+  const [kronosData, skill] = await Promise.all([
     fetchKronosForecasts().catch(() => null),
-    fetchTimesfmForecasts().catch(() => null),
+    fetchForecastSkill().catch(() => null),
   ]);
 
   // Always send EOD report — no skip gate (unlike alerts which skip on quiet days)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const message  = buildEodReport(payload as any, market, kronosData, timesfmData);
+  const message  = buildEodReport(payload as any, market, kronosData, undefined, skill);
   const tgResult = await sendTelegramMessage(message, "reports");
 
   return NextResponse.json({

@@ -6,6 +6,10 @@ export const KRONOS_NOISE_THRESHOLD = 25;
 // (index 19), matching forecastBox.ts (p[19]/t3) and telegram-report.ts (p50[19]).
 // Using p50[p50.length-1] would silently read the wrong horizon if the generator ever
 // emits more than 20 bars — a future flipPx-class divergence. Requires a full 20-bar array.
+export function pct5d(p50: number[] | undefined, lastPrice: number | undefined): number | null {
+  if (!p50 || p50.length < 5 || !lastPrice) return null;
+  return Math.round((p50[4] / lastPrice - 1) * 1000) / 10;
+}
 export function pct20d(p50: number[] | undefined, lastPrice: number | undefined): number | null {
   if (!p50 || p50.length < 20 || !lastPrice) return null;
   return Math.round((p50[19] / lastPrice - 1) * 1000) / 10;

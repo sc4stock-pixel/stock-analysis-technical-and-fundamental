@@ -1,6 +1,7 @@
-import { SepaMetadata, TrendTemplateCriteria, KronosForecasts, TimesfmForecasts } from "@/types";
+import { SepaMetadata, TrendTemplateCriteria, KronosForecasts, ForecastSkill } from "@/types";
 import { htmlEscape } from "@/lib/telegram";
 import { buildAlertModel } from "@/lib/alert-model";
+import { CONVICTION_PCT } from "@/lib/forecastBox";
 import type { StockAnalysisResult } from "@/types";
 
 const dispSymForReport = (s: string) => s.replace(".HK", "");
@@ -140,68 +141,74 @@ function detectProximity(valid: SlimResult[]): ProximityHit[] {
 }
 
 // ============================================================
-// Kronos vs TimesFM forecast table (compact, US then HK, sorted by Kronos 20d dir)
+// Kronos 5d forecast table (compact, US then HK, sorted by |kPct| desc)
 // ============================================================
 interface ForecastRow {
   label: string; isHK: boolean;
-  kPct: number | null; tPct: number | null;
-  kDir: number | null; tDir: number | null;
+  kPct: number | null;
 }
 
-function buildForecastSection(
+export function buildForecastSection(
   ordered: { symbol: string }[],
-  timesfmData: TimesfmForecasts | null | undefined,
   kronosData: KronosForecasts | null | undefined,
+  skill: ForecastSkill | null | undefined,
 ): string[] {
   const rows: ForecastRow[] = [];
   for (const r of ordered) {
     const kro = kronosData?.[r.symbol];
-    const tfm = timesfmData?.[r.symbol];
-    if (!kro && !tfm) continue;
-    // Each model's % move uses its OWN baseline close. Borrowing Kronos's
-    // last_price for TimesFM mixed baselines when one file was staler, and
-    // hid TimesFM entirely whenever Kronos lacked the symbol. Kronos baseline
-    // stays as fallback for older TimesFM files without last_price.
-    const kLast = kro?.last_price ?? null;
-    const tLast = tfm?.last_price ?? kLast;
-    const kPct = (kro && kLast && Array.isArray(kro.forward.p50) && kro.forward.p50.length >= 20)
-      ? ((kro.forward.p50[19] - kLast) / kLast) * 100 : null;
-    const tPct = (tfm && tLast && Array.isArray(tfm.p50) && tfm.p50.length >= 20)
-      ? ((tfm.p50[19] - tLast) / tLast) * 100 : null;
+    if (!kro) continue;
+    const kLast = kro.last_price ?? null;
+    const kPct = (kLast && Array.isArray(kro.forward.p50) && kro.forward.p50.length >= 5)
+      ? ((kro.forward.p50[4] - kLast) / kLast) * 100 : null;
     const isHK = r.symbol.endsWith(".HK");
     rows.push({
-      // strip ".HK" for HK names — shorter AND stops Telegram auto-linking "9988.HK" as a URL
+      // strip ".HK" — stops Telegram auto-linking "9988.HK" as a URL
       label: isHK ? r.symbol.replace(".HK", "") : r.symbol,
       isHK,
-      kPct, tPct,
-      kDir: kro?.historical?.dir_hits ?? null,
-      tDir: tfm?.historical?.dir_hits ?? null,
+      kPct,
     });
   }
   if (rows.length === 0) return [];
 
-  const byDirDesc = (a: ForecastRow, b: ForecastRow) => (b.kDir ?? -1) - (a.kDir ?? -1);
-  const us = rows.filter(x => !x.isHK).sort(byDirDesc);
-  const hk = rows.filter(x => x.isHK).sort(byDirDesc);
+  // Sort by absolute predicted move descending (biggest conviction first)
+  const byAbsPct = (a: ForecastRow, b: ForecastRow) =>
+    Math.abs(b.kPct ?? 0) - Math.abs(a.kPct ?? 0);
+  const us = rows.filter(x => !x.isHK).sort(byAbsPct);
+  const hk = rows.filter(x => x.isHK).sort(byAbsPct);
 
   const pct = (v: number | null) => v == null ? "  —  " : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
   const fmtRow = (x: ForecastRow) => {
     const lbl = x.label.padEnd(5);
-    const k = pct(x.kPct).padStart(7);
-    const t = pct(x.tPct).padStart(7);
-    const dir = x.kDir != null ? `${x.kDir}/20` : "  —  ";
-    const tdir = x.tDir != null ? ` T${x.tDir}/20` : "";
-    return `${lbl} K${k} T${t}  ${dir}${tdir}`;
+    const hiConv = x.kPct != null && Math.abs(x.kPct) > CONVICTION_PCT ? " ✦" : "";
+    return `${lbl} K ${pct(x.kPct).padStart(7)}${hiConv}`;
   };
 
   const table: string[] = [];
   if (us.length) { table.push("US"); us.forEach(x => table.push(fmtRow(x))); }
   if (hk.length) { table.push("HK"); hk.forEach(x => table.push(fmtRow(x))); }
 
-  return [
-    `\n📊 <b>FORECASTS 20d</b> <i>K=Kronos T=TimesFM · dir=hits/20</i>`,
+  const result: string[] = [
+    `\n📊 <b>FORECASTS 5d</b> <i>K=Kronos</i>`,
     `<pre>${table.join("\n")}</pre>`,
   ];
+
+  // Skill footer — aggregate Kronos-vs-naive comparison
+  if (skill) {
+    const kVerdict = skill.KRONOS.verdict;
+    if (kVerdict.startsWith("EDGE")) {
+      const kRate = skill.KRONOS.conviction_5d.gt5?.rate;
+      const nRate = skill.NAIVE.conviction_5d.gt5?.rate;
+      const kPctStr = kRate != null ? `${Math.round(kRate * 100)}%` : "?";
+      const nPctStr = nRate != null ? `${Math.round(nRate * 100)}%` : "?";
+      result.push(
+        `⚡ Kronos 5d (OOS, provisional): hi-conv ${kPctStr} vs naive ${nPctStr} edge`
+      );
+    } else {
+      result.push(`— Kronos 5d: no measured edge`);
+    }
+  }
+
+  return result;
 }
 
 // ============================================================
@@ -211,7 +218,8 @@ export function buildEodReport(
   results: SlimResult[],
   market: "us" | "hk",
   kronosData?: KronosForecasts | null,
-  timesfmData?: TimesfmForecasts | null,
+  timesfmData?: unknown,           // legacy param kept for call-site compat; unused
+  skill?: ForecastSkill | null,
 ): string {
   const valid = results.filter(r => !r.error && r.current_price > 0);
 
@@ -317,9 +325,9 @@ export function buildEodReport(
     lines.push(...groupedInline(bearish, 3));
   }
 
-  // FORECASTS — compact Kronos vs TimesFM table (US then HK, sorted by Kronos 20d dir)
-  if (kronosData || timesfmData) {
-    lines.push(...buildForecastSection(ordered, timesfmData, kronosData));
+  // FORECASTS — Kronos 5d forecast table
+  if (kronosData) {
+    lines.push(...buildForecastSection(ordered, kronosData, skill));
   }
 
   const failed = results.filter(r => !valid.includes(r));

@@ -7,6 +7,7 @@ import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, Area,
 } from "recharts";
+import { naiveRow } from "@/lib/forecastBox";
 
 interface TimesfmPriceTargets {
   t1: number;
@@ -81,17 +82,18 @@ interface ChartDataPoint {
   TunnelBand: [number, number] | null;
   KronosFwd?: number | null;
   KronosPred?: number | null;
-  TfmPred?: number | null;
   Actual?: number | null;
+  NaiveDrift?: number | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
   if (!active || !payload?.length) return null;
   const get = (name: string) => payload.find((x: {name:string;value:number}) => x.name === name)?.value as number | undefined;
-  const close = get("Close"); const p50 = get("P50");
+  const close = get("Close");
   const kronosFwd = get("Kronos"); const actual = get("Actual");
-  const kronosPred = get("Kronos pred"); const tfmPred = get("TimesFM pred");
+  const kronosPred = get("Kronos pred");
+  const naiveFwd = get("Naive drift");
   const sma20 = get("SMA20"); const sma50 = get("SMA50");
   const ema20 = get("EMA20"); const ema50 = get("EMA50");
   const stBull = get("ST_Bull"); const stBear = get("ST_Bear");
@@ -99,13 +101,12 @@ const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: 
   const entry = get("Entry"); const exit = get("Exit");
   return (
     <div className="bg-[#0f1629] border border-[#1e2d4a] rounded px-2.5 py-2 text-xs font-mono shadow-xl max-w-[220px]">
-      <div className="text-[#6b85a0] mb-1.5 border-b border-[#1e2d4a] pb-1">{label}{p50 != null ? " 🔮" : ""}</div>
+      <div className="text-[#6b85a0] mb-1.5 border-b border-[#1e2d4a] pb-1">{label}{kronosFwd != null ? " 🔮" : ""}</div>
       {close  != null && <div className="text-[#c8d8f0]">Close: <span className="text-[#00d4ff] font-bold">{close.toFixed(2)}</span></div>}
-      {p50    != null && <div className="text-[#a78bfa] font-bold">TimesFM P50: {p50.toFixed(2)}</div>}
       {kronosFwd  != null && <div className="text-[#ff8c42] font-bold">Kronos: {kronosFwd.toFixed(2)}</div>}
+      {naiveFwd   != null && <div className="text-[#566f8a]">Naive drift: {naiveFwd.toFixed(2)}</div>}
       {actual     != null && <div className="text-[#e8edf6] font-bold">Actual: {actual.toFixed(2)}</div>}
       {kronosPred != null && <div className="text-[#ff8c42]">Kronos pred: {kronosPred.toFixed(2)}</div>}
-      {tfmPred    != null && <div className="text-[#a78bfa]">TimesFM pred: {tfmPred.toFixed(2)}</div>}
       {sma20  != null && <div className="text-[#00ff88]">SMA20: {sma20.toFixed(2)}</div>}
       {sma50  != null && <div className="text-[#ff7f50]">SMA50: {sma50.toFixed(2)}</div>}
       {ema20  != null && <div className="text-[#a78bfa]">EMA20: {ema20.toFixed(2)}</div>}
@@ -206,22 +207,18 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
   const lastClose = sliced.length > 0 ? (sliced[sliced.length - 1].close ?? result.current_price) : result.current_price;
   const lastDateShort = sliced.length > 0 ? (sliced[sliced.length - 1].date ?? "").slice(5) : "";
 
-  const hasTimesfm =
-    showForecast &&
-    forecastMode === "forward" &&
-    timesfm != null &&
-    Array.isArray(timesfm.p50) && timesfm.p50.length > 0 &&
-    Array.isArray(timesfm.p10) && timesfm.p10.length > 0 &&
-    Array.isArray(timesfm.p90) && timesfm.p90.length > 0;
-
   const hasKronosFwd =
     showForecast && forecastMode === "forward" && !!kronos?.forward?.p50?.length;
 
-  // Either model contributes a forward projection
-  const hasForecast = hasTimesfm;
-  const buildForecast = hasTimesfm || hasKronosFwd;
+  // Kronos is the primary forecast; TimesFM removed from chart
+  const hasForecast = hasKronosFwd;
+  const buildForecast = hasKronosFwd;
 
-  const forecastLen = (timesfm?.p50?.length ?? kronos?.forward?.p50?.length ?? 0);
+  const forecastLen = kronos?.forward?.p50?.length ?? 0;
+
+  // Naive drift baseline — compute 5d target from close history
+  const naiveData = naiveRow(allCloses);
+  const naive5dPrice = naiveData?.cells[0]?.price ?? null;
 
   const forecastPoints: ChartDataPoint[] = buildForecast ? [
     // Bridge point — connects history to forecast seamlessly
@@ -230,26 +227,23 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
       Close: null, SMA20: null, SMA50: null, EMA20: null, EMA50: null,
       BBU: null, BBL: null, ST_Bull: null, ST_Bear: null,
       Volume: null, RSI: null, "MACD H": null, Entry: null, Exit: null,
-      P50: hasTimesfm ? lastClose : null,
-      TunnelLo: hasTimesfm ? lastClose : null,
-      TunnelHi: hasTimesfm ? lastClose : null,
-      TunnelBand: hasTimesfm ? ([lastClose, lastClose] as [number, number]) : null,
-      KronosFwd: hasKronosFwd ? lastClose : null,
+      P50: null, TunnelLo: null, TunnelHi: null, TunnelBand: null,
+      KronosFwd: lastClose,
+      NaiveDrift: naive5dPrice != null ? lastClose : null,
     },
     ...Array.from({ length: forecastLen }).map((_, i) => {
-      const tv = timesfm?.p50?.[i];
+      // Naive drift: linear interpolation from lastClose to naive5dPrice over 5 bars
+      const naiveVal = (naive5dPrice != null && forecastLen > 0 && i < 5)
+        ? lastClose + (naive5dPrice - lastClose) * ((i + 1) / 5)
+        : null;
       return {
         date: `F+${i + 1}`, dateShort: `+${i + 1}d`,
         Close: null, SMA20: null, SMA50: null, EMA20: null, EMA50: null,
         BBU: null, BBL: null, ST_Bull: null, ST_Bear: null,
         Volume: null, RSI: null, "MACD H": null, Entry: null, Exit: null,
-        P50: hasTimesfm ? (tv ?? null) : null,
-        TunnelLo: hasTimesfm ? (timesfm!.p10[i] ?? tv ?? null) : null,
-        TunnelHi: hasTimesfm ? (timesfm!.p90[i] ?? tv ?? null) : null,
-        TunnelBand: hasTimesfm
-          ? ([timesfm!.p10[i] ?? tv ?? 0, timesfm!.p90[i] ?? tv ?? 0] as [number, number])
-          : null,
-        KronosFwd: hasKronosFwd ? (kronos?.forward?.p50?.[i] ?? null) : null,
+        P50: null, TunnelLo: null, TunnelHi: null, TunnelBand: null,
+        KronosFwd: kronos?.forward?.p50?.[i] ?? null,
+        NaiveDrift: naiveVal,
       } as ChartDataPoint;
     }),
   ] : [];
@@ -258,20 +252,15 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
 
   // ── Track-record dataset (historical prediction overlay) ─────
   const trackMode =
-    showForecast && forecastMode === "track" &&
-    (!!kronos?.historical || !!timesfm?.historical);
+    showForecast && forecastMode === "track" && !!kronos?.historical;
   const trackData: ChartDataPoint[] = trackMode ? (() => {
-    const k = kronos?.historical, t = timesfm?.historical;
-    const n = Math.max(
-      k?.pred.length ?? 0, t?.pred.length ?? 0,
-      k?.actual.length ?? 0, t?.actual.length ?? 0,
-    );
+    const k = kronos?.historical;
+    const n = Math.max(k?.pred.length ?? 0, k?.actual.length ?? 0);
     const tailHist = histData.slice(0, Math.max(0, histData.length - n));
     const window: ChartDataPoint[] = Array.from({ length: n }).map((_, i) => ({
       dateShort: `-${n - i}d`,
-      Actual: k?.actual[i] ?? t?.actual[i] ?? null,
+      Actual: k?.actual[i] ?? null,
       KronosPred: k?.pred[i] ?? null,
-      TfmPred: t?.pred[i] ?? null,
     } as ChartDataPoint));
     return [...tailHist, ...window];
   })() : [];
@@ -279,11 +268,8 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
 
   // ── Y-axis domain ─────────────────────────────────────────────
   const prices = histData.map(d => d.Close).filter((v): v is number => v != null);
-  const tunnelVals: number[] = hasForecast
-    ? [
-        ...timesfm!.p10.filter((v): v is number => v != null),
-        ...timesfm!.p90.filter((v): v is number => v != null),
-      ]
+  const kronosFwdVals: number[] = hasForecast
+    ? (kronos?.forward?.p50 ?? []).filter((v): v is number => v != null)
     : [];
   const maVals: number[] = [
     ...(showBB    ? histData.flatMap(d => [d.BBU, d.BBL]).filter((v): v is number => v != null) : []),
@@ -291,7 +277,7 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
     ...(showEMA20 ? histData.map(d => d.EMA20).filter((v): v is number => v != null) : []),
     ...(showEMA50 ? histData.map(d => d.EMA50).filter((v): v is number => v != null) : []),
   ];
-  const allY = [...prices, ...maVals, ...(hasForecast ? tunnelVals : [])];
+  const allY = [...prices, ...maVals, ...(hasForecast ? kronosFwdVals : []), ...(naive5dPrice != null ? [naive5dPrice] : [])];
   const yPad = allY.length > 1 ? (Math.max(...allY) - Math.min(...allY)) * 0.06 : 1;
   const yMin = allY.length > 0 ? Math.min(...allY) - yPad : 0;
   const yMax = allY.length > 0 ? Math.max(...allY) + yPad : 100;
@@ -341,11 +327,11 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
         <Tog label="EMA50"  active={showEMA50}  onClick={() => setShowEMA50(v=>!v)}  activeClass="border-[#f59e0b]/70 text-[#f59e0b] bg-[#f59e0b]/10" />
         <Tog label="BB"     active={showBB}     onClick={() => setShowBB(v=>!v)}     activeClass="border-[#00d4ff]/50 text-[#00d4ff] bg-[#00d4ff]/08" />
         <Tog label="ST"     active={showST}     onClick={() => setShowST(v=>!v)}     activeClass="border-[#f97316]/60 text-[#f97316] bg-[#f97316]/10" />
-        {(timesfm || kronos) && (
-          <Tog label="🔮 Forecast" active={showForecast} onClick={() => setShowForecast(v=>!v)}
-            activeClass="border-[#a78bfa]/60 text-[#a78bfa] bg-[#a78bfa]/10" />
+        {kronos && (
+          <Tog label="🔮 Kronos" active={showForecast} onClick={() => setShowForecast(v=>!v)}
+            activeClass="border-[#ff8c42]/60 text-[#ff8c42] bg-[#ff8c42]/10" />
         )}
-        {(timesfm || kronos) && showForecast && (
+        {kronos && showForecast && (
           <>
             <Tog label="Forward" active={forecastMode === "forward"}
               onClick={() => setForecastMode("forward")}
@@ -385,44 +371,21 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
 
             {/* Forecast separator line */}
             {hasForecast && (
-              <ReferenceLine x={lastDateShort} stroke="#a78bfa" strokeDasharray="4 3" strokeOpacity={0.6}
-                label={{ value: "▶ Forecast", position: "insideTopRight", fontSize: 8, fill: "#a78bfa" }} />
+              <ReferenceLine x={lastDateShort} stroke="#ff8c42" strokeDasharray="4 3" strokeOpacity={0.6}
+                label={{ value: "▶ Kronos", position: "insideTopRight", fontSize: 8, fill: "#ff8c42" }} />
             )}
 
-            {/* Phase 1: Confidence tunnel — [P10, P90] band + P50 median line */}
-            {hasForecast && <>
-              {/* Band: TunnelBand=[lo,hi] renders as a proper filled region */}
-              <Area
-                dataKey="TunnelBand"
-                stroke="#a78bfa"
-                strokeWidth={0.8}
-                strokeOpacity={0.5}
-                strokeDasharray="3 3"
-                fill="url(#tunnelGrad)"
-                fillOpacity={1}
-                legendType="none"
-                name="Tunnel"
-                connectNulls={false}
-                isAnimationActive={false}
-              />
-              {/* P50 median forecast line */}
-              <Line
-                dataKey="P50"
-                stroke="#a78bfa"
-                strokeWidth={2.2}
-                dot={false}
-                strokeDasharray="7 3"
-                legendType="none"
-                name="P50"
-                connectNulls={false}
-                isAnimationActive={false}
-              />
-            </>}
-
-            {/* Kronos forward median line */}
-            {hasKronosFwd && (
-              <Line type="monotone" dataKey="KronosFwd" stroke="#ff8c42" strokeWidth={2}
+            {/* Kronos forward median line (primary) */}
+            {hasForecast && (
+              <Line type="monotone" dataKey="KronosFwd" stroke="#ff8c42" strokeWidth={2.2}
                 dot={false} isAnimationActive={false} name="Kronos" connectNulls />
+            )}
+
+            {/* Naive drift reference line (thin dashed) */}
+            {hasForecast && naive5dPrice != null && (
+              <Line type="monotone" dataKey="NaiveDrift" stroke="#566f8a" strokeWidth={1}
+                strokeDasharray="4 4" dot={false} isAnimationActive={false}
+                name="Naive drift" connectNulls legendType="none" />
             )}
 
             {/* Track-record overlay */}
@@ -431,8 +394,6 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
                 dot={false} isAnimationActive={false} name="Actual" connectNulls />
               <Line type="monotone" dataKey="KronosPred" stroke="#ff8c42" strokeWidth={1.8}
                 strokeDasharray="5 4" dot={false} isAnimationActive={false} name="Kronos pred" connectNulls />
-              <Line type="monotone" dataKey="TfmPred" stroke="#a78bfa" strokeWidth={1.8}
-                strokeDasharray="5 4" dot={false} isAnimationActive={false} name="TimesFM pred" connectNulls />
             </>)}
 
             {/* BB */}
@@ -475,39 +436,42 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
       {trackMode && (
         <div className="flex flex-wrap gap-3 text-[0.72rem] px-1 pt-1">
           {kronos?.historical && (
-            <span className="text-[#ff8c42]">Kronos: {kronos.historical.dir_hits}/20 dir · MAE {kronos.historical.mae}</span>
-          )}
-          {timesfm?.historical && (
-            <span className="text-[#a78bfa]">TimesFM: {timesfm.historical.dir_hits}/20 dir · MAE {timesfm.historical.mae}</span>
+            <span className="text-[#ff8c42]">Kronos: MAE {kronos.historical.mae}</span>
           )}
           <span className="text-[#4a6080] italic">Prediction made 20 sessions ago vs actual.</span>
         </div>
       )}
 
-      {/* Phase 1: Forecast target strip */}
-      {hasForecast && timesfm && (
+      {/* Kronos forecast target strip */}
+      {hasForecast && kronos?.forward?.p50 && (
         <div className="flex items-center gap-2 flex-wrap text-[0.65rem] font-mono">
-          <span className="text-[#a78bfa] font-bold">🔮</span>
+          <span className="text-[#ff8c42] font-bold">🔮</span>
           {[
-            { label: "T1 5d",  val: timesfm.t1 },
-            { label: "T2 10d", val: timesfm.t2 },
-            { label: "T3 20d", val: timesfm.t3 },
-          ].map(t => {
-            const pct = result.current_price > 0
-              ? ((t.val - result.current_price) / result.current_price) * 100
-              : 0;
+            { label: "5d",  idx: 4 },
+            { label: "10d", idx: 9 },
+            { label: "20d", idx: 19 },
+          ].filter(t => kronos!.forward!.p50![t.idx] != null).map(t => {
+            const val = kronos!.forward!.p50![t.idx];
+            const base = kronos!.last_price ?? result.current_price;
+            const pct = base > 0 ? ((val - base) / base) * 100 : 0;
             return (
               <span key={t.label}
-                className="flex items-center gap-1 border border-[#a78bfa]/30 rounded px-2 py-0.5 bg-[#a78bfa]/5">
+                className="flex items-center gap-1 border border-[#ff8c42]/30 rounded px-2 py-0.5 bg-[#ff8c42]/5">
                 <span className="text-[#4a6080]">{t.label}:</span>
-                <span className="text-[#a78bfa] font-bold">{t.val.toFixed(2)}</span>
+                <span className="text-[#ff8c42] font-bold">{val.toFixed(2)}</span>
                 <span className={pct >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"}>
                   {pct >= 0 ? "+" : ""}{pct.toFixed(1)}%
                 </span>
               </span>
             );
           })}
-          <span className="text-[#4a6080] text-[0.58rem] ml-1">P10–P90 cloud · P50 median dashed</span>
+          {naive5dPrice != null && (
+            <span className="flex items-center gap-1 border border-[#566f8a]/30 rounded px-2 py-0.5 bg-[#566f8a]/5">
+              <span className="text-[#4a6080]">naive 5d:</span>
+              <span className="text-[#566f8a]">{naive5dPrice.toFixed(2)}</span>
+            </span>
+          )}
+          <span className="text-[#4a6080] text-[0.58rem] ml-1">Kronos p50 · dashed = naive drift</span>
         </div>
       )}
 
@@ -570,10 +534,10 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
           <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #ff4757" }} /> ST Bear</span>
         </>}
         {hasForecast && <>
-          <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "2px dashed #a78bfa" }} /> P50 Forecast</span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-4 h-3 rounded-sm inline-block" style={{ background: "rgba(167,139,250,0.2)" }} /> P10–P90 Cloud
-          </span>
+          <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 bg-[#ff8c42] inline-block rounded" /> Kronos</span>
+          {naive5dPrice != null && (
+            <span className="flex items-center gap-1.5"><span className="w-5 inline-block" style={{ borderTop: "1px dashed #566f8a" }} /> Naive drift</span>
+          )}
         </>}
         {showTrades && <>
           <span className="flex items-center gap-1.5"><span className="text-[#00ff88] text-sm leading-none">▲</span> Entry</span>

@@ -7,5 +7,5 @@ A) BOTTOM LINE — 2-3 sentences: the decisive positioning call (risk-on/neutral
 B) WHAT MATTERS TODAY — 3 to 5 bullets MAX. Each bullet = one actionable name/setup with only the SINGLE most decisive number; fold forecast + risk + reliability into that one bullet.
 C) WATCH — one line: the trigger that decides the day.
 
-RULES: State any number once. Do not enumerate every name — only those with an actionable read. ~180 words, must stay scannable. Lead on TimesFM 20d + flip_risk; Kronos is noisy/mean-reverting (values shown as "noise" are artifacts — ignore them). Quality-vs-trend (TT 6+ but ST-down) = pullbacks in elite names, watchlist for flip-up NOT shorts. Discount serial whipsaws (high #ev with provisional flips that reverse).
+RULES: State any number once. Do not enumerate every name — only those with an actionable read. ~180 words, must stay scannable. Lead on Kronos 5d conviction calls (K5d >5% predicted move = high-conviction); K20d values marked "noise" (>25%) are artifacts — ignore them. Quality-vs-trend (TT 6+ but ST-down) = pullbacks in elite names, watchlist for flip-up NOT shorts. Discount serial whipsaws (high #ev with provisional flips that reverse).
 PRIORITY — NEVER DROP: any ticker with a fresh EOD-confirmed flip is mandatory in section B, even over the word budget.`;

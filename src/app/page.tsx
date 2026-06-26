@@ -17,8 +17,9 @@ import NavPanel from "@/components/NavPanel";
 import TradeLogPanel from "@/components/TradeLogPanel";
 import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import { fetchKronosForecasts } from "@/lib/kronos";
+import { fetchForecastSkill } from "@/lib/forecastSkill";
 import { supertrend } from "@/lib/indicators";
-import type { TimesfmForecasts, KronosForecasts } from "@/types";
+import type { TimesfmForecasts, KronosForecasts, ForecastSkill } from "@/types";
 import type { WorkerState } from "@/types/worker-state";
 
 const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
@@ -62,6 +63,7 @@ export default function Dashboard() {
   const [timesfmData, setTimesfmData] = useState<TimesfmForecasts | null>(null);
   const [timesfmLoading, setTimesfmLoading] = useState(false);
   const [kronosData, setKronosData] = useState<KronosForecasts | null>(null);
+  const [forecastSkill, setForecastSkill] = useState<ForecastSkill | null>(null);
 
   const [stOptimizing, setStOptimizing] = useState(false);
   // Global tab broadcast — null means each card uses its own state
@@ -186,6 +188,8 @@ export default function Dashboard() {
     }
     const k = await fetchKronosForecasts();
     if (k) setKronosData(k);
+    const sk = await fetchForecastSkill();
+    setForecastSkill(sk);
   }, []);
 
   useEffect(() => {
@@ -617,6 +621,7 @@ export default function Dashboard() {
                     config={config}
                     timesfm={timesfmData?.[result.symbol]}
                     kronos={kronosData?.[result.symbol]}
+                    forecastSkill={forecastSkill}
                     forcedTab={globalTab ?? undefined}
                   />
                 </div>

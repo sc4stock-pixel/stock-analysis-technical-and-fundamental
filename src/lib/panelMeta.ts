@@ -53,9 +53,12 @@ export const PANEL_META: PanelMeta[] = [
       "Signal — BUY / SELL / HOLD (score + confirmation logic)",
       "ST — current SuperTrend direction (↑ long / ↓ short)",
       "SEPA — Minervini SEPA conditions met, 0–3 (display-only overlay; HK shows —)",
-      "TFM 20d / K 20d — TimesFM & Kronos 20-day forecast vs current price, %. Hover a cell for each model's accuracy (direction hits / 20) and their 20d agreement. Display-only.",
+      "K 5d — Kronos 5-day price forecast vs current price, %. The primary forecast horizon (20d was coin-flip; 5d is where any edge lives). Display-only — never feeds signals.",
+      "naive 5d — a plain random-walk-with-drift baseline (60-day average drift, projected 5 days). The benchmark Kronos must beat: if K 5d ≈ naive, Kronos adds nothing.",
+      "✦ HIGH CONVICTION — Kronos predicts a >5% move at 5d; this is the only regime where it has shown a real directional edge (~81% out-of-sample). Small predicted moves are noise.",
+      "⚠ LOW RELIABILITY — Kronos's recent forecast error (relative MAE) is large for this name; treat the path as unreliable (e.g. a normalization 'teleport'). Independent of ✦ — both can show.",
       "RSI · MACD H — momentum indicators",
-      "Backtest, header-colored: SC (cyan)=Score · ST (amber)=SuperTrend · TFM (purple)=TimesFM — each 2Y%/1Y% return, Sharpe, Alpha",
+      "Backtest, header-colored: SC (cyan)=Score · ST (amber)=SuperTrend — each 2Y%/1Y% return, Sharpe, Alpha",
     ],
   },
   {
@@ -77,10 +80,10 @@ export const PANEL_META: PanelMeta[] = [
   {
     id: "chart",
     label: "Forecast Chart",
-    meaning: "Price chart + display-only Kronos / TimesFM forecast overlay & track-record scorecard.",
-    cadence: "Kronos & TimesFM regenerate daily (staggered).",
+    meaning: "Price chart + display-only Kronos forecast overlay & track-record scorecard.",
+    cadence: "Kronos regenerates daily.",
     detail: [
-      "Kronos / TimesFM are display-only overlays with a track record (direction-hit rate + MAE). They never feed signals, scoring, or execution.",
+      "Kronos is a display-only overlay with a track record (direction-hit rate + MAE). It never feeds signals, scoring, or execution.",
     ],
   },
   {
@@ -122,7 +125,6 @@ export const FRESHNESS: ReadonlyArray<readonly [string, string]> = [
   ["Execution alerts", "HK 10:00·14:00·16:30 / US 08:55"],
   ["EOD breadth report", "HK 16:30 / US 08:55"],
   ["Kronos forecast", "daily (staggered)"],
-  ["TimesFM forecast", "daily (staggered)"],
 ];
 
 export function getPanelMeta(id: string): PanelMeta | undefined {
