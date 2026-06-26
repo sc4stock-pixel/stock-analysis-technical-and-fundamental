@@ -82,7 +82,6 @@ interface ChartDataPoint {
   TunnelBand: [number, number] | null;
   KronosFwd?: number | null;
   KronosPred?: number | null;
-  TfmPred?: number | null;
   Actual?: number | null;
   NaiveDrift?: number | null;
 }
@@ -93,7 +92,7 @@ const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: 
   const get = (name: string) => payload.find((x: {name:string;value:number}) => x.name === name)?.value as number | undefined;
   const close = get("Close");
   const kronosFwd = get("Kronos"); const actual = get("Actual");
-  const kronosPred = get("Kronos pred"); const tfmPred = get("TimesFM pred");
+  const kronosPred = get("Kronos pred");
   const naiveFwd = get("Naive drift");
   const sma20 = get("SMA20"); const sma50 = get("SMA50");
   const ema20 = get("EMA20"); const ema50 = get("EMA50");
@@ -108,7 +107,6 @@ const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: 
       {naiveFwd   != null && <div className="text-[#566f8a]">Naive drift: {naiveFwd.toFixed(2)}</div>}
       {actual     != null && <div className="text-[#e8edf6] font-bold">Actual: {actual.toFixed(2)}</div>}
       {kronosPred != null && <div className="text-[#ff8c42]">Kronos pred: {kronosPred.toFixed(2)}</div>}
-      {tfmPred    != null && <div className="text-[#a78bfa]">TimesFM pred: {tfmPred.toFixed(2)}</div>}
       {sma20  != null && <div className="text-[#00ff88]">SMA20: {sma20.toFixed(2)}</div>}
       {sma50  != null && <div className="text-[#ff7f50]">SMA50: {sma50.toFixed(2)}</div>}
       {ema20  != null && <div className="text-[#a78bfa]">EMA20: {ema20.toFixed(2)}</div>}
@@ -254,20 +252,15 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
 
   // ── Track-record dataset (historical prediction overlay) ─────
   const trackMode =
-    showForecast && forecastMode === "track" &&
-    (!!kronos?.historical || !!timesfm?.historical);
+    showForecast && forecastMode === "track" && !!kronos?.historical;
   const trackData: ChartDataPoint[] = trackMode ? (() => {
-    const k = kronos?.historical, t = timesfm?.historical;
-    const n = Math.max(
-      k?.pred.length ?? 0, t?.pred.length ?? 0,
-      k?.actual.length ?? 0, t?.actual.length ?? 0,
-    );
+    const k = kronos?.historical;
+    const n = Math.max(k?.pred.length ?? 0, k?.actual.length ?? 0);
     const tailHist = histData.slice(0, Math.max(0, histData.length - n));
     const window: ChartDataPoint[] = Array.from({ length: n }).map((_, i) => ({
       dateShort: `-${n - i}d`,
-      Actual: k?.actual[i] ?? t?.actual[i] ?? null,
+      Actual: k?.actual[i] ?? null,
       KronosPred: k?.pred[i] ?? null,
-      TfmPred: t?.pred[i] ?? null,
     } as ChartDataPoint));
     return [...tailHist, ...window];
   })() : [];
@@ -401,8 +394,6 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
                 dot={false} isAnimationActive={false} name="Actual" connectNulls />
               <Line type="monotone" dataKey="KronosPred" stroke="#ff8c42" strokeWidth={1.8}
                 strokeDasharray="5 4" dot={false} isAnimationActive={false} name="Kronos pred" connectNulls />
-              <Line type="monotone" dataKey="TfmPred" stroke="#a78bfa" strokeWidth={1.8}
-                strokeDasharray="5 4" dot={false} isAnimationActive={false} name="TimesFM pred" connectNulls />
             </>)}
 
             {/* BB */}
@@ -445,10 +436,7 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
       {trackMode && (
         <div className="flex flex-wrap gap-3 text-[0.72rem] px-1 pt-1">
           {kronos?.historical && (
-            <span className="text-[#ff8c42]">Kronos: {kronos.historical.dir_hits}/20 dir · MAE {kronos.historical.mae}</span>
-          )}
-          {timesfm?.historical && (
-            <span className="text-[#a78bfa]">TimesFM: {timesfm.historical.dir_hits}/20 dir · MAE {timesfm.historical.mae}</span>
+            <span className="text-[#ff8c42]">Kronos: MAE {kronos.historical.mae}</span>
           )}
           <span className="text-[#4a6080] italic">Prediction made 20 sessions ago vs actual.</span>
         </div>
