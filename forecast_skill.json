@@ -2,34 +2,97 @@
   "_metadata": {
     "conviction_pct": 5.0,
     "drift_window": 60,
-    "generated_at_hk": "2026-06-29 07:46 HKT",
+    "generated_at_hk": "2026-06-30 07:47 HKT",
     "history_days": 2,
     "match_tol_days": 4
   },
   "NAIVE": {
     "verdict": "BASELINE",
     "horizons": {
-      "5d": null
+      "5d": {
+        "hits": 7,
+        "n": 15,
+        "rate": 0.4667,
+        "ci_lo": 0.2481,
+        "ci_hi": 0.6988,
+        "p": 0.7963
+      }
     },
     "conviction_5d": {
-      "lt2": null,
-      "2to5": null,
-      "gt5": null
+      "lt2": {
+        "hits": 5,
+        "n": 10,
+        "rate": 0.5,
+        "ci_lo": 0.2366,
+        "ci_hi": 0.7634,
+        "p": 1.0
+      },
+      "2to5": {
+        "hits": 1,
+        "n": 4,
+        "rate": 0.25,
+        "ci_lo": 0.0456,
+        "ci_hi": 0.6994,
+        "p": 0.3173
+      },
+      "gt5": {
+        "hits": 1,
+        "n": 1,
+        "rate": 1.0,
+        "ci_lo": 0.2065,
+        "ci_hi": 1.0,
+        "p": 0.3173
+      }
     }
   },
   "KRONOS": {
-    "verdict": "INSUFFICIENT",
+    "verdict": "NO_EDGE",
     "horizons": {
-      "2d": null,
-      "5d": null,
+      "2d": {
+        "hits": 8,
+        "n": 15,
+        "rate": 0.5333,
+        "ci_lo": 0.3012,
+        "ci_hi": 0.7519,
+        "p": 0.7963
+      },
+      "5d": {
+        "hits": 11,
+        "n": 15,
+        "rate": 0.7333,
+        "ci_lo": 0.4805,
+        "ci_hi": 0.891,
+        "p": 0.0707
+      },
       "10d": null,
       "15d": null,
       "20d": null
     },
     "conviction_5d": {
-      "lt2": null,
-      "2to5": null,
-      "gt5": null
+      "lt2": {
+        "hits": 5,
+        "n": 8,
+        "rate": 0.625,
+        "ci_lo": 0.3057,
+        "ci_hi": 0.8632,
+        "p": 0.4795
+      },
+      "2to5": {
+        "hits": 3,
+        "n": 4,
+        "rate": 0.75,
+        "ci_lo": 0.3006,
+        "ci_hi": 0.9544,
+        "p": 0.3173
+      },
+      "gt5": {
+        "hits": 3,
+        "n": 3,
+        "rate": 1.0,
+        "ci_lo": 0.4385,
+        "ci_hi": 1.0,
+        "p": 0.0833
+      }
     }
   },
   "TIMESFM": {
