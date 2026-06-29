@@ -121,7 +121,7 @@ function Forecast5dTd({ row, modelLabel, tint = false, muted = false, badge = ""
     <td className={`px-2 py-1.5 text-right font-mono whitespace-nowrap ${tint ? "bg-[#ff8c42]/5" : ""}`} title={title}>
       {c == null
         ? <span className="text-[#4a6080]">--</span>
-        : <span className={color}>{badge}{c.pct >= 0 ? "▲+" : "▼"}{Math.abs(c.pct).toFixed(1)}%</span>}
+        : <span className={color}>{badge && <span className="mr-1">{badge}</span>}{c.pct >= 0 ? "▲" : "▼"}{Math.abs(c.pct).toFixed(1)}%</span>}
     </td>
   );
 }
