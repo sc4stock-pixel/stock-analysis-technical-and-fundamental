@@ -50,6 +50,11 @@ jobs:
 
       - name: Update forecast_skill.json
         run: |
+          # The audit walks the full git history of kronos_forecasts.json. Despite
+          # fetch-depth:0 at checkout, the runner has been seeing a truncated history
+          # (history_days=2). Force a full history before running so the skill numbers
+          # reflect every snapshot, not a shallow tail.
+          git fetch origin main --unshallow 2>/dev/null || git fetch origin main --depth=100000 2>/dev/null || true
           python3 scripts/forecast_probation_audit.py --emit-skill-json forecast_skill.json
           if ! git diff --quiet forecast_skill.json; then
             git config user.name "github-actions[bot]"
