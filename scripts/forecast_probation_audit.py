@@ -45,6 +45,12 @@ def closes_upto(ticker, date_str):
 FILES = {"KRONOS": "kronos_forecasts.json", "TIMESFM": "timesfm_forecasts.json"}
 HORIZONS = {"2d": 2, "5d": 5, "10d": 10, "15d": 15, "20d": 20}  # bday offset -> p50[h-1]
 MATCH_TOL_DAYS = 4                           # realized-day match tolerance (holidays)
+# Loud guard: the audit walks the git history of kronos_forecasts.json. If the runner
+# checked out a shallow clone (history truncated), the buckets are tiny and a NO_EDGE
+# verdict would be a sampling ARTIFACT, not a result. Below this many snapshots we emit
+# INSUFFICIENT (badge: "gathering track record") instead of a misleading NO_EDGE, and
+# warn loudly. (Bug 2026-06-30: GHA emitted history_days=2 despite 31 snapshots on main.)
+MIN_HISTORY_SNAPS = 10
 # Conviction buckets for the 5d horizon. The 2026-06-24 audit found Kronos's 5d
 # directional accuracy is driven by the SIZE of the predicted move, not the horizon:
 # small predicted moves are noise, large ones carry signal. The probation keep/kill
@@ -164,6 +170,12 @@ def _verdict(gt5, horizons, naive_gt5_rate):
 
 def _build_skill_dict(all_model_data, naive_data, kronos_snaps):
     """Build the forecast_skill.json dict from collected audit data."""
+    shallow = kronos_snaps < MIN_HISTORY_SNAPS
+    if shallow:
+        print(f"WARNING: only {kronos_snaps} kronos snapshots walked "
+              f"(< {MIN_HISTORY_SNAPS}) — likely a shallow checkout. Forcing model "
+              f"verdicts to INSUFFICIENT so a history glitch can't masquerade as NO_EDGE.",
+              file=sys.stderr)
     hkt = timezone(timedelta(hours=8))
     result = {
         "_metadata": {
@@ -202,7 +214,7 @@ def _build_skill_dict(all_model_data, naive_data, kronos_snaps):
         gt5 = buckets.get("gt5")
         # TIMESFM: no naive gate needed (pass None)
         ngr = naive_gt5_rate if model == "KRONOS" else None
-        v = _verdict(gt5, horizons, ngr)
+        v = "INSUFFICIENT" if shallow else _verdict(gt5, horizons, ngr)
         result[model] = {
             "verdict": v,
             "horizons": horizons,
