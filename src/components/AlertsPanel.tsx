@@ -16,6 +16,8 @@ const EVENT_META: Record<string, { icon: string; label: string; cls: string }> =
   flip_exit:   { icon: "⬇", label: "SuperTrend FLIP EXIT", cls: "border-[#ff4757]/25 bg-[#ff4757]/5" },
   tt_stripped: { icon: "⚠", label: "TT 5→4 STRIPPED",     cls: "border-[#ffa502]/25 bg-[#ffa502]/5" },
   tt_regained: { icon: "✅", label: "TT 4→5 REGAINED",     cls: "border-[#00ff88]/25 bg-[#00ff88]/5" },
+  sma50_cross_up:   { icon: "📈", label: "CROSSED ABOVE SMA50", cls: "border-[#00ff88]/25 bg-[#00ff88]/5" },
+  sma50_cross_down: { icon: "📉", label: "FELL BELOW SMA50",    cls: "border-[#ff4757]/25 bg-[#ff4757]/5" },
 };
 
 function workerEventRow(ev: ReconciledEvent, idx: number) {

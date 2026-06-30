@@ -1,4 +1,6 @@
-export type WorkerEventType = "flip_buy" | "flip_exit" | "tt_stripped" | "tt_regained";
+export type WorkerEventType =
+  | "flip_buy" | "flip_exit" | "tt_stripped" | "tt_regained"
+  | "sma50_cross_up" | "sma50_cross_down";
 
 export interface WorkerEvent {
   type: WorkerEventType;

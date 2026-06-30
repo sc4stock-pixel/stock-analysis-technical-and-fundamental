@@ -3,6 +3,7 @@ import { htmlEscape } from "@/lib/telegram";
 import { buildAlertModel } from "@/lib/alert-model";
 import { CONVICTION_PCT } from "@/lib/forecastBox";
 import type { StockAnalysisResult } from "@/types";
+import type { BreadthMovers } from "@/lib/breadth-movers";
 
 const dispSymForReport = (s: string) => s.replace(".HK", "");
 
@@ -220,6 +221,7 @@ export function buildEodReport(
   kronosData?: KronosForecasts | null,
   timesfmData?: unknown,           // legacy param kept for call-site compat; unused
   skill?: ForecastSkill | null,
+  movers?: BreadthMovers | null,   // SMA50 breadth movers vs the prior report's snapshot
 ): string {
   const valid = results.filter(r => !r.error && r.current_price > 0);
 
@@ -303,6 +305,17 @@ export function buildEodReport(
   // Market breadth
   lines.push(`\n${breadthEmoji} <b>MARKET BREADTH:</b> ${aboveSma50.length}/${valid.length} above SMA50 (${breadthPct}%)`);
   lines.push(`  US ${usAbove}/${usStocks.length} · HK ${hkAbove}/${hkStocks.length}`);
+
+  // Breadth movers since the prior report (which stock crossed SMA50). Omitted on the
+  // first run (no prior snapshot) and on quiet days (no crossings).
+  if (movers && (movers.up.length > 0 || movers.down.length > 0)) {
+    const parts: string[] = [];
+    if (movers.up.length > 0)
+      parts.push(`↑ crossed above: ${movers.up.map(dispSymForReport).map(htmlEscape).join(", ")}`);
+    if (movers.down.length > 0)
+      parts.push(`↓ fell below: ${movers.down.map(dispSymForReport).map(htmlEscape).join(", ")}`);
+    lines.push(`  ${parts.join("   ")}`);
+  }
 
   // ST BULLISH — monospace block for column alignment
   if (bullish.length > 0) {
