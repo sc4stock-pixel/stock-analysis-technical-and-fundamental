@@ -23,7 +23,11 @@ export async function GET() {
     if (!result) {
       return NextResponse.json(null);
     }
-    const state = JSON.parse(result) as WorkerState;
+    // Defense in depth: a bare NaN token (e.g. a ticker's price/stop on a yfinance
+    // gap) makes JSON.parse throw and blanks the ENTIRE overlay, not just that
+    // ticker. Strip \bNaN\b -> null before parsing. The worker also sanitizes on
+    // write; this guards any already-poisoned state and future writer regressions.
+    const state = JSON.parse(result.replace(/\bNaN\b/g, "null")) as WorkerState;
     return NextResponse.json(state);
   } catch (e) {
     console.error("[/api/state]", e);
