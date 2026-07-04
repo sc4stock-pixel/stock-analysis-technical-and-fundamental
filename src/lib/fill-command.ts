@@ -40,18 +40,31 @@ export function parseFillCommand(text: string): FillCommand {
   return { mode: "fill", selector, price, date: dateStr ?? null };
 }
 
+/** Strategy SMA50 gate for a trade-log record: worker field when present, else
+ *  derived from stored TT criteria (index 4 = Close>SMA50 at signal time) —
+ *  covers legacy records written before entry_ready existed. Exits: null. */
+export function entryReadyOfRecord(r: TradeLogRecord): boolean | null {
+  if (r.type !== "entry") return null;
+  if (typeof r.entry_ready === "boolean") return r.entry_ready;
+  if (Array.isArray(r.criteria) && r.criteria.length > 4) return r.criteria[4] === true;
+  return null;
+}
+
 // A record is fillable only when it's a CONFIRMED (EOD-ratified) flip that isn't
 // filled yet. Provisional intraday flips (confirmed === false) may never have
 // executed — a same-day SuperTrend re-cross that the EOD bar didn't sustain — so
-// they must not be filled.
+// they must not be filled. Entries with the SMA50 gate failing (entry_ready
+// false) are raw flips the strategy never takes — also not fillable.
 export function isFillable(r: TradeLogRecord): boolean {
-  return r.confirmed === true && r.actual_fill_price == null;
+  return r.confirmed === true && r.actual_fill_price == null
+    && entryReadyOfRecord(r) !== false;
 }
 
 export type TargetResult =
   | { kind: "one"; id: string }
   | { kind: "none" }
   | { kind: "provisional"; id: string }
+  | { kind: "not_entry_ready"; id: string }
   | { kind: "ambiguous"; ids: string[] };
 
 export function selectFillTarget(log: TradeLogRecord[], sel: FillSelector): TargetResult {
@@ -59,6 +72,7 @@ export function selectFillTarget(log: TradeLogRecord[], sel: FillSelector): Targ
     const rec = log.find((r) => r.id === sel.id);
     if (!rec) return { kind: "none" };
     if (!rec.confirmed) return { kind: "provisional", id: sel.id };
+    if (entryReadyOfRecord(rec) === false) return { kind: "not_entry_ready", id: sel.id };
     return { kind: "one", id: sel.id };
   }
   const fillable = log

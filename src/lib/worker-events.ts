@@ -21,10 +21,23 @@ export interface ReconciledEvent extends WorkerEvent {
   currentDir?: "up" | "down";
 }
 
-const FLIP_TYPES = new Set<WorkerEvent["type"]>(["flip_buy", "flip_exit"]);
+const FLIP_TYPES = new Set<WorkerEvent["type"]>(["flip_buy", "flip_exit", "entry_buy"]);
 
 const impliedDir = (type: WorkerEvent["type"]): "up" | "down" | null =>
-  type === "flip_buy" ? "up" : type === "flip_exit" ? "down" : null;
+  type === "flip_buy" || type === "entry_buy" ? "up"
+  : type === "flip_exit" ? "down" : null;
+
+/** THE strategy gate (SuperTrend + Close>SMA50). Single derivation for all web
+ *  surfaces: worker flag when present, else TT criterion c5 (index 4) — so it
+ *  works against pre-entryReady KV states too. */
+export function entryReadyOf(
+  ts?: Pick<WorkerTickerState, "dir" | "entryReady" | "criteria">,
+): boolean | undefined {
+  if (!ts) return undefined;
+  if (typeof ts.entryReady === "boolean") return ts.entryReady;
+  const c5 = Array.isArray(ts.criteria) ? ts.criteria[4] : undefined;
+  return typeof c5 === "boolean" ? ts.dir === "up" && c5 : undefined;
+}
 
 // Higher key = more recent. Same bar: eod (confirmed) ranks after intraday (provisional).
 const recencyKey = (e: WorkerEvent): string => `${e.barDate}:${e.confirmed ? 1 : 0}`;

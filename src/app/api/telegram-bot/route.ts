@@ -178,6 +178,11 @@ async function handleFill(token: string, chatId: number, text: string): Promise<
         `⏳ <code>${target.id.replace(/\.HK/g, "")}</code> is a provisional (unconfirmed intraday) flip — not fillable. It may never have executed.`);
       return;
     }
+    if (target.kind === "not_entry_ready") {
+      await replyTo(token, chatId,
+        `🚫 <code>${target.id.replace(/\.HK/g, "")}</code> is a raw ST flip below SMA50 — the strategy never entered (no SMA50 gate pass), so there is nothing to fill.`);
+      return;
+    }
     if (target.kind === "ambiguous") {
       const lines = target.ids.map((id) => `<code>${id.replace(/\.HK/g, "")}</code>`);
       await replyTo(token, chatId, ["Multiple unfilled records — specify the id:", ...lines].join("\n"));

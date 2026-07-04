@@ -51,6 +51,60 @@ describe("buildAlertModel — worker actionable rows", () => {
     expect(bySym("0939.HK").barsSince).toBe(0);
   });
 });
+// ---- SMA50 strategy gate (entry_ready) invariants ------------------------
+// The strategy is SuperTrend + Close>SMA50. "entered uptrend" / LONG must be
+// reserved for gate-passing entries; a raw flip below SMA50 must render as
+// awaiting-SMA50 on EVERY surface. (2026-07-04 audit — 1211.HK/META case.)
+describe("buildAlertModel — SMA50 entry gate", () => {
+  const crit = (c5: boolean) => [true, true, true, true, c5, true, false];
+  const flipUp = (ticker: string): WorkerEvent[] => [
+    { type: "flip_buy", ticker, region: "hk", session: "eod", barDate: "2026-06-17", confirmed: true },
+  ];
+
+  it("labels a flip below SMA50 as awaiting, not entered (entryReady false)", () => {
+    const tickers = { "1211.HK": { dir: "up", criteria: crit(false) } } as unknown as Record<string, WorkerTickerState>;
+    const m = buildAlertModel(flipUp("1211.HK"), tickers, [], { now: NOW });
+    const r = m.actOnThis[0];
+    expect(r.entryReady).toBe(false);
+    expect(r.change).toBe("flipped up · awaiting SMA50");
+  });
+
+  it("labels a gate-passing flip as entered uptrend (entryReady true)", () => {
+    const tickers = { "AAPL": { dir: "up", criteria: crit(true) } } as unknown as Record<string, WorkerTickerState>;
+    const m = buildAlertModel(flipUp("AAPL"), tickers, [], { now: NOW });
+    const r = m.actOnThis[0];
+    expect(r.entryReady).toBe(true);
+    expect(r.change).toBe("entered uptrend");
+  });
+
+  it("prefers the worker's explicit entryReady flag over criteria", () => {
+    const tickers = { "AAPL": { dir: "up", entryReady: false, criteria: crit(true) } } as unknown as Record<string, WorkerTickerState>;
+    const m = buildAlertModel(flipUp("AAPL"), tickers, [], { now: NOW });
+    expect(m.actOnThis[0].entryReady).toBe(false);
+  });
+
+  it("renders a standalone entry_buy (SMA50 reclaim) as re-entry", () => {
+    const ev: WorkerEvent[] = [
+      { type: "entry_buy", ticker: "META", region: "us", session: "eod", barDate: "2026-06-17", confirmed: true },
+    ];
+    const tickers = { "META": { dir: "up", entryReady: true, criteria: crit(true) } } as unknown as Record<string, WorkerTickerState>;
+    const m = buildAlertModel(ev, tickers, [], { now: NOW });
+    expect(m.actOnThis[0].change).toBe("re-entered above SMA50");
+    expect(m.actOnThis[0].entryReady).toBe(true);
+  });
+
+  it("does not count a same-bar flip_buy+entry_buy pair as extra whipsaw flips", () => {
+    const ev: WorkerEvent[] = [
+      { type: "flip_buy",  ticker: "AAPL", region: "us", session: "eod", barDate: "2026-06-17", confirmed: true },
+      { type: "entry_buy", ticker: "AAPL", region: "us", session: "eod", barDate: "2026-06-17", confirmed: true },
+      { type: "flip_exit", ticker: "AAPL", region: "us", session: "eod", barDate: "2026-06-16", confirmed: true },
+    ];
+    const tickers = { "AAPL": { dir: "up", entryReady: true, criteria: crit(true) } } as unknown as Record<string, WorkerTickerState>;
+    const m = buildAlertModel(ev, tickers, [], { now: NOW });
+    expect(m.actOnThis[0].whipsaw).toBe(false); // 2 raw flips, not 3
+  });
+});
+
 import type { StockAnalysisResult } from "@/types";
 
 const row = (symbol: string): ActionableRow => ({

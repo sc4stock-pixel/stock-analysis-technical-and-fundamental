@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import type { TradeLogRecord } from "@/types/trade-log";
 import { computeSlippage, summarize } from "@/lib/slippage";
+import { entryReadyOfRecord } from "@/lib/fill-command";
 import InfoTooltip from "@/components/InfoTooltip";
 
 type SortKey = "date" | "ticker" | "slippage";
@@ -156,6 +157,12 @@ export default function TradeLogPanel() {
                       <td className="px-2 py-1.5 text-[#00d4ff] font-bold">{r.ticker}</td>
                       <td className="px-2 py-1.5 text-[#c8d8f0]">
                         {r.type}
+                        {entryReadyOfRecord(r) === false && (
+                          <span
+                            className="ml-1 px-1 rounded bg-[#3a1a1a] text-[#e07070] text-[0.55rem] align-middle"
+                            title="Raw ST flip below SMA50 — the strategy never entered (SMA50 gate failed at signal time). Telemetry only; not fillable."
+                          >no entry</span>
+                        )}
                         {!r.confirmed && (
                           <span
                             className="ml-1 px-1 rounded bg-[#3a2d1a] text-[#caa15a] text-[0.55rem] align-middle"

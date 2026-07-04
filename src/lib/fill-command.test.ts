@@ -40,6 +40,31 @@ describe("parseFillCommand", () => {
   });
 });
 
+describe("SMA50 entry gate (entry_ready)", () => {
+  it("entry_ready false is not fillable (phantom entry)", () => {
+    expect(isFillable(rec({ entry_ready: false }))).toBe(false);
+  });
+  it("legacy record derives gate from criteria[4] (c5 Close>SMA50)", () => {
+    const below = rec({ criteria: [true, true, true, true, false, true, false] });
+    const above = rec({ criteria: [true, true, true, true, true, true, false] });
+    expect(isFillable(below)).toBe(false);   // the 1211.HK/META phantom case
+    expect(isFillable(above)).toBe(true);
+  });
+  it("selectFillTarget by id refuses a non-ready entry", () => {
+    const log = [rec({ entry_ready: false })];
+    expect(selectFillTarget(log, { kind: "id", id: "X|2026-01-01|entry" }))
+      .toEqual({ kind: "not_entry_ready", id: "X|2026-01-01|entry" });
+  });
+  it("selectFillTarget by ticker skips non-ready entries entirely", () => {
+    const log = [rec({ entry_ready: false })];
+    expect(selectFillTarget(log, { kind: "ticker", ticker: "X" }))
+      .toEqual({ kind: "none" });
+  });
+  it("exit records are unaffected by the gate", () => {
+    expect(isFillable(rec({ type: "exit", id: "X|2026-01-01|exit" }))).toBe(true);
+  });
+});
+
 describe("selectFillTarget", () => {
   const log = [
     rec({ id: "A|2026-06-10|entry", ticker: "A", date: "2026-06-10" }),

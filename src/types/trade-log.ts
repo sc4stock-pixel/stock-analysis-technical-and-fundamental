@@ -10,6 +10,10 @@ export interface TradeLogRecord {
   ticker: string;
   region: string;             // UPPERCASE
   type: "entry" | "exit";
+  /** Strategy SMA50 gate at signal time (worker: dir up AND TT c5). false = raw
+   *  flip below SMA50 — a phantom entry the strategy never takes (not fillable).
+   *  Absent on legacy/exit records; derive from criteria[4] via entryReadyOfRecord. */
+  entry_ready?: boolean | null;
   direction: "long";
   signal_price: number | null;
   stop: number | null;
