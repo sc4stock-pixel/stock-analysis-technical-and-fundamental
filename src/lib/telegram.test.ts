@@ -27,6 +27,35 @@ function bearishHKResult(): StockAnalysisResult {
   } as unknown as StockAnalysisResult;
 }
 
+// Mirror image: fresh BULLISH flip (crash-up bar) with TT c5 false → the row must
+// tag [WAIT], never [LONG] — the strategy entry is ST flip + Close>SMA50.
+function bullishBelowSma50Result(): StockAnalysisResult {
+  const downtrendBars = Array.from({ length: 30 }, (_, i) => ({
+    high:  160 - i * 2 + 1,
+    low:   160 - i * 2 - 1,
+    close: 160 - i * 2,
+  }));
+  const spikeBar = { high: 210, low: 100, close: 205 };
+  const bars = [...downtrendBars, spikeBar];
+  return {
+    symbol: "1211.HK", exchange: "HK", signal: "HOLD", score: 5,
+    current_price: 205, change_pct: 7.4, regime: "DOWNTREND",
+    chart_bars: bars, st_opt_params: { atrPeriod: 10, multiplier: 3.0 },
+    st_direction: 1,
+    sepa_metadata: { trend_template_criteria: { c5_price_above_sma50: false } },
+  } as unknown as StockAnalysisResult;
+}
+
+describe("buildTelegramMessage — SMA50 entry gate tag", () => {
+  const msg = buildTelegramMessage([bullishBelowSma50Result()], "manual");
+  it("tags a below-SMA50 flip as [WAIT], not [LONG]", () => {
+    const block = msg.slice(msg.indexOf("ACT ON THIS"));
+    expect(block).toContain("awaiting SMA50");
+    expect(block).toContain("[WAIT]");
+    expect(block).not.toContain("[LONG]");
+  });
+});
+
 describe("buildTelegramMessage — Act on this block", () => {
   const msg = buildTelegramMessage([bearishHKResult()], "manual");
   it("includes an ACT ON THIS section", () => {

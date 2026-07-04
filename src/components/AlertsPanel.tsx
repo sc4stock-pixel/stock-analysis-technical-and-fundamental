@@ -56,7 +56,9 @@ function ActRow({ r }: { r: ActionableRow }) {
     : out ? (r.ttFlag ? "border-[#ff4757]/55 bg-[#ff4757]/8" : "border-[#ff4757]/30 bg-[#ff4757]/5")
     : "border-[#00ff88]/30 bg-[#00ff88]/5";
   const arrowColor = r.whipsaw ? "text-[#ffa502]" : out ? "text-[#ff4757]" : "text-[#00ff88]";
-  const pill = out ? "bg-[#ff4757]/15 text-[#ff6b78]" : "bg-[#00ff88]/14 text-[#3affa0]";
+  const pill = out ? "bg-[#ff4757]/15 text-[#ff6b78]"
+    : r.entryReady === false ? "bg-[#ffa502]/15 text-[#ffa502]"   // gate not passed — amber, not green
+    : "bg-[#00ff88]/14 text-[#3affa0]";
   return (
     <div>
       <div className={`flex items-center gap-2 text-[0.7rem] rounded px-2 py-1.5 ${r.whipsaw ? "mb-0.5" : "mb-1.5"} border ${border}`}
@@ -71,8 +73,9 @@ function ActRow({ r }: { r: ActionableRow }) {
         {r.barsSince === 0
           ? <span className="font-mono text-[0.55rem] font-bold px-1 py-0.5 rounded bg-[#f59e0b]/20 border border-[#f59e0b]/40 text-[#f59e0b]">TODAY</span>
           : <span className="font-mono text-[0.6rem] text-[#6b82a3]">{r.barsSince}d</span>}
-        <span className={`font-mono text-[0.6rem] font-medium px-1.5 py-0.5 rounded ${pill}`}>
-          {out ? "OUT · ST↓" : "LONG · ST↑"}
+        <span className={`font-mono text-[0.6rem] font-medium px-1.5 py-0.5 rounded ${pill}`}
+              title={r.entryReady === false ? "ST flipped up but price is below SMA50 — the strategy has NOT entered (waits for reclaim)" : undefined}>
+          {out ? "OUT · ST↓" : r.entryReady === false ? "⏳ WAIT · ST↑" : "LONG · ST↑"}
         </span>
       </div>
       {r.whipsaw && r.rawCount != null && (
