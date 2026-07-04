@@ -228,7 +228,10 @@ export function buildTelegramMessage(
     const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
     const tt  = ttFor(r);
     const ttStr = tt ? `TT${tt.criteria_met}/7` : "TT—";
-    return `${sym} ${chg} ${px} ${ttStr}`;
+    // Strategy SMA50 gate (TT c5): a flip below SMA50 is NOT an entry yet.
+    const gate = tt?.c5_price_above_sma50 === true ? "✓entry"
+      : tt?.c5_price_above_sma50 === false ? "⏳SMA50" : "";
+    return `${sym} ${chg} ${px} ${ttStr} ${gate}`.trimEnd();
   };
 
   // Watchlist: HK first then US, inline 3-per-line, " · " separator, .HK stripped, no flag

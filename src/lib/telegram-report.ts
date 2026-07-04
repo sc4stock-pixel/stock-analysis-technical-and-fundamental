@@ -283,7 +283,10 @@ export function buildEodReport(
   if (actRows.length > 0) {
     lines.push(`\n⚡ <b>ACT ON THIS</b>`);
     actRows.forEach(r => {
-      const tag = r.stance === "out" ? "🔴 OUT" : "🟢 LONG";
+      // 🟢 LONG only for real strategy entries (SMA50 gate passed); a raw flip
+      // below SMA50 is ⏳ WAIT — the strategy has NOT entered.
+      const tag = r.stance === "out" ? "🔴 OUT"
+        : r.entryReady === false ? "⏳ WAIT" : "🟢 LONG";
       const when = r.barsSince === 0 ? "today" : `${r.barsSince}d ago`;
       const tt = r.ttFlag ? ` ${htmlEscape(r.ttFlag.replace("→", "->"))}` : "";
       lines.push(`  • <b>${htmlEscape(dispSymForReport(r.symbol))}</b> ${r.change}${tt} (${when}) — ${tag}`);

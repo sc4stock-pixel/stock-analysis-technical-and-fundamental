@@ -1,4 +1,5 @@
 import type { WorkerState } from "@/types/worker-state";
+import { entryReadyOf } from "@/lib/worker-events";
 import { DIGEST_EDITORIAL_SPEC } from "./editorialSpec";
 import { pct5d, pct20d, downsideToStopPct, distanceToFlipPct, eventCount, isDefaultParams, fmtPct, fmtKronos } from "./metrics";
 
@@ -10,7 +11,8 @@ export interface DigestInputs {
 
 const COLUMN_LEGEND = [
   "COLUMN LEGEND — read before interpreting:",
-  "- dir: SuperTrend direction. up = long signal active; down = exited / no long.",
+  "- dir: RAW SuperTrend direction (trend telemetry). up alone is NOT a long — the strategy is SuperTrend + 50d SMA: a long is active only when gate=✓. down = exited / no long.",
+  "- gate: the strategy's SMA50 entry gate. ✓ = price>SMA50 with dir=up (real long / entry-ready); ⏳ = dir=up but price below SMA50 (flip WITHOUT entry — the strategy is NOT long, watching for reclaim); blank for down names.",
   "- TT: Trend-Template score 0-7 (structural/fundamental quality; 6-7 = elite).",
   "- px: latest price.",
   "- stop: the live SuperTrend line = the level a close must cross to flip dir (resistance when dir=down, support when dir=up). For an open long it is the EXIT; for a down name it is the BUY / flip-up trigger.",
@@ -24,7 +26,7 @@ const COLUMN_LEGEND = [
 function pad(s: string, n: number): string { return (s + " ".repeat(n)).slice(0, n); }
 
 export function assembleDigestPrompt({ state, kronos }: DigestInputs): string {
-  const header = "TICK       dir  TT   px       stop     risk%  flip%  K5d    K20d   #ev";
+  const header = "TICK       dir  gate TT   px       stop     risk%  flip%  K5d    K20d   #ev";
   const rows: string[] = [];
   for (const [sym, t] of Object.entries(state.tickers)) {
     const kr = kronos[sym] as KronosRawEntry | undefined;
@@ -33,6 +35,7 @@ export function assembleDigestPrompt({ state, kronos }: DigestInputs): string {
     rows.push(
       pad(sym, 10) + " " +
       pad(t.dir, 4) + " " +
+      pad(t.dir !== "up" ? "" : entryReadyOf(t) === false ? "⏳" : entryReadyOf(t) ? "✓" : "?", 4) + " " +
       pad(`${t.score}/7`, 4) + " " +
       pad(t.price.toFixed(2), 8) + " " +
       pad(t.stop.toFixed(2), 8) + " " +

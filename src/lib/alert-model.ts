@@ -1,5 +1,5 @@
 import type { ReconciledEvent } from "@/lib/worker-events";
-import { reconcileWorkerEvents } from "@/lib/worker-events";
+import { reconcileWorkerEvents, entryReadyOf } from "@/lib/worker-events";
 import type { StockAnalysisResult } from "@/types";
 import type { WorkerEvent, WorkerTickerState } from "@/types/worker-state";
 import { supertrend } from "@/lib/indicators";
@@ -15,6 +15,9 @@ export interface ActionableRow {
   stance: Stance;
   change: string;        // "entered uptrend" | "exited uptrend" | "whipsawing · N flips/2wk"
   barsSince: number;     // freshness; 0 => TODAY pill
+  /** Strategy SMA50 gate at signal time. true = real entry ("LONG"); false =
+   *  raw flip below SMA50 ("awaiting SMA50", NOT a long); undefined = unknown. */
+  entryReady?: boolean;
   whipsaw: boolean;
   rawCount?: number;     // raw events folded (whipsaw caption)
   ttFlag?: string;       // e.g. "+ TT 5→4"
@@ -60,7 +63,11 @@ export interface ClientFlip {
   barsSince: number;
 }
 
-const FLIP_SET = new Set<WorkerEvent["type"]>(["flip_buy", "flip_exit"]);
+// entry_buy included: a fresh SMA50-reclaim re-entry is actionable even when the
+// underlying dir flip is older than the window. Whipsaw counting stays on raw
+// flips only (RAW_FLIP_SET) so a same-bar flip_buy+entry_buy pair counts once.
+const FLIP_SET = new Set<WorkerEvent["type"]>(["flip_buy", "flip_exit", "entry_buy"]);
+const RAW_FLIP_SET = new Set<WorkerEvent["type"]>(["flip_buy", "flip_exit"]);
 
 // Trend Template passes at criteria_met >= 5 (see CLAUDE.md). Derive the escalation
 // label from the threshold so it can't silently go stale if the threshold changes.
@@ -99,18 +106,25 @@ function workerActionable(
     const since = daysAgo(liveFlip.barDate, now);
     if (since > window) return;
 
-    const flips = events.filter(e => FLIP_SET.has(e.type) && daysAgo(e.barDate, now) <= window);
+    const flips = events.filter(e => RAW_FLIP_SET.has(e.type) && daysAgo(e.barDate, now) <= window);
     const whipsaw = flips.length >= 3;
     const stance: Stance = tickers[ticker]?.dir === "up" ? "long" : "out";
     const ttFlag = ttFlagFor(events.filter(e => daysAgo(e.barDate, now) <= window));
+    const entryReady = stance === "long" ? entryReadyOf(tickers[ticker]) : undefined;
 
+    // "entered uptrend" is reserved for real strategy entries (ST flip +
+    // Close>SMA50). A raw flip below SMA50 is telemetry, not a long.
     const change = whipsaw
       ? `whipsawing · ${flips.length} flips/2wk`
-      : stance === "long" ? "entered uptrend" : "exited uptrend";
+      : stance === "out" ? "exited uptrend"
+      : entryReady === false ? "flipped up · awaiting SMA50"
+      : liveFlip.type === "entry_buy" && !flips.some(f => f.type === "flip_buy" && f.barDate === liveFlip.barDate)
+        ? "re-entered above SMA50"
+        : "entered uptrend";
     const arrow: ActionableRow["arrow"] = whipsaw ? "↔" : stance === "long" ? "▲" : "▼";
 
     rows.push({
-      symbol: ticker, arrow, stance, change, barsSince: since, whipsaw,
+      symbol: ticker, arrow, stance, change, barsSince: since, whipsaw, entryReady,
       rawCount: whipsaw ? flips.length : undefined,
       ttFlag, severity: severityOf(stance, whipsaw, ttFlag), source: "worker",
     });
@@ -129,11 +143,18 @@ function clientActionable(
     const { flipType, barsSince } = clientFlip(r);
     if (!flipType || barsSince > FLIP_ALERT_DAYS) continue;
     const stance: Stance = flipType === "BULLISH" ? "long" : "out";
+    // Client-side gate: TT c5 (Close>SMA50) from sepa_metadata — same strategy
+    // gate the worker's entryReady carries.
+    const c5 = r.sepa_metadata?.trend_template_criteria?.c5_price_above_sma50;
+    const entryReady = stance === "long"
+      ? (typeof c5 === "boolean" ? c5 : undefined) : undefined;
     rows.push({
       symbol: r.symbol,
       arrow: stance === "long" ? "▲" : "▼",
       stance,
-      change: stance === "long" ? "entered uptrend" : "exited uptrend",
+      change: stance === "out" ? "exited uptrend"
+        : entryReady === false ? "flipped up · awaiting SMA50" : "entered uptrend",
+      entryReady,
       barsSince, whipsaw: false,
       severity: severityOf(stance, false, undefined),
       source: "client",
