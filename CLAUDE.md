@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ STRATEGY.md is normative
+
+Before touching ANY signal-adjacent code (alerts, logs, digest, displays, backtests,
+pipeline), read `STRATEGY.md`. The ST strategy = SuperTrend flip + Close>SMA50;
+"LONG/entry/entered" wording may only derive from `entryReady`/`entry_buy`. New
+stance-rendering surfaces must add a below-SMA50-flip-is-not-LONG test. (2026-07-04 audit)
+
 ## Commands
 
 ```bash
