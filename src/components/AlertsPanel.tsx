@@ -57,7 +57,8 @@ function ActRow({ r }: { r: ActionableRow }) {
     : "border-[#00ff88]/30 bg-[#00ff88]/5";
   const arrowColor = r.whipsaw ? "text-[#ffa502]" : out ? "text-[#ff4757]" : "text-[#00ff88]";
   const pill = out ? "bg-[#ff4757]/15 text-[#ff6b78]"
-    : r.entryReady === false ? "bg-[#ffa502]/15 text-[#ffa502]"   // gate not passed — amber, not green
+    : r.posState === "waiting" ? "bg-[#ffa502]/15 text-[#ffa502]"   // no position — amber
+    : r.posState === "pending" ? "bg-[#00d4ff]/15 text-[#00d4ff]"   // fill queued — cyan
     : "bg-[#00ff88]/14 text-[#3affa0]";
   return (
     <div>
@@ -74,8 +75,15 @@ function ActRow({ r }: { r: ActionableRow }) {
           ? <span className="font-mono text-[0.55rem] font-bold px-1 py-0.5 rounded bg-[#f59e0b]/20 border border-[#f59e0b]/40 text-[#f59e0b]">TODAY</span>
           : <span className="font-mono text-[0.6rem] text-[#6b82a3]">{r.barsSince}d</span>}
         <span className={`font-mono text-[0.6rem] font-medium px-1.5 py-0.5 rounded ${pill}`}
-              title={r.entryReady === false ? "ST flipped up but price is below SMA50 — the strategy has NOT entered (waits for reclaim)" : undefined}>
-          {out ? "OUT · ST↓" : r.entryReady === false ? "⏳ WAIT · ST↑" : "LONG · ST↑"}
+              title={r.posState === "waiting"
+                ? "ST flipped up but price is below SMA50 — the strategy has NOT entered (waits for reclaim)"
+                : r.posState === "pending"
+                ? "Entry signal on the latest bar — the fill executes at the next session's open"
+                : undefined}>
+          {out ? "OUT · ST↓"
+            : r.posState === "waiting" ? "⏳ WAIT · ST↑"
+            : r.posState === "pending" ? "🕒 ENTRY · ST↑"
+            : "LONG · ST↑"}
         </span>
       </div>
       {r.whipsaw && r.rawCount != null && (

@@ -9,6 +9,27 @@ export const FLIP_ALERT_DAYS = 3;
 
 export type Stance = "long" | "out";
 
+/** Strategy position state for a dir-up row (STRATEGY.md state machine):
+ *  "long"    — entered via the SMA50 gate, holding until ST exit;
+ *  "pending" — entry signal on the latest bar, fill is next session's open;
+ *  "waiting" — ST flipped up but the gate never passed (no position). */
+export type PosState = "long" | "pending" | "waiting";
+
+/** Derive PosState from worker ticker state; falls back to the entryReady gate
+ *  for pre-upgrade KV states that lack inLong. */
+export function posStateOf(
+  ts: Pick<WorkerTickerState, "dir" | "inLong" | "entryPending" | "entryReady" | "criteria"> | undefined,
+): PosState | undefined {
+  if (!ts || ts.dir !== "up") return undefined;
+  if (typeof ts.inLong === "boolean") {
+    if (ts.inLong) return "long";
+    if (ts.entryPending) return "pending";
+    return "waiting";
+  }
+  const gate = entryReadyOf(ts);
+  return gate === undefined ? undefined : gate ? "long" : "waiting";
+}
+
 export interface ActionableRow {
   symbol: string;
   arrow: "▲" | "▼" | "↔";
@@ -18,6 +39,8 @@ export interface ActionableRow {
   /** Strategy SMA50 gate at signal time. true = real entry ("LONG"); false =
    *  raw flip below SMA50 ("awaiting SMA50", NOT a long); undefined = unknown. */
   entryReady?: boolean;
+  /** Strategy position state for long-stance rows (see PosState). */
+  posState?: PosState;
   whipsaw: boolean;
   rawCount?: number;     // raw events folded (whipsaw caption)
   ttFlag?: string;       // e.g. "+ TT 5→4"
@@ -111,20 +134,24 @@ function workerActionable(
     const stance: Stance = tickers[ticker]?.dir === "up" ? "long" : "out";
     const ttFlag = ttFlagFor(events.filter(e => daysAgo(e.barDate, now) <= window));
     const entryReady = stance === "long" ? entryReadyOf(tickers[ticker]) : undefined;
+    const posState = stance === "long" ? posStateOf(tickers[ticker]) : undefined;
 
-    // "entered uptrend" is reserved for real strategy entries (ST flip +
-    // Close>SMA50). A raw flip below SMA50 is telemetry, not a long.
+    // Copy is driven by the POSITION state machine (STRATEGY.md), not the raw
+    // flip: a below-SMA50 flip is "awaiting", a signal on the latest bar is a
+    // pending fill, and an entered position stays "entered" even if price later
+    // dips under SMA50 (exits are ST-flip only — the META 2026-07-02 case).
     const change = whipsaw
       ? `whipsawing · ${flips.length} flips/2wk`
       : stance === "out" ? "exited uptrend"
-      : entryReady === false ? "flipped up · awaiting SMA50"
+      : posState === "waiting" ? "flipped up · awaiting SMA50"
+      : posState === "pending" ? "entry signal · fills next open"
       : liveFlip.type === "entry_buy" && !flips.some(f => f.type === "flip_buy" && f.barDate === liveFlip.barDate)
         ? "re-entered above SMA50"
         : "entered uptrend";
     const arrow: ActionableRow["arrow"] = whipsaw ? "↔" : stance === "long" ? "▲" : "▼";
 
     rows.push({
-      symbol: ticker, arrow, stance, change, barsSince: since, whipsaw, entryReady,
+      symbol: ticker, arrow, stance, change, barsSince: since, whipsaw, entryReady, posState,
       rawCount: whipsaw ? flips.length : undefined,
       ttFlag, severity: severityOf(stance, whipsaw, ttFlag), source: "worker",
     });
@@ -148,13 +175,23 @@ function clientActionable(
     const c5 = r.sepa_metadata?.trend_template_criteria?.c5_price_above_sma50;
     const entryReady = stance === "long"
       ? (typeof c5 === "boolean" ? c5 : undefined) : undefined;
+    // Client-side position state: the pipeline already simulates the open
+    // position (st_open_return_pct is non-null iff the strategy holds a long).
+    // A fresh gate-passing flip without an open position = fill pending.
+    const posState: PosState | undefined = stance !== "long" ? undefined
+      : r.st_open_return_pct != null ? "long"
+      : entryReady === true ? "pending"
+      : entryReady === false ? "waiting"
+      : undefined;
     rows.push({
       symbol: r.symbol,
       arrow: stance === "long" ? "▲" : "▼",
       stance,
       change: stance === "out" ? "exited uptrend"
-        : entryReady === false ? "flipped up · awaiting SMA50" : "entered uptrend",
-      entryReady,
+        : posState === "waiting" ? "flipped up · awaiting SMA50"
+        : posState === "pending" ? "entry signal · fills next open"
+        : "entered uptrend",
+      entryReady, posState,
       barsSince, whipsaw: false,
       severity: severityOf(stance, false, undefined),
       source: "client",
