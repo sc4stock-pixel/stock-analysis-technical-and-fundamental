@@ -31,6 +31,14 @@ export interface WorkerTickerState {
   /** Strategy SMA50 gate: dir=="up" AND TT c5 (Close>SMA50). Optional until the
    *  worker PR deploys; derive via entryReadyOf() which falls back to criteria[4]. */
   entryReady?: boolean;
+  /** Strategy POSITION state (STRATEGY.md state machine): entered via the gate
+   *  and no ST exit since. Stays true when price later dips under SMA50 —
+   *  exits are ST-flip only. Optional until the worker deploys it. */
+  inLong?: boolean;
+  /** Entry signal fired on the latest bar — the fill is next session's open. */
+  entryPending?: boolean;
+  entryDate?: string | null;
+  entryPx?: number | null;
   funds: {
     f: number | null;
     z: number | null;

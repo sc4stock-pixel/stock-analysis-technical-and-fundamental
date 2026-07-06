@@ -32,6 +32,30 @@ them is a bug — resolve explicitly, never silently.
 SELL signals pass through **ungated** (capital protection). The SuperTrend line
 is the trailing stop; stop-hit exits defer to next bar's open (audit fix H3).
 
+## The position state machine (added 2026-07-06)
+
+`entryReady` answers "does the gate pass NOW"; the strategy's actual state is
+positional. States for a dir-up ticker:
+
+```
+OUT ──(flip+gate | SMA50 reclaim)──▶ ENTRY-PENDING (signal on latest bar;
+      fills next session's open) ──▶ LONG ──(ST flip down)──▶ OUT
+```
+
+- **LONG** (`inLong`): entered via the gate, held until an ST flip-down —
+  stays LONG even if price later dips back under SMA50 (exits are ST-flip
+  only; the META 2026-07-02 case).
+- **ENTRY-PENDING** (`entryPending`): signal fired on the latest bar; no fill
+  yet (the AAPL 2026-07-02 holiday-weekend case).
+- **WAITING**: dir up but never entered (below SMA50 at flip, no reclaim).
+
+Single derivations: worker `signals._position_state()` (authoritative, in KV) ·
+web `positionState.simulatePositionState()` (reconcile recompute) · client
+surfaces use the pipeline's own open-position sim (`st_open_return_pct`).
+`alert-model.posStateOf()` maps state → labels for ALL narrative surfaces;
+do not derive labels anywhere else. `/api/reconcile` cross-checks `inLong`
+worker-vs-web daily.
+
 ## The vocabulary contract (enforced by tests)
 
 - **"LONG" / "entry" / "entered" wording may only derive from `entryReady`

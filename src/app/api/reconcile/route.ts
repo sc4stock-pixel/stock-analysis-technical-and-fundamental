@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_CONFIG } from "@/lib/config";
-import { supertrend } from "@/lib/indicators";
+import { supertrend, sma } from "@/lib/indicators";
 import { computeTrendTemplateCriteria } from "@/lib/trendTemplate";
 import { fetchYahooOHLCV, getSTParams } from "@/lib/marketData";
+import { simulatePositionState } from "@/lib/positionState";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -17,6 +18,7 @@ interface ReconcileTicker {
   mult: number;
   score: number;   // 7-criterion TT count
   entryReady: boolean; // strategy SMA50 gate: dir up AND c5 (see STRATEGY.md)
+  inLong: boolean;     // strategy position state (STRATEGY.md state machine)
   barDate: string; // YYYY-MM-DD of the last bar used for computation
 }
 
@@ -39,15 +41,18 @@ async function computeOne(symbol: string): Promise<ReconcileTicker | null> {
   const lows   = ohlcv.bars.map(b => b.low);
   const closes = ohlcv.bars.map(b => b.close);
 
-  const [, dirArr] = supertrend(highs, lows, closes, p.atrPeriod, p.multiplier);
+  const [, dirArr, sigArr] = supertrend(highs, lows, closes, p.atrPeriod, p.multiplier);
   const dir = (dirArr[dirArr.length - 1] === 1) ? "up" : "down";
   const tt = computeTrendTemplateCriteria(closes, DEFAULT_CONFIG.analysis.smaLong);
   // Strategy SMA50 gate (STRATEGY.md): same derivation as the worker's entryReady.
   const entryReady = dir === "up" && tt.c5_price_above_sma50 === true;
+  // Strategy position state — independent recompute of the worker's inLong so
+  // Tier-2 catches the two engines disagreeing about holding a position.
+  const { inLong } = simulatePositionState(closes, dirArr, sigArr, sma(closes, 50));
   const barDate = ohlcv.bars[ohlcv.bars.length - 1].date;
 
   return { dir, atrPeriod: p.atrPeriod, mult: p.multiplier,
-           score: tt.criteria_met, entryReady, barDate };
+           score: tt.criteria_met, entryReady, inLong, barDate };
 }
 
 export async function GET(req: NextRequest) {

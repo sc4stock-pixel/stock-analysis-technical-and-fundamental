@@ -255,9 +255,10 @@ export function buildTelegramMessage(
   if (actRows.length > 0) {
     const rows = actRows.map(r => {
       const sym = dispSym(r.symbol).padEnd(6);
-      // LONG is reserved for gate-passing entries; a raw flip below SMA50 is WAIT.
+      // Tag = the position state machine: LONG only when the strategy holds.
       const tag = r.stance === "out" ? "OUT"
-        : r.entryReady === false ? "WAIT" : "LONG";
+        : r.posState === "waiting" ? "WAIT"
+        : r.posState === "pending" ? "ENTRY" : "LONG";
       const when = r.barsSince === 0 ? "today" : `${r.barsSince}d`;
       const tt = r.ttFlag ? ` ${r.ttFlag.replace("→", "->")}` : "";  // defensive; ttFlag is empty on this surface
       return `${sym} ${r.change}${tt} (${when}) [${tag}]`;

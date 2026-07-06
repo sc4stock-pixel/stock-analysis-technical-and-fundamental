@@ -93,6 +93,28 @@ describe("buildAlertModel — SMA50 entry gate", () => {
     expect(m.actOnThis[0].entryReady).toBe(true);
   });
 
+  it("META case: inLong survives a dip below SMA50 — stays 'entered uptrend'", () => {
+    // Entered via the gate on the flip; price has since dipped under SMA50
+    // (c5 false, entryReady false) — but the strategy holds until an ST exit.
+    const tickers = { "META": { dir: "up", inLong: true, entryPending: false, entryReady: false, criteria: crit(false) } } as unknown as Record<string, WorkerTickerState>;
+    const m = buildAlertModel(flipUp("META"), tickers, [], { now: NOW });
+    expect(m.actOnThis[0].posState).toBe("long");
+    expect(m.actOnThis[0].change).toBe("entered uptrend");
+  });
+
+  it("AAPL case: signal on latest bar renders as pending fill, not LONG", () => {
+    const tickers = { "AAPL": { dir: "up", inLong: false, entryPending: true, entryReady: true, criteria: crit(true) } } as unknown as Record<string, WorkerTickerState>;
+    const m = buildAlertModel(flipUp("AAPL"), tickers, [], { now: NOW });
+    expect(m.actOnThis[0].posState).toBe("pending");
+    expect(m.actOnThis[0].change).toBe("entry signal · fills next open");
+  });
+
+  it("falls back to the entryReady gate when inLong is absent (pre-upgrade KV)", () => {
+    const tickers = { "1211.HK": { dir: "up", criteria: crit(false) } } as unknown as Record<string, WorkerTickerState>;
+    const m = buildAlertModel(flipUp("1211.HK"), tickers, [], { now: NOW });
+    expect(m.actOnThis[0].posState).toBe("waiting");
+  });
+
   it("does not count a same-bar flip_buy+entry_buy pair as extra whipsaw flips", () => {
     const ev: WorkerEvent[] = [
       { type: "flip_buy",  ticker: "AAPL", region: "us", session: "eod", barDate: "2026-06-17", confirmed: true },
