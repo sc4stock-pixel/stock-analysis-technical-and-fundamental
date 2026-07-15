@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseFillCommand, selectFillTarget, applyFill, stripNaN, isFillable } from "@/lib/fill-command";
+import { parseEquityCommand, formatEquityReply, EQUITY_KV_KEY, type EquityRecord } from "@/lib/equity-command";
 import { slippageLabel } from "@/lib/slippage";
 import type { TradeLogRecord } from "@/types/trade-log";
 
@@ -205,6 +206,49 @@ async function handleFill(token: string, chatId: number, text: string): Promise<
   }
 }
 
+async function readEquity(kvUrl: string, kvToken: string): Promise<EquityRecord | null> {
+  const res = await fetch(`${kvUrl}/get/${EQUITY_KV_KEY}`, {
+    headers: { Authorization: `Bearer ${kvToken}` }, cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`KV get ${res.status}`);
+  const { result } = (await res.json()) as { result: string | null };
+  return result ? (JSON.parse(stripNaN(result)) as EquityRecord) : null;
+}
+
+async function writeEquity(kvUrl: string, kvToken: string, record: EquityRecord): Promise<void> {
+  const body = JSON.stringify(record);
+  const res = await fetch(`${kvUrl}/set/${EQUITY_KV_KEY}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${kvToken}`, "Content-Type": "application/json" },
+    body,
+  });
+  if (!res.ok) throw new Error(`KV set ${res.status}`);
+}
+
+async function handleEquity(token: string, chatId: number, text: string): Promise<void> {
+  const kvUrl = process.env.KV_REST_API_URL;
+  const kvToken = process.env.KV_REST_API_TOKEN;
+  if (!kvUrl || !kvToken) { await replyTo(token, chatId, "KV not configured."); return; }
+
+  const cmd = parseEquityCommand(text);
+  if ("error" in cmd) { await replyTo(token, chatId, cmd.error); return; }
+
+  try {
+    const current = await readEquity(kvUrl, kvToken);
+
+    if ("show" in cmd) {
+      await replyTo(token, chatId, formatEquityReply(current));
+      return;
+    }
+
+    const updated: EquityRecord = { value: cmd.value, updated_at: new Date().toISOString() };
+    await writeEquity(kvUrl, kvToken, updated);
+    await replyTo(token, chatId, formatEquityReply(current, updated));
+  } catch (e) {
+    await replyTo(token, chatId, `⚠️ Error: ${String(e)}`);
+  }
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // Validate Telegram webhook secret
   const secret         = req.headers.get("x-telegram-bot-api-secret-token");
@@ -249,6 +293,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       await replyTo(token, chatId, "⛔ Not authorized.").catch(() => {});
     } else {
       await handleFill(token, chatId, text).catch(() => {});
+    }
+  } else if (cmd === "/equity") {
+    const adminId = process.env.TELEGRAM_ADMIN_CHAT_ID;
+    if (!adminId || String(chatId) !== adminId) {
+      await replyTo(token, chatId, "⛔ Not authorized.").catch(() => {});
+    } else {
+      await handleEquity(token, chatId, text).catch(() => {});
     }
   }
 
