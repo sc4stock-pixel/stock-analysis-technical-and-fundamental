@@ -1,7 +1,7 @@
 {
   "_metadata": {
-    "generated_at_utc": "2026-07-19T04:02:54.315596+00:00",
-    "generated_at_hk": "2026-07-19 12:02:54 HKT",
+    "generated_at_utc": "2026-07-19T07:03:52.850505+00:00",
+    "generated_at_hk": "2026-07-19 15:03:52 HKT",
     "model": "TimesFM 2.5 200M PyTorch",
     "data_source": "yfinance",
     "horizon_days": 20,
@@ -699,16 +699,16 @@
       "persistence_prob": 100.0,
       "flip_risk": "low",
       "p50_distances": [
-        9.24,
-        8.34,
-        7.91,
-        7.23,
-        6.68,
-        5.87,
-        5.31,
-        5.1,
-        4.66,
-        4.85
+        9.26,
+        8.37,
+        7.94,
+        7.25,
+        6.72,
+        5.9,
+        5.34,
+        5.13,
+        4.71,
+        4.92
       ]
     }
   },
