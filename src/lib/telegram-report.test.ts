@@ -55,12 +55,20 @@ describe("buildForecastSection — 5d + skill footer", () => {
   const stubSkill: ForecastSkill = {
     _metadata: { conviction_pct: 5, drift_window: 5, generated_at_hk: "2026-06-25", history_days: 90, match_tol_days: 2 },
     KRONOS: {
-      horizons: {},
+      horizons: {
+        "5d": { hits: 260, n: 500, rate: 0.52, ci_lo: 0.47, ci_hi: 0.56, p: 0.4 },
+        "15d": { hits: 300, n: 484, rate: 0.62, ci_lo: 0.58, ci_hi: 0.66, p: 0.0004 },
+        "20d": { hits: 280, n: 452, rate: 0.62, ci_lo: 0.57, ci_hi: 0.66, p: 0.0004 },
+      },
       conviction_5d: { lt2: null, "2to5": null, gt5: { hits: 47, n: 58, rate: 0.81, ci_lo: 0.69, ci_hi: 0.90, p: 0.001 } },
       verdict: "EDGE_HIGH_CONVICTION",
     },
     NAIVE: {
-      horizons: {},
+      horizons: {
+        "5d": { hits: 250, n: 500, rate: 0.50, ci_lo: 0.46, ci_hi: 0.54, p: 0.9 },
+        "15d": { hits: 266, n: 484, rate: 0.55, ci_lo: 0.50, ci_hi: 0.59, p: 0.03 },
+        "20d": { hits: 258, n: 452, rate: 0.57, ci_lo: 0.52, ci_hi: 0.62, p: 0.003 },
+      },
       conviction_5d: { lt2: null, "2to5": null, gt5: { hits: 30, n: 58, rate: 0.517, ci_lo: 0.38, ci_hi: 0.65, p: 0.5 } },
       verdict: "BASELINE",
     },
@@ -102,25 +110,33 @@ describe("buildForecastSection — 5d + skill footer", () => {
     expect(joined).not.toContain("0700.HK");
   });
 
-  it("renders skill footer with EDGE verdict and percentages", () => {
+  it("renders the OOS hit-rate scoreboard (Kronos vs naive per horizon)", () => {
     const lines = buildForecastSection(ordered, kronosData as any, stubSkill);
     const joined = lines.join("\n");
+    expect(joined).toContain("OOS dir-accuracy");
     expect(joined).toContain("provisional");
-    expect(joined).toContain("81%");
+    // per-horizon rows present
+    expect(joined).toContain("5d");
+    expect(joined).toContain("15d");
+    expect(joined).toContain("20d");
+    // Kronos 5d 52% shown vs naive 50%
     expect(joined).toContain("52%");
+    expect(joined).toContain("50%");
   });
 
-  it("renders no-edge footer when verdict is not EDGE", () => {
-    const noEdgeSkill = { ...stubSkill, KRONOS: { ...stubSkill.KRONOS, verdict: "NO_EDGE" as const } };
-    const lines = buildForecastSection(ordered, kronosData as any, noEdgeSkill);
+  it("marks a clearing horizon with ✅ and leaves 5d unmarked", () => {
+    const lines = buildForecastSection(ordered, kronosData as any, stubSkill);
     const joined = lines.join("\n");
-    expect(joined).toContain("no measured edge");
+    const line15 = joined.split("\n").find(l => l.includes("55%")); // 15d (naive 55% is unique)
+    const line5 = joined.split("\n").find(l => l.includes("52%"));  // 5d (kronos 52% is unique)
+    expect(line15).toContain("✅");   // 62% vs naive 55%, p<0.05 → clears
+    expect(line5).not.toContain("✅"); // 52% vs naive 50%, p=0.4 → no edge
   });
 
   it("omits footer when skill is null", () => {
     const lines = buildForecastSection(ordered, kronosData as any, null);
     const joined = lines.join("\n");
     expect(joined).not.toContain("provisional");
-    expect(joined).not.toContain("no measured edge");
+    expect(joined).not.toContain("OOS dir-accuracy");
   });
 });
