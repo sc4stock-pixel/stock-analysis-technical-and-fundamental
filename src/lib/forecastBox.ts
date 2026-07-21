@@ -88,11 +88,19 @@ export function skillBadge(
       ? `hi-conv ${Math.round(kr * 100)}%${nr != null ? ` vs naive ${Math.round(nr * 100)}%` : ""}`
       : "";
   switch (k?.verdict) {
+    // Only the 5d high-conviction bucket earns an "edge" claim — that is what the
+    // display is about. EDGE_BROAD (a longer-horizon signal) is NOT surfaced as an
+    // edge here: it lacks a same-horizon naive control and is under separate study.
     case "EDGE_HIGH_CONVICTION":
-    case "EDGE_BROAD":
       return {
         tone: "edge",
-        label: "Edge on high-conviction calls (provisional)",
+        label: "5d high-conviction edge (provisional)",
+        detail,
+      };
+    case "EDGE_BROAD":
+      return {
+        tone: "muted",
+        label: "No proven 5d edge · longer-horizon under study",
         detail,
       };
     case "INSUFFICIENT":

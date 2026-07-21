@@ -196,7 +196,9 @@ export function buildForecastSection(
   // Skill footer — aggregate Kronos-vs-naive comparison
   if (skill) {
     const kVerdict = skill.KRONOS.verdict;
-    if (kVerdict.startsWith("EDGE")) {
+    // Only the 5d high-conviction bucket earns an edge claim. EDGE_BROAD is a
+    // longer-horizon signal without a same-horizon naive control — not surfaced as edge.
+    if (kVerdict === "EDGE_HIGH_CONVICTION") {
       const kRate = skill.KRONOS.conviction_5d.gt5?.rate;
       const nRate = skill.NAIVE.conviction_5d.gt5?.rate;
       const kPctStr = kRate != null ? `${Math.round(kRate * 100)}%` : "?";
