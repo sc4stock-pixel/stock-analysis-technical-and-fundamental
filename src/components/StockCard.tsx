@@ -362,9 +362,9 @@ export default function StockCard({ result, config, timesfm, kronos, forecastSki
                   {(flags.high || flags.unreliable) && (
                     <div className="flex items-center justify-center gap-1.5 mt-1.5">
                       {flags.high && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-bold tracking-wide text-[#00ff88] border border-[#00ff88]/50 bg-[#00ff88]/10"
-                          title="Kronos predicts a >5% move — its high-conviction regime">
-                          ✦ HIGH CONVICTION
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-bold tracking-wide text-[#00d4ff] border border-[#00d4ff]/50 bg-[#00d4ff]/10"
+                          title="Kronos predicts a large (>5%) 5d move. Magnitude only — 5d direction has no proven out-of-sample edge (under monitoring).">
+                          ✦ LARGE 5d MOVE
                         </span>
                       )}
                       {flags.unreliable && (

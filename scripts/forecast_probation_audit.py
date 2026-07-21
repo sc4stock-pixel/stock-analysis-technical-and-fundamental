@@ -155,15 +155,21 @@ BUCKET_KEY = {"|f|<2%": "lt2", "2-5%": "2to5", ">5%": "gt5"}
 HORIZON_KEY = {"2d": "2d", "5d": "5d", "10d": "10d", "15d": "15d", "20d": "20d"}
 
 
-def _verdict(gt5, horizons, naive_gt5_rate):
-    """Classify model skill vs naive baseline."""
-    def clears(s, nmin):
+def _verdict(gt5, horizons, naive_gt5_rate, naive_horizon_rates=None):
+    """Classify model skill vs naive baseline.
+
+    EDGE_BROAD now requires the horizon to beat its OWN naive baseline (drift
+    extrapolation over that same horizon), not the 5d naive rate. Without a
+    same-horizon control, a trending market can make raw drift look skillful.
+    """
+    nhr = naive_horizon_rates or {}
+    def clears(s, nmin, beat_rate):
         return (s and s["rate"] > 0.5 and s["p"] < 0.05
                 and s["ci_lo"] > 0.5 and s["n"] >= nmin
-                and (naive_gt5_rate is None or s["rate"] > naive_gt5_rate))
-    if clears(gt5, 20):
+                and (beat_rate is None or s["rate"] > beat_rate))
+    if clears(gt5, 20, naive_gt5_rate):
         return "EDGE_HIGH_CONVICTION"
-    if any(clears(horizons.get(h), 30) for h in horizons):
+    if any(clears(horizons.get(h), 30, nhr.get(h)) for h in horizons):
         return "EDGE_BROAD"
     return "NO_EDGE" if any(horizons.get(h) for h in horizons) else "INSUFFICIENT"
 
@@ -191,8 +197,11 @@ def _build_skill_dict(all_model_data, naive_data, kronos_snaps):
     naive_gt5 = _stat(*naive_data["conv"][">5%"])
     naive_gt5_rate = naive_gt5["rate"] if naive_gt5 else None
 
-    # NAIVE entry
-    naive_horizons = {"5d": _stat(*naive_data["h5"])}
+    # NAIVE entry — per-horizon baseline (falls back to h5 for 5d if horizons absent)
+    nh_raw = naive_data.get("horizons") or {"5d": naive_data["h5"]}
+    naive_horizons = {HORIZON_KEY[h]: _stat(*nh_raw[h]) for h in nh_raw}
+    naive_horizon_rates = {k: (s["rate"] if s else None)
+                           for k, s in naive_horizons.items()}
     naive_buckets = {BUCKET_KEY[b]: _stat(*naive_data["conv"][b])
                      for b in naive_data["conv"]}
     result["NAIVE"] = {
@@ -212,9 +221,11 @@ def _build_skill_dict(all_model_data, naive_data, kronos_snaps):
         buckets = {BUCKET_KEY[b]: _stat(*md["conv"][b])
                    for b in md["conv"]}
         gt5 = buckets.get("gt5")
-        # TIMESFM: no naive gate needed (pass None)
+        # Naive gates apply to KRONOS (naive pairs are Kronos's dates); TIMESFM is
+        # dead regardless, so pass None (its own dates differ from the naive pairs).
         ngr = naive_gt5_rate if model == "KRONOS" else None
-        v = "INSUFFICIENT" if shallow else _verdict(gt5, horizons, ngr)
+        nhr = naive_horizon_rates if model == "KRONOS" else None
+        v = "INSUFFICIENT" if shallow else _verdict(gt5, horizons, ngr, nhr)
         result[model] = {
             "verdict": v,
             "horizons": horizons,
@@ -228,7 +239,10 @@ def audit(emit_skill_json=None):
     print("FORECAST PROBATION AUDIT — true out-of-sample, from git history")
     print(f"(run {datetime.now():%Y-%m-%d %H:%M})  match tol = +/-{MATCH_TOL_DAYS}d\n")
     # Collect Kronos 5d scored pairs for the naive baseline pass.
-    kronos_5d_pairs = []   # [(ticker, ld, base, rclose), ...]
+    kronos_5d_pairs = []   # [(ticker, ld, base, rclose), ...] (5d — conviction buckets)
+    # Per-horizon Kronos pairs so the naive baseline can be scored at EACH horizon
+    # (10/15/20d), giving the EDGE_BROAD verdict a same-horizon control.
+    kronos_pairs_by_h = {h: [] for h in HORIZONS}
     all_model_data = {}
     for model, path in FILES.items():
         realized = build_realized(model)
@@ -269,6 +283,8 @@ def audit(emit_skill_json=None):
                     m = "HK" if tkr.endswith(".HK") else "US"
                     mkt[hname][m][0] += hit
                     mkt[hname][m][1] += 1
+                    if model == "KRONOS":
+                        kronos_pairs_by_h[hname].append((tkr, ld, base, rclose))
                     if hbd == CONVICTION_HORIZON:
                         if model == "KRONOS":
                             kronos_5d_pairs.append((tkr, ld, base, rclose))
@@ -346,14 +362,37 @@ def audit(emit_skill_json=None):
         print(f"     {bname:<8} {bk}/{bn} = {bk/bn*100:.0f}%  "
               f"CI[{lo*100:.0f},{hi*100:.0f}]  p={binom_p(bk, bn):.2f}")
     print()
+    # Naive baseline scored at EACH horizon (same Kronos pairs) — the control for
+    # EDGE_BROAD. naive_dir is horizon-independent (sign of drift), so cache per (tkr,ld).
+    _nd_cache = {}
+    def _nd(tkr, ld):
+        key = (tkr, ld)
+        if key not in _nd_cache:
+            _nd_cache[key] = naive_dir(closes_upto(tkr, ld))
+        return _nd_cache[key]
+    naive_horizons = {}
+    for hname, pairs in kronos_pairs_by_h.items():
+        hh = [0, 0]
+        for tkr, ld, base, rclose in pairs:
+            nd = _nd(tkr, ld)
+            if nd is None:
+                continue
+            hh[0] += (nd == sign(rclose - base))
+            hh[1] += 1
+        naive_horizons[hname] = hh
+    print("  naive by horizon (vs same pairs):", {h: (f"{a}/{b}={a/b*100:.0f}%" if b else "-")
+                                                  for h, (a, b) in naive_horizons.items()})
+    print()
     print("KEEP/KILL (probation): a model earns KEEP only if some horizon OR the")
-    print(">5% conviction bucket shows >50% with p<0.05 AND CI lower-bound >50%.")
+    print(">5% conviction bucket shows >50% with p<0.05 AND CI lower-bound >50%,")
+    print("beating the SAME-horizon naive baseline.")
     print("Caveat: daily forecasts overlap, so effective n << reported n — treat a")
     print("lone significant bucket as a hypothesis, weight by breadth across tickers.")
 
     # --- Emit forecast_skill.json if requested ---
     if emit_skill_json:
-        naive_data = {"h5": list(naive_h5), "conv": dict(naive_conv)}
+        naive_data = {"h5": list(naive_h5), "conv": dict(naive_conv),
+                      "horizons": {h: list(v) for h, v in naive_horizons.items()}}
         kronos_snaps = all_model_data.get("KRONOS", {}).get("snaps", 0)
         skill = _build_skill_dict(all_model_data, naive_data, kronos_snaps)
         with open(emit_skill_json, "w") as f:
