@@ -209,12 +209,12 @@ export default function MacroPanel({ data, loading, onRefresh }: Props) {
 
           {/* Adjustment note */}
           <div className="mt-1 text-[0.6rem] text-[#4a6080] font-mono">
-            {mbs >= 7.0  && "📈 Macro tailwind — SCR score +0.5 bonus applied"}
-            {mbs >= 5.5  && mbs < 7.0  && "— Neutral macro — no SCR adjustment"}
-            {mbs >= 4.0  && mbs < 5.5  && "⚠️ Caution — SCR score −0.3 penalty applied"}
-            {mbs >= 2.5  && mbs < 4.0  && "🚨 Risk-off — SCR score −0.5 penalty applied"}
-            {mbs < 2.5   && "🛑 Avoid entries — SCR score −1.0 penalty applied"}
-            <span className="ml-2 text-[#2a3d5a]">· SuperTrend unaffected</span>
+            {mbs >= 7.0  && "📈 Macro tailwind (context only)"}
+            {mbs >= 5.5  && mbs < 7.0  && "— Neutral macro (context only)"}
+            {mbs >= 4.0  && mbs < 5.5  && "⚠️ Caution (context only)"}
+            {mbs >= 2.5  && mbs < 4.0  && "🚨 Risk-off (context only)"}
+            {mbs < 2.5   && "🛑 Avoid entries (context only)"}
+            <span className="ml-2 text-[#2a3d5a]">· not applied to Score/Signal/backtest</span>
           </div>
 
           {/* Footer */}

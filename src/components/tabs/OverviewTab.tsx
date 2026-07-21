@@ -70,8 +70,16 @@ export default function OverviewTab({ result }: Props) {
               <div className="text-[#4a6080] text-xs mb-1">SCORE HISTORY</div>
               <div className="flex gap-0.5 h-8">
                 {scoreHistory.map((s, i) => {
-                  const bg = s >= 6.5 ? "bg-[#00ff88]" : s >= 5.5 ? "bg-[#ffa502]" : s >= 4.5 ? "bg-[#ffa502]/50" : "bg-[#ff4757]";
-                  return <div key={i} title={`Bar ${i + 1}: ${s.toFixed(1)}`} className={`flex-1 rounded-sm ${bg} opacity-80`} style={{ minWidth: 3 }} />;
+                  // Colour by the SAME thresholds the signal engine uses
+                  // (config.signal defaults: entry 5.5 / exit 4.0) so green = a
+                  // BUY-eligible score — matching the Signal badge and backtest
+                  // entry. A green bar is threshold-eligible, NOT a guaranteed
+                  // entry (confirmation + velocity + volume-surge gating still
+                  // apply on top). Zones: ≥5.5 BUY, ≤4.0 SELL, else HOLD.
+                  const ENTRY_TH = 5.5, EXIT_TH = 4.0;
+                  const zone = s >= ENTRY_TH ? "BUY" : s <= EXIT_TH ? "SELL" : "HOLD";
+                  const bg   = zone === "BUY" ? "bg-[#00ff88]" : zone === "SELL" ? "bg-[#ff4757]" : "bg-[#ffa502]";
+                  return <div key={i} title={`Bar ${i + 1}: ${s.toFixed(1)} · ${zone}`} className={`flex-1 rounded-sm ${bg} opacity-80`} style={{ minWidth: 3 }} />;
                 })}
               </div>
               <div className="flex justify-between text-[#4a6080] text-[0.6rem] mt-0.5"><span>20d ago</span><span>now</span></div>

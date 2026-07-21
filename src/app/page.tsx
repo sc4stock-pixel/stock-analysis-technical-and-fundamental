@@ -1,7 +1,7 @@
 "use client";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { AppConfig, StockAnalysisResult } from "@/types";
-import { MacroData, HKMacroData, mbsScoreAdjustment } from "@/lib/macro-types";
+import { MacroData, HKMacroData } from "@/lib/macro-types";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import ConfigPanel from "@/components/ConfigPanel";
 import PortfolioSummaryBar from "@/components/PortfolioSummaryBar";
@@ -25,24 +25,22 @@ import type { WorkerState } from "@/types/worker-state";
 const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
 const MacroPanelHK = dynamic(() => import("@/components/MacroPanelHK"), { ssr: false });
 
+// MBS is macro CONTEXT ONLY — it is intentionally NOT baked into the displayed
+// Score (2026-07-21). The Score, Signal badge, score-history bars, and backtest
+// all share ONE basis: the pure technical score from runPipeline(). The old
+// MBS-to-Score adjustment was decision-inert (it never fed signalConfirmed or the
+// backtest — see signals.ts audit note C8), so it only made the Score number
+// diverge from the other three surfaces. If macro should ever gate entries, wire
+// it into the ENGINE with OOS validation, not into this display overlay.
+// `usMbs`/`hkMbs`/`applyToScore` are retained on the signature so callers are
+// untouched; they no longer affect Score. macro_adjustment is pinned to 0.
 function applyDualMacroAdjustment(
   results: StockAnalysisResult[],
-  usMbs:  number | null,
-  hkMbs:  number | null,
-  applyToScore: boolean,
+  _usMbs:  number | null,
+  _hkMbs:  number | null,
+  _applyToScore: boolean,
 ): StockAnalysisResult[] {
-  if (!applyToScore) return results.map(r => ({ ...r, macro_adjustment: 0 }));
-  return results.map(r => {
-    const isHK  = r.exchange === "HK";
-    const mbs   = isHK ? hkMbs : usMbs;
-    if (mbs === null) return { ...r, macro_adjustment: 0 };
-    const adj = mbsScoreAdjustment(mbs);
-    return {
-      ...r,
-      score: Math.max(0, Math.min(10, r.score + adj)),
-      macro_adjustment: adj,
-    };
-  });
+  return results.map(r => ({ ...r, macro_adjustment: 0 }));
 }
 
 export default function Dashboard() {
