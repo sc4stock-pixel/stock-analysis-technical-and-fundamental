@@ -284,7 +284,11 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData, 
                   {/* Grade */}
                   <td className={`px-2 py-1.5 text-center text-sm ${g.color}`}>{g.label}</td>
                   {/* Score */}
-                  <td className={`px-2 py-1.5 text-right font-mono font-bold ${(r.score ?? 0) >= 6.5 ? "text-[#00ff88]" : (r.score ?? 0) >= 5.5 ? "text-[#ffa502]" : "text-[#ff4757]"}`}>
+                  {/* Colour by the engine's entry/exit thresholds (5.5 / 4.0) so
+                      the Score cell agrees with the Signal badge and the card's
+                      score-history bars: ≥5.5 BUY-eligible green, ≤4.0 SELL red,
+                      HOLD amber between. (2026-07-21 alignment) */}
+                  <td className={`px-2 py-1.5 text-right font-mono font-bold ${(r.score ?? 0) >= 5.5 ? "text-[#00ff88]" : (r.score ?? 0) <= 4.0 ? "text-[#ff4757]" : "text-[#ffa502]"}`}>
                     {r.score?.toFixed(1) ?? "--"}
                   </td>
                   {/* Signal */}
