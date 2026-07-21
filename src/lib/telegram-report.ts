@@ -1,4 +1,4 @@
-import { SepaMetadata, TrendTemplateCriteria, KronosForecasts, ForecastSkill } from "@/types";
+import { SepaMetadata, TrendTemplateCriteria, KronosForecasts, ForecastSkill, SkillStat } from "@/types";
 import { htmlEscape } from "@/lib/telegram";
 import { buildAlertModel } from "@/lib/alert-model";
 import { CONVICTION_PCT } from "@/lib/forecastBox";
@@ -193,21 +193,27 @@ export function buildForecastSection(
     `<pre>${table.join("\n")}</pre>`,
   ];
 
-  // Skill footer — aggregate Kronos-vs-naive comparison
+  // Skill footer — OOS hit-rate scoreboard (Kronos vs same-horizon naive) so the
+  // probation stats stay visible at a glance. A ✅ marks a horizon that actually
+  // clears (>50%, p<0.05, CI-lo>50%, beats naive). 5d has no edge; 15/20d under review.
   if (skill) {
-    const kVerdict = skill.KRONOS.verdict;
-    // Only the 5d high-conviction bucket earns an edge claim. EDGE_BROAD is a
-    // longer-horizon signal without a same-horizon naive control — not surfaced as edge.
-    if (kVerdict === "EDGE_HIGH_CONVICTION") {
-      const kRate = skill.KRONOS.conviction_5d.gt5?.rate;
-      const nRate = skill.NAIVE.conviction_5d.gt5?.rate;
-      const kPctStr = kRate != null ? `${Math.round(kRate * 100)}%` : "?";
-      const nPctStr = nRate != null ? `${Math.round(nRate * 100)}%` : "?";
+    const K = skill.KRONOS, N = skill.NAIVE;
+    const pc = (s?: SkillStat | null) => (s ? `${Math.round(s.rate * 100)}%` : "—");
+    const clears = (s?: SkillStat | null, nv?: SkillStat | null) =>
+      !!s && s.rate > 0.5 && s.p < 0.05 && s.ci_lo > 0.5 && (!nv || s.rate > nv.rate);
+    const rows = (["5d", "15d", "20d"] as const)
+      .map((h) => {
+        const k = K.horizons?.[h], nv = N.horizons?.[h];
+        if (!k) return null;
+        return `${h.padEnd(3)} K ${pc(k).padStart(4)}  naive ${pc(nv).padStart(4)}${clears(k, nv) ? "  ✅" : ""}`;
+      })
+      .filter((r): r is string => r != null);
+    if (rows.length) {
       result.push(
-        `⚡ Kronos 5d (OOS, provisional): hi-conv ${kPctStr} vs naive ${nPctStr} edge`
+        `\n📈 <b>Kronos OOS dir-accuracy</b> <i>(vs naive · provisional)</i>`,
+        `<pre>${rows.join("\n")}</pre>`,
+        `<i>✅ = beats naive + significant · 5d no edge; 15/20d under review</i>`
       );
-    } else {
-      result.push(`— Kronos 5d: no measured edge`);
     }
   }
 
