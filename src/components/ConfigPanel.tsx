@@ -349,20 +349,16 @@ export default function ConfigPanel({
               </label>
             </div>
 
-            {/* Apply to Score toggle */}
-            <div className={`bg-[#080d1a] border rounded p-3 mb-4 transition-opacity ${config.macro.enabled ? "border-[#1e2d4a] opacity-100" : "border-[#1e2d4a]/30 opacity-40 pointer-events-none"}`}>
-              <label className="flex items-center justify-between cursor-pointer">
-                <div>
-                  <div className="text-xs font-mono text-[#c8d8f0] font-bold">Apply MBS to Score (SCR) Strategy</div>
-                  <div className="text-[0.65rem] text-[#4a6080] mt-0.5">Adjusts SCR entry score based on macro environment</div>
-                </div>
-                <div
-                  onClick={() => update("macro.applyToScore", !config.macro.applyToScore)}
-                  className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${config.macro.applyToScore ? "bg-[#00ff88]/40" : "bg-[#1e2d4a]"}`}
-                >
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${config.macro.applyToScore ? "left-5 bg-[#00ff88]" : "left-0.5 bg-[#4a6080]"}`} />
-                </div>
-              </label>
+            {/* MBS is context-only — it does NOT adjust the Score (2026-07-21).
+                The Score, Signal, score-history bars, and backtest all share one
+                technical basis. The former "Apply MBS to Score" toggle was
+                decision-inert (it never fed the signal engine or backtest), so it
+                only made the Score diverge from the other three surfaces. */}
+            <div className={`bg-[#080d1a] border rounded p-3 mb-4 ${config.macro.enabled ? "border-[#1e2d4a]" : "border-[#1e2d4a]/30 opacity-40"}`}>
+              <div className="text-xs font-mono text-[#c8d8f0] font-bold mb-0.5">MBS is context only</div>
+              <div className="text-[0.65rem] text-[#4a6080] leading-relaxed">
+                MBS is <span className="text-[#c8d8f0]">not</span> applied to the Score, Signal, or backtest — all four surfaces share one technical basis. Read the bands below as macro context alongside each signal, not as a score adjustment. To make macro gate entries it must be wired into the engine with OOS validation.
+              </div>
             </div>
 
             {/* SuperTrend info box */}
@@ -378,9 +374,9 @@ export default function ConfigPanel({
               </div>
             </div>
 
-            {/* MBS tier table */}
-            <div className={`transition-opacity ${config.macro.enabled && config.macro.applyToScore ? "opacity-100" : "opacity-40"}`}>
-              <div className="text-[#4a6080] text-xs font-bold tracking-widest mb-2">MBS ADJUSTMENT TIERS</div>
+            {/* MBS regime bands — interpretation guide, context only (not applied to Score) */}
+            <div className={`transition-opacity ${config.macro.enabled ? "opacity-100" : "opacity-40"}`}>
+              <div className="text-[#4a6080] text-xs font-bold tracking-widest mb-2">MBS REGIME BANDS · CONTEXT ONLY</div>
               <div className="space-y-1">
                 {[
                   { range: "≥ 7.0", label: "BULLISH",  adj: "+0.5", color: "text-[#00ff88]", bg: "bg-[#00ff88]/5",  border: "border-[#00ff88]/20" },
@@ -394,7 +390,7 @@ export default function ConfigPanel({
                       <span className="text-[#4a6080] text-xs font-mono w-16">{row.range}</span>
                       <span className={`text-xs font-mono font-bold ${row.color}`}>{row.label}</span>
                     </div>
-                    <span className={`text-xs font-mono font-bold ${row.color}`}>{row.adj} SCR</span>
+                    <span className={`text-xs font-mono font-bold ${row.color}`}>{row.adj} bias</span>
                   </div>
                 ))}
               </div>
