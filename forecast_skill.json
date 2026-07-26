@@ -2,8 +2,8 @@
   "_metadata": {
     "conviction_pct": 5.0,
     "drift_window": 60,
-    "generated_at_hk": "2026-07-26 07:43 HKT",
-    "history_days": 59,
+    "generated_at_hk": "2026-07-27 07:42 HKT",
+    "history_days": 60,
     "match_tol_days": 4
   },
   "NAIVE": {
@@ -152,12 +152,12 @@
     "verdict": "NO_EDGE",
     "horizons": {
       "2d": {
-        "hits": 1457,
-        "n": 2865,
-        "rate": 0.5086,
-        "ci_lo": 0.4902,
-        "ci_hi": 0.5268,
-        "p": 0.36
+        "hits": 1460,
+        "n": 2874,
+        "rate": 0.508,
+        "ci_lo": 0.4897,
+        "ci_hi": 0.5263,
+        "p": 0.3909
       },
       "5d": {
         "hits": 1374,
