@@ -73,7 +73,9 @@ describe("research ideas block", () => {
       },
     };
     const prompt = assembleDigestPrompt({ state, kronos: {} });
-    expect(prompt).toContain("RESEARCH IDEAS");
+    // Assert the DATA block header specifically (the editorial spec also mentions
+    // "RESEARCH IDEAS" in its section-D/rules text, so match the block's unique header).
+    expect(prompt).toContain("RESEARCH IDEAS (template-generated");
     expect(prompt).toContain("GOOGL");
     expect(prompt).toContain("-12.4%");
     expect(prompt).toContain("10-20%");
@@ -82,6 +84,8 @@ describe("research ideas block", () => {
   it("omits the block entirely when there are no ideas", () => {
     const state = baseState();
     const prompt = assembleDigestPrompt({ state, kronos: {} });
-    expect(prompt).not.toContain("RESEARCH IDEAS");
+    // The editorial spec always references "RESEARCH IDEAS"; assert the DATA block
+    // (its unique header) is what's absent when there are no ideas.
+    expect(prompt).not.toContain("RESEARCH IDEAS (template-generated");
   });
 });
