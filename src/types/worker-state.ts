@@ -47,6 +47,29 @@ export interface WorkerTickerState {
   };
 }
 
+export interface ResearchIdeaBucket {
+  band: string;
+  count: number;
+  avg_prior_high_to_reclaim_mo: number;
+  avg_trough_to_reclaim_mo: number;
+}
+export interface ResearchIdea {
+  ticker: string;
+  template_id: string;
+  trigger_reason: string;
+  raw_severity: number;
+  date: string;
+  metrics: {
+    current_dd_pct: number;
+    trailing_high: number;
+    trailing_high_date: string;
+    days_since_high: number;
+    n_completed: number;
+    n_open: number;
+    buckets: ResearchIdeaBucket[];
+  };
+}
+
 export interface WorkerState {
   version: number;
   updatedAt: string | null;
@@ -54,4 +77,5 @@ export interface WorkerState {
   tickers: Record<string, WorkerTickerState>;
   lastAlert: Record<string, string>;
   events: WorkerEvent[];
+  researchIdeas?: Record<string, ResearchIdea>;
 }

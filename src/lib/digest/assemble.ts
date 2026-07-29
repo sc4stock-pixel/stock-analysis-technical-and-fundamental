@@ -25,6 +25,28 @@ const COLUMN_LEGEND = [
 
 function pad(s: string, n: number): string { return (s + " ".repeat(n)).slice(0, n); }
 
+function buildResearchIdeasBlock(state: WorkerState): string[] {
+  const ideas = Object.values(state.researchIdeas ?? {});
+  if (ideas.length === 0) return [];
+  const lines: string[] = [
+    "",
+    "RESEARCH IDEAS (template-generated; rate & narrate per the RESEARCH IDEAS rules below):",
+  ];
+  for (const idea of ideas) {
+    const m = idea.metrics;
+    const buckets = m.buckets
+      .map((b) => `${b.band}: n=${b.count}, priorHigh→reclaim ${b.avg_prior_high_to_reclaim_mo}mo, trough→reclaim ${b.avg_trough_to_reclaim_mo}mo`)
+      .join(" | ");
+    lines.push(
+      `- ${idea.ticker} [${idea.template_id}] ${m.current_dd_pct}% off high ` +
+      `(high ${m.trailing_high} on ${m.trailing_high_date}, ${m.days_since_high}d ago); ` +
+      `completed drawdowns=${m.n_completed}, current still open. ` +
+      `Historical recoveries — ${buckets}`,
+    );
+  }
+  return lines;
+}
+
 export function assembleDigestPrompt({ state, kronos }: DigestInputs): string {
   const header = "TICK       dir  pos  TT   px       stop     risk%  flip%  K5d    K20d   #ev";
   const rows: string[] = [];
@@ -60,5 +82,6 @@ export function assembleDigestPrompt({ state, kronos }: DigestInputs): string {
     ...rows,
     "",
     `Recent events: ${recentEvents}`,
+    ...buildResearchIdeasBlock(state),
   ].join("\n");
 }
