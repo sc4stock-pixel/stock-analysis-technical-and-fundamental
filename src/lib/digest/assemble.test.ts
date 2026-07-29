@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { assembleDigestPrompt, type DigestInputs } from "./assemble";
+import type { WorkerState } from "@/types/worker-state";
+
+function baseState(): WorkerState {
+  return {
+    version: 1,
+    updatedAt: "2026-07-29T00:00Z",
+    regionLastRun: {},
+    tickers: {},
+    lastAlert: {},
+    events: [],
+  };
+}
 
 const inputs: DigestInputs = {
   state: {
@@ -43,5 +55,33 @@ describe("assembleDigestPrompt", () => {
     expect(p).toContain("K5d");
     expect(p).toContain("high-conviction");
     expect(p).not.toContain("TimesFM");
+  });
+});
+
+describe("research ideas block", () => {
+  it("renders a fired idea with bucket table", () => {
+    const state = baseState();
+    state.researchIdeas = {
+      GOOGL: {
+        ticker: "GOOGL", template_id: "drawdown_recovery",
+        trigger_reason: "-12.4% off high (2026-06-30)", raw_severity: 0.25,
+        date: "2026-07-29",
+        metrics: { current_dd_pct: -12.4, trailing_high: 210.55,
+          trailing_high_date: "2026-06-30", n_completed: 10, n_open: 1,
+          buckets: [{ band: "10-20%", count: 4,
+            avg_prior_high_to_reclaim_mo: 3.1, avg_trough_to_reclaim_mo: 1.1 }] },
+      },
+    };
+    const prompt = assembleDigestPrompt({ state, kronos: {} });
+    expect(prompt).toContain("RESEARCH IDEAS");
+    expect(prompt).toContain("GOOGL");
+    expect(prompt).toContain("-12.4%");
+    expect(prompt).toContain("10-20%");
+  });
+
+  it("omits the block entirely when there are no ideas", () => {
+    const state = baseState();
+    const prompt = assembleDigestPrompt({ state, kronos: {} });
+    expect(prompt).not.toContain("RESEARCH IDEAS");
   });
 });
