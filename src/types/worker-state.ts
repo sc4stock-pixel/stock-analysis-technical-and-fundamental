@@ -63,6 +63,7 @@ export interface ResearchIdea {
     current_dd_pct: number;
     trailing_high: number;
     trailing_high_date: string;
+    days_since_high: number;
     n_completed: number;
     n_open: number;
     buckets: ResearchIdeaBucket[];

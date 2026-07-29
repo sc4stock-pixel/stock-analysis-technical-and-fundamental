@@ -67,7 +67,7 @@ describe("research ideas block", () => {
         trigger_reason: "-12.4% off high (2026-06-30)", raw_severity: 0.25,
         date: "2026-07-29",
         metrics: { current_dd_pct: -12.4, trailing_high: 210.55,
-          trailing_high_date: "2026-06-30", n_completed: 10, n_open: 1,
+          trailing_high_date: "2026-06-30", days_since_high: 60, n_completed: 10, n_open: 1,
           buckets: [{ band: "10-20%", count: 4,
             avg_prior_high_to_reclaim_mo: 3.1, avg_trough_to_reclaim_mo: 1.1 }] },
       },
@@ -79,6 +79,7 @@ describe("research ideas block", () => {
     expect(prompt).toContain("GOOGL");
     expect(prompt).toContain("-12.4%");
     expect(prompt).toContain("10-20%");
+    expect(prompt).toContain("60d ago");
   });
 
   it("omits the block entirely when there are no ideas", () => {

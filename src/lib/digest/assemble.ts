@@ -39,7 +39,7 @@ function buildResearchIdeasBlock(state: WorkerState): string[] {
       .join(" | ");
     lines.push(
       `- ${idea.ticker} [${idea.template_id}] ${m.current_dd_pct}% off high ` +
-      `(high ${m.trailing_high} on ${m.trailing_high_date}); ` +
+      `(high ${m.trailing_high} on ${m.trailing_high_date}, ${m.days_since_high}d ago); ` +
       `completed drawdowns=${m.n_completed}, current still open. ` +
       `Historical recoveries — ${buckets}`,
     );
