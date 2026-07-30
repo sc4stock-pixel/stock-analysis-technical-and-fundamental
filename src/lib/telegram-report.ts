@@ -4,6 +4,7 @@ import { buildAlertModel } from "@/lib/alert-model";
 import { CONVICTION_PCT } from "@/lib/forecastBox";
 import type { StockAnalysisResult } from "@/types";
 import type { BreadthMovers } from "@/lib/breadth-movers";
+import { spreadSuffix, type BreadthPoint } from "@/lib/breadth-history";
 
 const dispSymForReport = (s: string) => s.replace(".HK", "");
 
@@ -230,6 +231,7 @@ export function buildEodReport(
   timesfmData?: unknown,           // legacy param kept for call-site compat; unused
   skill?: ForecastSkill | null,
   movers?: BreadthMovers | null,   // SMA50 breadth movers vs the prior report's snapshot
+  breadthHistory?: BreadthPoint[] | null, // HK-vs-US spread series, for the spread suffix
 ): string {
   const valid = results.filter(r => !r.error && r.current_price > 0);
 
@@ -318,7 +320,10 @@ export function buildEodReport(
 
   // Market breadth
   lines.push(`\n${breadthEmoji} <b>MARKET BREADTH:</b> ${aboveSma50.length}/${valid.length} above SMA50 (${breadthPct}%)`);
-  lines.push(`  US ${usAbove}/${usStocks.length} · HK ${hkAbove}/${hkStocks.length}`);
+  // The spread suffix (` · spread +78 (5d +12)`) answers HK-vs-US rotation: the static
+  // counts alone don't say whether one side's favour is building or fading. Degrades to
+  // "" when the series is too short, leaving the line exactly as it was before.
+  lines.push(`  US ${usAbove}/${usStocks.length} · HK ${hkAbove}/${hkStocks.length}${spreadSuffix(breadthHistory)}`);
 
   // Breadth movers since the prior report (which stock crossed SMA50). Omitted on the
   // first run (no prior snapshot) and on quiet days (no crossings).
