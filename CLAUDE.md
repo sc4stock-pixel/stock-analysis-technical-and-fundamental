@@ -14,9 +14,23 @@ stance-rendering surfaces must add a below-SMA50-flip-is-not-LONG test. (2026-07
 ```bash
 npm run dev      # start dev server (Next.js 14, http://localhost:3000)
 npm run build    # production build
-npm run lint     # ESLint
+npm run lint     # ⚠️ NOT CONFIGURED — see below. Do not use as a verification step.
 npm test         # run the vitest suite (src/**/*.test.ts)
 ```
+
+**`npm run lint` does not lint.** There is no ESLint config in this repo, so the script
+drops into Next's interactive "How would you like to configure ESLint?" setup prompt and
+exits without checking anything. Printing no errors therefore does NOT mean clean — a
+non-result is easy to mistake for a pass. Next also silently skips its build-time lint
+step when there's no config, so Vercel builds don't cover it either.
+
+Verification here is **`npx tsc --noEmit` + `npm test` + `npm run build`**, not lint.
+Known consequence: nothing automatically checks React hook dependencies
+(`react-hooks/exhaustive-deps`), so a stale `useEffect` dep in a self-fetching panel
+(`NavPanel`, `TradeLogPanel`, `RotationPanel`) would pass types and tests while silently
+serving outdated data — check those by eye in review. Left unconfigured deliberately
+(2026-07-30); enabling it on an established codebase surfaces a backlog of style warnings
+that has to be triaged before the signal is usable.
 
 Tests run on **vitest** (`vitest.config.ts`). Unit tests live alongside source as
 `src/**/*.test.ts` (e.g. `src/lib/worker-events.test.ts`). Prefer extracting pure logic
