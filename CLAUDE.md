@@ -14,23 +14,28 @@ stance-rendering surfaces must add a below-SMA50-flip-is-not-LONG test. (2026-07
 ```bash
 npm run dev      # start dev server (Next.js 14, http://localhost:3000)
 npm run build    # production build
-npm run lint     # ⚠️ NOT CONFIGURED — see below. Do not use as a verification step.
+npm run lint     # ESLint — React hooks rules ONLY (see scope below)
 npm test         # run the vitest suite (src/**/*.test.ts)
 ```
 
-**`npm run lint` does not lint.** There is no ESLint config in this repo, so the script
-drops into Next's interactive "How would you like to configure ESLint?" setup prompt and
-exits without checking anything. Printing no errors therefore does NOT mean clean — a
-non-result is easy to mistake for a pass. Next also silently skips its build-time lint
-step when there's no config, so Vercel builds don't cover it either.
+**ESLint is deliberately scoped to two rules**, `react-hooks/rules-of-hooks` and
+`react-hooks/exhaustive-deps`, both as errors (`.eslintrc.json`). No style rules, no
+import ordering, no `next/core-web-vitals`. The reasoning: a full config on an established
+codebase surfaces a backlog of style warnings that has to be triaged before the signal is
+usable, whereas the hooks rules catch a class of bug **nothing else here can** — a stale
+`useEffect` dependency in a self-fetching panel (`NavPanel`, `TradeLogPanel`,
+`RotationPanel`) passes both `tsc` and the vitest suite while silently serving outdated
+data.
 
-Verification here is **`npx tsc --noEmit` + `npm test` + `npm run build`**, not lint.
-Known consequence: nothing automatically checks React hook dependencies
-(`react-hooks/exhaustive-deps`), so a stale `useEffect` dep in a self-fetching panel
-(`NavPanel`, `TradeLogPanel`, `RotationPanel`) would pass types and tests while silently
-serving outdated data — check those by eye in review. Left unconfigured deliberately
-(2026-07-30); enabling it on an established codebase surfaces a backlog of style warnings
-that has to be triaged before the signal is usable.
+`next build` runs this automatically, so **a hooks violation fails the Vercel deploy** —
+verified 2026-07-30 with a deliberate missing-dep canary. Full verification is
+`npx tsc --noEmit` + `npm test` + `npm run build`; lint is now genuinely part of that last
+one rather than a no-op.
+
+Two things to know before widening it: `@typescript-eslint/no-explicit-any` is declared
+`off` purely so pre-existing `eslint-disable` comments for it resolve (an undefined rule
+in a disable directive is itself an error), and the build prints a benign "Next.js plugin
+was not detected" warning because `eslint-config-next` is intentionally not extended.
 
 Tests run on **vitest** (`vitest.config.ts`). Unit tests live alongside source as
 `src/**/*.test.ts` (e.g. `src/lib/worker-events.test.ts`). Prefer extracting pure logic
