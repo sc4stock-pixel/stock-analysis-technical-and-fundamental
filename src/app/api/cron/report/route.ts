@@ -7,7 +7,11 @@ import { DEFAULT_CONFIG } from "@/lib/config";
 import { analyzeStock } from "@/lib/analyze-stock";
 import { detectFlip, type ChartBar } from "@/lib/flip";
 import { classifyValidity, degradedAlertText } from "@/lib/pipeline-health";
-import { aboveSma50Map, computeBreadthMovers, type BreadthSnapshot } from "@/lib/breadth-movers";
+import { aboveSma50Map, computeBreadthMovers, isAboveSma50, type BreadthSnapshot } from "@/lib/breadth-movers";
+import {
+  mergeRegion, sessionDate, type BreadthPoint, type RegionBreadth,
+} from "@/lib/breadth-history";
+import { stripNaN } from "@/lib/fill-command";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -37,6 +41,38 @@ async function writeBreadthSnapshot(market: "us" | "hk", snap: BreadthSnapshot):
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(snap),
+    });
+  } catch { /* best-effort */ }
+}
+
+// Breadth-spread history: the longitudinal HK-vs-US series behind the Rotation panel.
+// ONE shared key (not per-market) because a session's spread needs both halves; each run
+// merges only its own region in, via `mergeRegion`. Best-effort like the snapshot above.
+async function readBreadthHistory(): Promise<BreadthPoint[]> {
+  const url = process.env.KV_REST_API_URL, token = process.env.KV_REST_API_TOKEN;
+  if (!url || !token) return [];
+  try {
+    const res = await fetch(`${url}/get/breadth_history`, {
+      headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const { result } = (await res.json()) as { result: string | null };
+    if (!result) return [];
+    // Reader NaN guardrail (CLAUDE.md): bare NaN/Infinity parse in Python json but throw
+    // in JS JSON.parse. `stripNaN` is single-sourced so read/write regexes can't drift.
+    const parsed = JSON.parse(stripNaN(result));
+    return Array.isArray(parsed) ? (parsed as BreadthPoint[]) : [];
+  } catch { return []; }
+}
+
+async function writeBreadthHistory(history: BreadthPoint[]): Promise<void> {
+  const url = process.env.KV_REST_API_URL, token = process.env.KV_REST_API_TOKEN;
+  if (!url || !token) return;
+  try {
+    await fetch(`${url}/set/breadth_history`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(history),
     });
   } catch { /* best-effort */ }
 }
@@ -71,10 +107,11 @@ export async function POST(req: NextRequest) {
 
   // Fetch forecast data + prior breadth snapshot in parallel (all best-effort —
   // failures don't block the report).
-  const [kronosData, skill, prevSnapshot] = await Promise.all([
+  const [kronosData, skill, prevSnapshot, priorHistory] = await Promise.all([
     fetchKronosForecasts().catch(() => null),
     fetchForecastSkill().catch(() => null),
     readBreadthSnapshot(market),
+    readBreadthHistory(),
   ]);
 
   // Breadth movers: diff this run's above-SMA50 map vs the prior report's snapshot.
@@ -85,14 +122,33 @@ export async function POST(req: NextRequest) {
   const currentAbove = aboveSma50Map(validRows as unknown as Parameters<typeof aboveSma50Map>[0]);
   const movers = computeBreadthMovers(currentAbove, prevSnapshot);
 
+  // Breadth-spread history: merge THIS run's own region into the shared series before
+  // building the message, so the report's spread line reflects today. Each run owns only
+  // its half — the HK run reports the session that just closed, the US run reports the
+  // overnight US session, which `sessionDate` maps back onto the same session date.
+  const ownRows = validRows.filter(r =>
+    market === "hk" ? r.exchange === "HK" : r.exchange !== "HK",
+  );
+  const reading: RegionBreadth = {
+    above: ownRows.filter(
+      r => isAboveSma50(r as unknown as Parameters<typeof isAboveSma50>[0]),
+    ).length,
+    total: ownRows.length,
+    asOf:  new Date().toISOString(),
+  };
+  const history = ownRows.length > 0
+    ? mergeRegion(priorHistory, sessionDate(market), market, reading)
+    : priorHistory;
+
   // Always send EOD report — no skip gate (unlike alerts which skip on quiet days)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const message  = buildEodReport(payload as any, market, kronosData, undefined, skill, movers);
+  const message  = buildEodReport(payload as any, market, kronosData, undefined, skill, movers, history);
   const tgResult = await sendTelegramMessage(message, "reports");
 
   // Persist this run's map as the baseline for the next report (only on a valid run —
   // degraded runs returned earlier and never reach here).
   await writeBreadthSnapshot(market, { asOf: new Date().toISOString(), above: currentAbove });
+  if (history !== priorHistory) await writeBreadthHistory(history);
 
   return NextResponse.json({
     ok:       tgResult.ok,

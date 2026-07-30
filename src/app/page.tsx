@@ -15,6 +15,7 @@ import { UserButton } from "@clerk/nextjs";
 import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 import NavPanel from "@/components/NavPanel";
 import TradeLogPanel from "@/components/TradeLogPanel";
+import RotationPanel from "@/components/RotationPanel";
 import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import { fetchKronosForecasts } from "@/lib/kronos";
 import { fetchForecastSkill } from "@/lib/forecastSkill";
@@ -577,6 +578,11 @@ export default function Dashboard() {
       {/* AUTOPILOT REALIZED NAV PANEL */}
       <div className="mx-4">
         <NavPanel />
+      </div>
+
+      {/* HK vs US ROTATION PANEL */}
+      <div className="mx-4">
+        <RotationPanel />
       </div>
 
       {/* TRADE LOG PANEL */}

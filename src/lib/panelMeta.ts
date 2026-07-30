@@ -100,6 +100,20 @@ export const PANEL_META: PanelMeta[] = [
     ],
   },
   {
+    id: "rotation",
+    label: "HK vs US Rotation",
+    meaning: "Whether breadth and tech relative strength currently favour the HK book or the US book.",
+    cadence: "Breadth accrues one half per region per EOD report (HK 16:30 · US 08:55 HKT); the ratio is fetched live.",
+    detail: [
+      "Breadth spread — HK % above SMA50 minus US % above SMA50, in percentage points; positive = HK favoured",
+      "Counts are stored raw (7/7, 2/9) because the books are small — one ticker joining or leaving moves the % ~11pts with no market move",
+      "A session appears only once BOTH regions have reported it; HK-only or US-only holidays leave an honest gap rather than a carried-forward value",
+      "5d delta — change in spread over the last 5 complete sessions; a static spread doesn't say whether favour is building or fading",
+      "Tech RS — ^HSTECH ÷ ^NDX against its 50-day mean; above and rising = HK tech leading. Indices, not the ETFs, so tracking error and mismatched session hours stay out of the ratio",
+      "Breadth answers who is participating; the ratio answers whether that's HK strength or US weakness — neither alone distinguishes them",
+    ],
+  },
+  {
     id: "trades",
     label: "Trade Log",
     meaning: "Signal-vs-execution slippage per Autopilot trade. To record your real fill, message the Telegram bot: /fill TICKER PRICE [date] — e.g. /fill 0939 8.95 (date defaults to today, HKT). Bare /fill lists fillable records.",
