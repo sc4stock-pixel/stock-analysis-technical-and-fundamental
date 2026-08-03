@@ -17,7 +17,7 @@ export const maxDuration = 30; // external Yahoo fetches (CLAUDE.md guardrail)
 // ETFs so at least the two sides are consistent instruments.
 // VERIFY WITH A LIVE FETCH before changing either symbol — a 404 here degrades silently to
 // an empty chart (it did, on first deploy).
-const HK_TECH = "3067.HK"; // iShares Hang Seng TECH ETF
+const HK_TECH = "3033.HK"; // CSOP Hang Seng TECH ETF — the most liquid / largest-AUM tracker
 const US_TECH = "QQQ";     // Invesco QQQ (Nasdaq-100)
 
 /** Bars pulled for the ratio: enough for the 50-day mean plus a readable window. */
@@ -29,7 +29,7 @@ const DISPLAY_DAYS = 90;
 export interface RotationResponse {
   /** Sessions where BOTH regions reported, oldest first. */
   breadth: BreadthPoint[];
-  /** `3067.HK / QQQ` with its trailing mean, oldest first. */
+  /** `3033.HK / QQQ` with its trailing mean, oldest first. */
   ratio: RatioPoint[];
   /** Which side the ratio currently favours; null before the mean is established. */
   lead: "hk" | "us" | null;

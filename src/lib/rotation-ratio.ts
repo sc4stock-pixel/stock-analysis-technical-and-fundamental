@@ -1,7 +1,7 @@
 /**
  * HK-vs-US tech relative-strength ratio — the second Rotation panel chart.
  *
- * `3067.HK / QQQ`, plotted against its own 50-day mean. Above and rising = HK tech
+ * `3033.HK / QQQ`, plotted against its own 50-day mean. Above and rising = HK tech
  * leading; below and falling = US tech leading. Crossings of the mean are the rotation
  * signal.
  *
