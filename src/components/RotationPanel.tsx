@@ -60,7 +60,7 @@ function SpreadChart({ points }: { points: BreadthPoint[] }) {
 }
 
 /**
- * `^HSTECH / ^NDX` against its trailing mean.
+ * `3033.HK / QQQ` against its trailing mean.
  *
  * Self-scaling here, unlike the spread chart — a ratio has no natural bounds, and what
  * matters is the shape relative to its own mean rather than an absolute level.
@@ -190,7 +190,7 @@ export default function RotationPanel() {
                 <div className="flex-1 bg-[#080d1a] border border-[#1e2d4a] rounded p-2 min-w-0">
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-[0.72rem] font-mono font-bold text-[#6b85a0] tracking-widest">
-                      TECH RS <span className="text-[#2a3d5a]">· HSTECH ÷ NDX</span>
+                      TECH RS <span className="text-[#2a3d5a]">· 3033 ÷ QQQ</span>
                     </span>
                     <span className="text-[0.72rem] font-mono text-[#4a6080]">{ratio.length}d</span>
                   </div>

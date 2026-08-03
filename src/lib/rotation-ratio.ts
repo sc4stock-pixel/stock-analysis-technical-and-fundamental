@@ -1,13 +1,13 @@
 /**
  * HK-vs-US tech relative-strength ratio — the second Rotation panel chart.
  *
- * `^HSTECH / ^NDX`, plotted against its own 50-day mean. Above and rising = HK tech
+ * `3033.HK / QQQ`, plotted against its own 50-day mean. Above and rising = HK tech
  * leading; below and falling = US tech leading. Crossings of the mean are the rotation
  * signal.
  *
- * Indices, not the tradable ETFs (`3067.HK` / `QQQ`), deliberately: this series is a
- * diagnostic, and ETF tracking error plus a HK-hours close divided by a US-hours close
- * would inject a wobble that isn't a real change in relative strength.
+ * ETFs rather than indices because Yahoo has no Hang Seng TECH index series to use — see
+ * the symbol constants in `app/api/rotation/route.ts` for the probe results. This module
+ * is symbol-agnostic; it divides whatever two close series it is handed.
  *
  * Nothing here is persisted. Unlike the breadth spread — which is derived from the
  * portfolio and cannot be reconstructed after the fact — index history is re-fetchable

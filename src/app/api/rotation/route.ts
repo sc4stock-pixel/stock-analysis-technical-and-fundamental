@@ -7,9 +7,18 @@ import { fetchYahooOHLCV } from "@/lib/marketData";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30; // external Yahoo fetches (CLAUDE.md guardrail)
 
-/** Index symbols for the relative-strength ratio. Indices, not the tradable ETFs. */
-const HK_TECH = "^HSTECH";
-const US_TECH = "^NDX";
+// Symbols for the relative-strength ratio. ETFs, not indices — NOT a preference but a
+// data constraint: Yahoo's /v8/finance/chart has no Hang Seng TECH index series. `^HSTECH`
+// and `^HSTC` 404, and `HSTECH.HK` resolves but serves a single bar. `^HSCE` (HSCEI) has
+// full history but is broad China large-cap, not tech, so it would answer a different
+// question. The HK-hours-vs-US-hours mismatch people cite against ETF pairs applies to any
+// cross-market pair, index or not, so it isn't a reason to prefer one here; what's left is
+// tracking error, which is small against the moves this chart exists to show. Both legs are
+// ETFs so at least the two sides are consistent instruments.
+// VERIFY WITH A LIVE FETCH before changing either symbol — a 404 here degrades silently to
+// an empty chart (it did, on first deploy).
+const HK_TECH = "3033.HK"; // CSOP Hang Seng TECH ETF — the most liquid / largest-AUM tracker
+const US_TECH = "QQQ";     // Invesco QQQ (Nasdaq-100)
 
 /** Bars pulled for the ratio: enough for the 50-day mean plus a readable window. */
 const RATIO_LOOKBACK_DAYS = 200;
@@ -20,7 +29,7 @@ const DISPLAY_DAYS = 90;
 export interface RotationResponse {
   /** Sessions where BOTH regions reported, oldest first. */
   breadth: BreadthPoint[];
-  /** `^HSTECH / ^NDX` with its trailing mean, oldest first. */
+  /** `3033.HK / QQQ` with its trailing mean, oldest first. */
   ratio: RatioPoint[];
   /** Which side the ratio currently favours; null before the mean is established. */
   lead: "hk" | "us" | null;
@@ -67,8 +76,15 @@ export async function GET() {
   const usBars = usRes.status === "fulfilled" ? usRes.value?.bars ?? null : null;
   if (hkBars && usBars) {
     ratio = buildRatioSeries(hkBars, usBars).slice(-DISPLAY_DAYS);
+    // A non-empty fetch on both legs can still yield nothing if their calendars never
+    // line up — a distinct failure from a bad symbol, so it gets a distinct message.
+    if (ratio.length === 0) warnings.push("ratio: no overlapping sessions");
   } else {
-    warnings.push("ratio series unavailable");
+    // Name the failing leg. The first deploy reported a bare "ratio series unavailable",
+    // which took a manual Yahoo probe to trace to a symbol that 404s.
+    const dead = [!hkBars && HK_TECH, !usBars && US_TECH].filter(Boolean).join(" + ");
+    console.error(`[/api/rotation] no bars for ${dead}`);
+    warnings.push(`ratio unavailable — no data for ${dead}`);
   }
 
   const body: RotationResponse = { breadth, ratio, lead: currentLead(ratio) };
