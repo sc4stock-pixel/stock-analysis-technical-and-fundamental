@@ -350,51 +350,19 @@ export default function StockCard({ result, config, timesfm, kronos, forecastSki
             <div className="flex items-center justify-between mb-2">
               <div className="text-[#ff8c42] font-bold">🔮 KRONOS PREDICTION</div>
             </div>
-            {/* Hero 5d cell */}
-            <div className="text-center bg-[#0f1629] rounded p-3 mb-2">
-              <div className="text-[#4a6080] text-[0.6rem]">5d</div>
-              {c5d ? (
-                <>
-                  <div className="text-white font-bold text-lg font-mono">{c5d.price.toFixed(2)}</div>
-                  <div className={`font-mono ${c5d.pct >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {c5d.pct >= 0 ? "+" : ""}{c5d.pct.toFixed(1)}%
-                  </div>
-                  {(flags.high || flags.unreliable) && (
-                    <div className="flex items-center justify-center gap-1.5 mt-1.5">
-                      {flags.high && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-bold tracking-wide text-[#00d4ff] border border-[#00d4ff]/50 bg-[#00d4ff]/10"
-                          title="Kronos predicts a large (>5%) 5d move. Magnitude only — 5d direction has no proven out-of-sample edge (under monitoring).">
-                          ✦ LARGE 5d MOVE
-                        </span>
-                      )}
-                      {flags.unreliable && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-bold tracking-wide text-[#ffa502] border border-[#ffa502]/50 bg-[#ffa502]/10"
-                          title="High recent forecast error (relative MAE) — treat this path as unreliable">
-                          ⚠ LOW RELIABILITY
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="text-[#3a4a64]">—</div>
-              )}
-              {/* Naive 5d benchmark */}
-              {naive5d && (
-                <div className="text-[#4a6080] text-[0.6rem] font-mono mt-1">
-                  naive {naive5d.pct >= 0 ? "+" : ""}{naive5d.pct.toFixed(1)}%
-                </div>
-              )}
-            </div>
-            {/* Secondary 10d / 20d */}
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              {[{ lbl: "10d", c: c10d }, { lbl: "20d", c: c20d }].map(({ lbl, c }) => (
-                <div key={lbl} className="text-center bg-[#0c1322] rounded p-2">
-                  <div className="text-[#3a4a64] text-[0.55rem]">{lbl}</div>
+            {/* Horizons — EQUAL WEIGHT on purpose. No horizon has a demonstrated
+                out-of-sample edge (5d ~coin-flip; 15/20d look better only because
+                Kronos is structurally contrarian in a mean-reverting market, and it
+                matches a one-line fade-the-drift rule). A hero cell would imply one
+                horizon is the one to trust — it isn't. */}
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              {[{ lbl: "5d", c: c5d }, { lbl: "10d", c: c10d }, { lbl: "20d", c: c20d }].map(({ lbl, c }) => (
+                <div key={lbl} className="text-center bg-[#0f1629] rounded p-2">
+                  <div className="text-[#4a6080] text-[0.6rem]">{lbl}</div>
                   {c ? (
                     <>
-                      <div className="text-[#6b85a0] font-mono text-[0.7rem]">{c.price.toFixed(2)}</div>
-                      <div className={`text-[0.65rem] font-mono ${c.pct >= 0 ? "text-green-400/60" : "text-red-400/60"}`}>
+                      <div className="text-[#c2d2e6] font-mono text-[0.8rem]">{c.price.toFixed(2)}</div>
+                      <div className={`font-mono text-[0.75rem] ${c.pct >= 0 ? "text-green-400" : "text-red-400"}`}>
                         {c.pct >= 0 ? "+" : ""}{c.pct.toFixed(1)}%
                       </div>
                     </>
@@ -404,6 +372,28 @@ export default function StockCard({ result, config, timesfm, kronos, forecastSki
                 </div>
               ))}
             </div>
+            {/* naive 5d benchmark + 5d magnitude/reliability flags */}
+            {(naive5d || flags.high || flags.unreliable) && (
+              <div className="flex items-center justify-center gap-2 flex-wrap mb-2">
+                {naive5d && (
+                  <span className="text-[#4a6080] text-[0.6rem] font-mono">
+                    naive 5d {naive5d.pct >= 0 ? "+" : ""}{naive5d.pct.toFixed(1)}%
+                  </span>
+                )}
+                {flags.high && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-bold tracking-wide text-[#00d4ff] border border-[#00d4ff]/50 bg-[#00d4ff]/10"
+                    title="Kronos predicts a large (>5%) 5d move. Magnitude only — no horizon has a proven out-of-sample direction edge.">
+                    ✦ LARGE 5d MOVE
+                  </span>
+                )}
+                {flags.unreliable && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-bold tracking-wide text-[#ffa502] border border-[#ffa502]/50 bg-[#ffa502]/10"
+                    title="High recent forecast error (relative MAE) — treat this path as unreliable">
+                    ⚠ LOW RELIABILITY
+                  </span>
+                )}
+              </div>
+            )}
             {/* Skill badge */}
             <div className={`text-[0.6rem] font-mono px-2 py-1 rounded border ${badgeCls}`}>
               <span>{badge.tone === "edge" ? "⚡ " : ""}{badge.label}</span>
