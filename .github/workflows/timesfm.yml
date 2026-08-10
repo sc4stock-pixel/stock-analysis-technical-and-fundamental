@@ -1,10 +1,15 @@
 name: TimesFM Price Targets
 
+# RETIRED 2026-08-10. TimesFM was scored out-of-sample for ~11 weeks and was dead at
+# every horizon (5d 48%, 20d 47% — both significantly WORSE than a coin flip), and it
+# effectively never made a high-conviction call (>5% bucket n=4). It is removed from all
+# display surfaces and no longer worth a daily run.
+#
+# The schedule is disabled; workflow_dispatch is retained so the job can still be run
+# by hand if the model is ever revisited. scripts/timesfm_predict.py and the historical
+# timesfm_forecasts.json are kept deliberately — the probation record stays auditable.
 on:
-  schedule:
-    - cron: "30 08,10,12,16 * * *"   # daily after market close (UTC)
-      timezone: 'Asia/Hong_Kong' # Added functionality
-  workflow_dispatch:        # manual trigger
+  workflow_dispatch:        # manual only — scheduled runs retired
 
 permissions:
   contents: write

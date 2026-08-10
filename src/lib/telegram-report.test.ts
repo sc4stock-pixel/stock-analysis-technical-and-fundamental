@@ -110,27 +110,34 @@ describe("buildForecastSection — 5d + skill footer", () => {
     expect(joined).not.toContain("0700.HK");
   });
 
-  it("renders the OOS hit-rate scoreboard (Kronos vs naive per horizon)", () => {
+  it("benchmarks against the contrarian rule, not naive", () => {
     const lines = buildForecastSection(ordered, kronosData as any, stubSkill);
     const joined = lines.join("\n");
     expect(joined).toContain("OOS dir-accuracy");
-    expect(joined).toContain("provisional");
-    // per-horizon rows present
+    expect(joined).toContain("fade-drift");
     expect(joined).toContain("5d");
     expect(joined).toContain("15d");
     expect(joined).toContain("20d");
-    // Kronos 5d 52% shown vs naive 50%
-    expect(joined).toContain("52%");
-    expect(joined).toContain("50%");
+    // naive 15d = 55% → contrarian baseline shown as 45%, NOT 55%
+    const line15 = joined.split("\n").find(l => l.trim().startsWith("15d"));
+    expect(line15).toContain("45%");
   });
 
-  it("marks a clearing horizon with ✅ and leaves 5d unmarked", () => {
+  it("does not claim an edge when Kronos fails to clear the contrarian baseline", () => {
+    // naive 5d 50% → contrarian 50%; Kronos 52% but ci_lo 0.47 < 0.50 → no ✅
+    const lines = buildForecastSection(ordered, kronosData as any, stubSkill);
+    // Kronos 5d = 52% is unique to that row (first row carries the <pre> prefix)
+    const line5 = lines.join("\n").split("\n").find(l => l.includes("52%"));
+    expect(line5).toBeDefined();
+    expect(line5).not.toContain("✅");
+  });
+
+  it("reports the regime from the trend-following hit rate", () => {
     const lines = buildForecastSection(ordered, kronosData as any, stubSkill);
     const joined = lines.join("\n");
-    const line15 = joined.split("\n").find(l => l.includes("55%")); // 15d (naive 55% is unique)
-    const line5 = joined.split("\n").find(l => l.includes("52%"));  // 5d (kronos 52% is unique)
-    expect(line15).toContain("✅");   // 62% vs naive 55%, p<0.05 → clears
-    expect(line5).not.toContain("✅"); // 52% vs naive 50%, p=0.4 → no edge
+    // naive 20d = 57% → trending
+    expect(joined).toContain("regime:");
+    expect(joined).toContain("trending");
   });
 
   it("omits footer when skill is null", () => {
