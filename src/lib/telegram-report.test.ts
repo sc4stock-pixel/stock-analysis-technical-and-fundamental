@@ -79,10 +79,18 @@ describe("buildForecastSection — 5d + skill footer", () => {
     },
   };
 
-  it("header says FORECASTS 5d", () => {
+  it("header names Kronos and marks the table display-only", () => {
     const lines = buildForecastSection(ordered, kronosData as any, null);
     const joined = lines.join("\n");
-    expect(joined).toContain("FORECASTS 5d");
+    expect(joined).toContain("KRONOS FORECASTS");
+    expect(joined).toContain("display-only");
+  });
+
+  it("shows both the 5d and 20d columns", () => {
+    const lines = buildForecastSection(ordered, kronosData as any, null);
+    const joined = lines.join("\n");
+    const head = joined.split("\n").find(l => l.includes("5d") && l.includes("20d"));
+    expect(head).toBeDefined();
   });
 
   it("does not contain /20 or TimesFM", () => {
@@ -113,14 +121,13 @@ describe("buildForecastSection — 5d + skill footer", () => {
   it("benchmarks against the contrarian rule, not naive", () => {
     const lines = buildForecastSection(ordered, kronosData as any, stubSkill);
     const joined = lines.join("\n");
-    expect(joined).toContain("OOS dir-accuracy");
-    expect(joined).toContain("fade-drift");
-    expect(joined).toContain("5d");
+    expect(joined).toContain("Kronos vs a one-line contrarian rule");
+    expect(joined).toContain("contrarian");
     expect(joined).toContain("15d");
-    expect(joined).toContain("20d");
     // naive 15d = 55% → contrarian baseline shown as 45%, NOT 55%
     const line15 = joined.split("\n").find(l => l.trim().startsWith("15d"));
     expect(line15).toContain("45%");
+    expect(line15).not.toContain("55%");
   });
 
   it("does not claim an edge when Kronos fails to clear the contrarian baseline", () => {
@@ -135,15 +142,37 @@ describe("buildForecastSection — 5d + skill footer", () => {
   it("reports the regime from the trend-following hit rate", () => {
     const lines = buildForecastSection(ordered, kronosData as any, stubSkill);
     const joined = lines.join("\n");
-    // naive 20d = 57% → trending
-    expect(joined).toContain("regime:");
+    // naive 20d = 57% → trending, and it names the opposite as the flip case
     expect(joined).toContain("trending");
+    expect(joined).toContain("mean-reverting");
+    expect(joined).toContain("behaving as");
+    // the % columns are framed as the market, not the model
+    expect(joined).toContain("describe the <b>market</b>");
+  });
+
+  it("states no edge when nothing clears, and names the horizon when one does", () => {
+    // No-edge case: every Kronos ci_lo sits BELOW its contrarian baseline (1 − naive).
+    const flat = JSON.parse(JSON.stringify(stubSkill));
+    flat.KRONOS.horizons = {
+      "5d":  { hits: 250, n: 500, rate: 0.50, ci_lo: 0.46, ci_hi: 0.54, p: 0.9 },  // vs 50%
+      "15d": { hits: 213, n: 484, rate: 0.44, ci_lo: 0.40, ci_hi: 0.48, p: 0.9 },  // vs 45%
+      "20d": { hits: 190, n: 452, rate: 0.42, ci_lo: 0.38, ci_hi: 0.46, p: 0.9 },  // vs 43%
+    };
+    const noEdge = buildForecastSection(ordered, kronosData as any, flat).join("\n");
+    expect(noEdge).toContain("no horizon has cleared it");
+
+    // Edge case: lift 15d well clear of its 45% contrarian baseline → must be named.
+    const edgy = JSON.parse(JSON.stringify(flat));
+    edgy.KRONOS.horizons["15d"] = { hits: 340, n: 484, rate: 0.70, ci_lo: 0.66, ci_hi: 0.74, p: 0.0001 };
+    const joined = buildForecastSection(ordered, kronosData as any, edgy).join("\n");
+    expect(joined).toContain("15d now clears");
+    expect(joined).not.toContain("no horizon has cleared it");
   });
 
   it("omits footer when skill is null", () => {
     const lines = buildForecastSection(ordered, kronosData as any, null);
     const joined = lines.join("\n");
     expect(joined).not.toContain("provisional");
-    expect(joined).not.toContain("OOS dir-accuracy");
+    expect(joined).not.toContain("Kronos vs a one-line contrarian rule");
   });
 });
