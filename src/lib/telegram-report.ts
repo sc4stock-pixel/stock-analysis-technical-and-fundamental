@@ -147,7 +147,8 @@ function detectProximity(valid: SlimResult[]): ProximityHit[] {
 // ============================================================
 interface ForecastRow {
   label: string; isHK: boolean;
-  kPct: number | null;
+  kPct: number | null;      // 5d
+  kPct20: number | null;    // 20d — shown alongside, NOT ranked above 5d
 }
 
 export function buildForecastSection(
@@ -160,14 +161,18 @@ export function buildForecastSection(
     const kro = kronosData?.[r.symbol];
     if (!kro) continue;
     const kLast = kro.last_price ?? null;
-    const kPct = (kLast && Array.isArray(kro.forward.p50) && kro.forward.p50.length >= 5)
-      ? ((kro.forward.p50[4] - kLast) / kLast) * 100 : null;
+    const p50 = Array.isArray(kro.forward.p50) ? kro.forward.p50 : [];
+    const kPct = (kLast && p50.length >= 5)
+      ? ((p50[4] - kLast) / kLast) * 100 : null;
+    const kPct20 = (kLast && p50.length >= 20)
+      ? ((p50[19] - kLast) / kLast) * 100 : null;
     const isHK = r.symbol.endsWith(".HK");
     rows.push({
       // strip ".HK" — stops Telegram auto-linking "9988.HK" as a URL
       label: isHK ? r.symbol.replace(".HK", "") : r.symbol,
       isHK,
       kPct,
+      kPct20,
     });
   }
   if (rows.length === 0) return [];
@@ -179,18 +184,21 @@ export function buildForecastSection(
   const hk = rows.filter(x => x.isHK).sort(byAbsPct);
 
   const pct = (v: number | null) => v == null ? "  —  " : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+  // ✦ stays tied to the 5d value: CONVICTION_PCT (5%) is calibrated for a 5-day move.
+  // A >5% move over 20 days is unremarkable, so flagging it there would be noise.
   const fmtRow = (x: ForecastRow) => {
     const lbl = x.label.padEnd(5);
-    const hiConv = x.kPct != null && Math.abs(x.kPct) > CONVICTION_PCT ? " ✦" : "";
-    return `${lbl} K ${pct(x.kPct).padStart(7)}${hiConv}`;
+    const flag = x.kPct != null && Math.abs(x.kPct) > CONVICTION_PCT ? "✦" : " ";
+    return `${lbl}${pct(x.kPct).padStart(7)}${flag} ${pct(x.kPct20).padStart(7)}`;
   };
+  const header = `${"".padEnd(5)}${"5d".padStart(7)}  ${"20d".padStart(7)}`;
 
   const table: string[] = [];
-  if (us.length) { table.push("US"); us.forEach(x => table.push(fmtRow(x))); }
-  if (hk.length) { table.push("HK"); hk.forEach(x => table.push(fmtRow(x))); }
+  if (us.length) { table.push("US", header); us.forEach(x => table.push(fmtRow(x))); }
+  if (hk.length) { table.push("HK", header); hk.forEach(x => table.push(fmtRow(x))); }
 
   const result: string[] = [
-    `\n📊 <b>FORECASTS 5d</b> <i>K=Kronos</i>`,
+    `\n📊 <b>KRONOS FORECASTS</b> <i>display-only · ✦ = large 5d move</i>`,
     `<pre>${table.join("\n")}</pre>`,
   ];
 
@@ -216,20 +224,41 @@ export function buildForecastSection(
         // Only claim an edge if the CI lower bound clears the contrarian baseline.
         const beats = k.ci_lo > inv ? "  ✅" : "";
         const ds = `${d >= 0 ? "+" : ""}${d.toFixed(0)}`;
-        return `${h.padEnd(3)} K ${pc(k.rate).padStart(4)}  fade-drift ${pc(inv).padStart(4)}  ${ds.padStart(3)}${beats}`;
+        return `${h.padEnd(4)}${pc(k.rate).padStart(5)}${pc(inv).padStart(12)}${ds.padStart(6)}${beats}`;
       })
       .filter((r): r is string => r != null);
     const n20 = N.horizons?.["20d"] as SkillStat | null | undefined;
     if (rows.length) {
+      const head = `${"".padEnd(4)}${"Kronos".padStart(5)}${"contrarian".padStart(12)}${"diff".padStart(6)}`;
+      // The "no edge" claim must follow the data, not be hardcoded — if a horizon ever
+      // genuinely clears the contrarian rule, this line has to say so.
+      const cleared = (["5d", "15d", "20d"] as const).filter((h) => {
+        const k = K.horizons?.[h] as SkillStat | null | undefined;
+        const nv = N.horizons?.[h] as SkillStat | null | undefined;
+        return !!k && !!nv && k.ci_lo > 1 - nv.rate;
+      });
+      const verdict = cleared.length
+        ? `<b>${cleared.join(", ")} now clear${cleared.length === 1 ? "s" : ""}`
+          + ` the contrarian rule</b> — worth a fresh look`
+        : `no horizon has cleared it`;
+      // Regime-invariant wording: Kronos is contrarian BY CONSTRUCTION, so when the
+      // market turns trending both columns fall below 50% together. Describing that in
+      // advance stops the inversion from reading as a malfunction.
       const regime = n20
-        ? `\n<i>regime: trend-following scores ${pc(n20.rate)} at 20d → ${
-            n20.rate < 0.45 ? "mean-reverting" : n20.rate > 0.55 ? "trending" : "mixed"
-          }</i>`
+        ? `${n20.rate < 0.45 ? "mean-reverting" : n20.rate > 0.55 ? "trending" : "mixed"}`
+        : "unknown";
+      const regimeNote = n20
+        ? ` <b>${regime}</b> (trend-following wins ${pc(n20.rate)} at 20d).`
+          + ` If it turns ${regime === "trending" ? "mean-reverting" : "trending"},`
+          + ` expect both % columns to move together — that is the model behaving as`
+          + ` designed, not breaking.`
         : "";
       result.push(
-        `\n📈 <b>Kronos OOS dir-accuracy</b> <i>(vs contrarian baseline)</i>`,
-        `<pre>${rows.join("\n")}</pre>`,
-        `<i>fade-drift = one-line contrarian rule. Kronos ≈ that rule → no independent edge.</i>${regime}`
+        `\n📈 <b>Kronos vs a one-line contrarian rule</b>`,
+        `<pre>${head}\n${rows.join("\n")}</pre>`,
+        `<i>• <b>diff</b> is the only column about Kronos — ${verdict}. It mean-reverts by`
+        + ` construction, so it tracks "fade the 60-day drift" in any regime.`
+        + `\n• the % columns describe the <b>market</b>, not the model. Currently${regimeNote}</i>`
       );
     }
   }
