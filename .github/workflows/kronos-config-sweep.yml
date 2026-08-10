@@ -1,0 +1,86 @@
+name: Kronos Config Sweep
+
+# One-off experiment (manual only). Tests whether OUR configuration crippled Kronos:
+# LOOKBACK=128 was chosen for chart continuity, never validated for accuracy, and we
+# run the smallest model variant. Each matrix leg scores the same historical dates so
+# the comparison is paired. Results land as artifacts; nothing is committed.
+on:
+  workflow_dispatch:
+    inputs:
+      stride:
+        description: "Trading days between forecast dates (lower = more samples, slower)"
+        default: "10"
+      months:
+        description: "How many months back to sample"
+        default: "12"
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lookback: 128
+            model: NeoQuasar/Kronos-small
+            tag: 128-small
+          - lookback: 256
+            model: NeoQuasar/Kronos-small
+            tag: 256-small
+          - lookback: 400
+            model: NeoQuasar/Kronos-small
+            tag: 400-small
+          - lookback: 128
+            model: NeoQuasar/Kronos-base
+            tag: 128-base
+          - lookback: 400
+            model: NeoQuasar/Kronos-base
+            tag: 400-base
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Cache HuggingFace model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: kronos-hf-${{ runner.os }}
+
+      - name: Clone Kronos model code
+        run: git clone --depth 1 https://github.com/shiyu-coder/Kronos.git ./Kronos
+
+      - name: Install dependencies
+        run: |
+          pip install "numpy<2"
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install einops huggingface_hub safetensors tqdm pandas yfinance
+
+      - name: Run sweep leg
+        env:
+          LOOKBACK: ${{ matrix.lookback }}
+          MODEL: ${{ matrix.model }}
+          TAG: ${{ matrix.tag }}
+          STRIDE: ${{ inputs.stride }}
+          MONTHS: ${{ inputs.months }}
+        run: |
+          python scripts/kronos_config_sweep.py \
+            --lookback "$LOOKBACK" \
+            --model "$MODEL" \
+            --stride "$STRIDE" \
+            --months "$MONTHS" \
+            --sample-count 5 \
+            --out "sweep_${TAG}.json"
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweep-${{ matrix.tag }}
+          path: sweep_${{ matrix.tag }}.json
