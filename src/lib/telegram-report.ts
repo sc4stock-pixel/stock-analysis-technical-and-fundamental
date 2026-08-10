@@ -194,26 +194,42 @@ export function buildForecastSection(
     `<pre>${table.join("\n")}</pre>`,
   ];
 
-  // Skill footer — OOS hit-rate scoreboard (Kronos vs same-horizon naive) so the
-  // probation stats stay visible at a glance. A ✅ marks a horizon that actually
-  // clears (>50%, p<0.05, CI-lo>50%, beats naive). 5d has no edge; 15/20d under review.
+  // Skill footer — OOS hit-rate scoreboard.
+  //
+  // BENCHMARK NOTE (2026-08-10): the correct control is the CONTRARIAN rule
+  // (fade the 60-day drift = inverse-naive), NOT naive itself. Kronos mean-reverts to
+  // its context-window mean by construction, so it is structurally the opposite of a
+  // trend-follower — scoring it against naive flatters it by ~20pp and produced a
+  // bogus "edge" at 15/20d. Measured against the contrarian rule, Kronos adds ~0.
+  // The naive rate is still shown, but as what it actually is: a REGIME GAUGE
+  // (low = mean-reverting market, high = trending market).
   if (skill) {
     const K = skill.KRONOS, N = skill.NAIVE;
-    const pc = (s?: SkillStat | null) => (s ? `${Math.round(s.rate * 100)}%` : "—");
-    const clears = (s?: SkillStat | null, nv?: SkillStat | null) =>
-      !!s && s.rate > 0.5 && s.p < 0.05 && s.ci_lo > 0.5 && (!nv || s.rate > nv.rate);
+    const pc = (r: number) => `${Math.round(r * 100)}%`;
     const rows = (["5d", "15d", "20d"] as const)
       .map((h) => {
-        const k = K.horizons?.[h], nv = N.horizons?.[h];
-        if (!k) return null;
-        return `${h.padEnd(3)} K ${pc(k).padStart(4)}  naive ${pc(nv).padStart(4)}${clears(k, nv) ? "  ✅" : ""}`;
+        const k = K.horizons?.[h] as SkillStat | null | undefined;
+        const nv = N.horizons?.[h] as SkillStat | null | undefined;
+        if (!k || !nv) return null;
+        const inv = 1 - nv.rate;                 // contrarian baseline
+        const d = (k.rate - inv) * 100;
+        // Only claim an edge if the CI lower bound clears the contrarian baseline.
+        const beats = k.ci_lo > inv ? "  ✅" : "";
+        const ds = `${d >= 0 ? "+" : ""}${d.toFixed(0)}`;
+        return `${h.padEnd(3)} K ${pc(k.rate).padStart(4)}  fade-drift ${pc(inv).padStart(4)}  ${ds.padStart(3)}${beats}`;
       })
       .filter((r): r is string => r != null);
+    const n20 = N.horizons?.["20d"] as SkillStat | null | undefined;
     if (rows.length) {
+      const regime = n20
+        ? `\n<i>regime: trend-following scores ${pc(n20.rate)} at 20d → ${
+            n20.rate < 0.45 ? "mean-reverting" : n20.rate > 0.55 ? "trending" : "mixed"
+          }</i>`
+        : "";
       result.push(
-        `\n📈 <b>Kronos OOS dir-accuracy</b> <i>(vs naive · provisional)</i>`,
+        `\n📈 <b>Kronos OOS dir-accuracy</b> <i>(vs contrarian baseline)</i>`,
         `<pre>${rows.join("\n")}</pre>`,
-        `<i>✅ = beats naive + significant · 5d no edge; 15/20d under review</i>`
+        `<i>fade-drift = one-line contrarian rule. Kronos ≈ that rule → no independent edge.</i>${regime}`
       );
     }
   }
