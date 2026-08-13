@@ -1,13 +1,12 @@
 "use client";
 import { useState, useCallback } from "react";
-import { StockAnalysisResult, TimesfmForecasts, KronosForecasts } from "@/types";
+import { StockAnalysisResult, KronosForecasts } from "@/types";
 import { kronosRow, naiveRow, convictionFlags, ForecastRowData } from "@/lib/forecastBox";
 import InfoTooltip from "@/components/InfoTooltip";
 
 interface Props {
   results: StockAnalysisResult[];
   onRowClick: (symbol: string) => void;
-  timesfmData?: TimesfmForecasts | null;
   kronosData?: KronosForecasts | null;
 }
 
@@ -76,7 +75,7 @@ interface ColDef {
   label: string;
   labelColor?: string;
   align: "left" | "right" | "center";
-  sortVal: (r: StockAnalysisResult, tfm?: TimesfmForecasts | null, kro?: KronosForecasts | null) => number;
+  sortVal: (r: StockAnalysisResult, kro?: KronosForecasts | null) => number;
 }
 
 const SC_HDR  = "text-[#00d4ff]";
@@ -94,7 +93,7 @@ const COLS: ColDef[] = [
   { key: "st_status",  label: "ST",         align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
   { key: "sepa",       label: "SEPA",       align: "center", sortVal: r => r.sepa_metadata?.sepa_score ?? -1 },
   { key: "k_5d",       label: "K 5d",       labelColor: K_HDR, align: "right",
-    sortVal: (r, _tfm, kro) => kronosRow(kro?.[r.symbol])?.cells[0]?.pct ?? -999 },
+    sortVal: (r, kro) => kronosRow(kro?.[r.symbol])?.cells[0]?.pct ?? -999 },
   { key: "naive_5d",   label: "naive 5d",   labelColor: "text-[#6b85a0]", align: "right",
     sortVal: (r) => naiveRow(r.chart_bars?.map(b => b.close))?.cells[0]?.pct ?? -999 },
   { key: "rsi",        label: "RSI",        align: "right",  sortVal: r => r.backtest?.rsi ?? 0 },
@@ -126,7 +125,7 @@ function Forecast5dTd({ row, modelLabel, tint = false, muted = false, badge = ""
   );
 }
 
-export default function PortfolioSummaryBar({ results, onRowClick, timesfmData, kronosData }: Props) {
+export default function PortfolioSummaryBar({ results, onRowClick, kronosData }: Props) {
   const [sortKey, setSortKey] = useState<ColKey>("signal");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
   const [flashSymbol, setFlashSymbol] = useState<string | null>(null);
@@ -145,7 +144,7 @@ export default function PortfolioSummaryBar({ results, onRowClick, timesfmData, 
   if (results.length === 0) return null;
 
   const col    = COLS.find(c => c.key === sortKey)!;
-  const sorted = [...results].sort((a, b) => sortDir * (col.sortVal(b, timesfmData, kronosData) - col.sortVal(a, timesfmData, kronosData)));
+  const sorted = [...results].sort((a, b) => sortDir * (col.sortVal(b, kronosData) - col.sortVal(a, kronosData)));
 
   const buy      = results.filter(r => r.signal === "BUY").length;
   const sell     = results.filter(r => r.signal === "SELL").length;

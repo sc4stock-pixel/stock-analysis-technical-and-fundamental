@@ -9,20 +9,9 @@ import {
 } from "recharts";
 import { naiveRow } from "@/lib/forecastBox";
 
-interface TimesfmPriceTargets {
-  t1: number;
-  t2: number;
-  t3: number;
-  p10: number[];
-  p50: number[];
-  p90: number[];
-  historical?: import("@/types").ForecastHistorical;
-}
-
 interface Props {
   result: StockAnalysisResult;
   config: AppConfig;
-  timesfm?: TimesfmPriceTargets;
   kronos?: import("@/types").KronosForecast;
 }
 
@@ -122,7 +111,7 @@ const PriceTooltip = ({ active, payload, label }: { active?: boolean; payload?: 
   );
 };
 
-export default function ChartTab({ result, config, timesfm, kronos }: Props) {
+export default function ChartTab({ result, config, kronos }: Props) {
   // ── All hooks first ───────────────────────────────────────────
   const [range, setRange]             = useState<Range>("1Y");
   const [showSMA, setShowSMA]         = useState(true);
@@ -210,7 +199,7 @@ export default function ChartTab({ result, config, timesfm, kronos }: Props) {
   const hasKronosFwd =
     showForecast && forecastMode === "forward" && !!kronos?.forward?.p50?.length;
 
-  // Kronos is the primary forecast; TimesFM removed from chart
+  // Kronos is the primary forecast
   const hasForecast = hasKronosFwd;
   const buildForecast = hasKronosFwd;
 

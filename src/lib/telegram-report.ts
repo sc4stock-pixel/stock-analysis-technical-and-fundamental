@@ -273,7 +273,6 @@ export function buildEodReport(
   results: SlimResult[],
   market: "us" | "hk",
   kronosData?: KronosForecasts | null,
-  timesfmData?: unknown,           // legacy param kept for call-site compat; unused
   skill?: ForecastSkill | null,
   movers?: BreadthMovers | null,   // SMA50 breadth movers vs the prior report's snapshot
   breadthHistory?: BreadthPoint[] | null, // HK-vs-US spread series, for the spread suffix

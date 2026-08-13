@@ -41,12 +41,19 @@ describe("freshness evaluate", () => {
   });
 
   it("trading-day threshold: Friday update is fresh on Monday (weekend doesn't count)", () => {
-    const r = evaluate(check("timesfm_forecasts.json"), new Date("2026-06-05T20:00:00Z"), now);
+    const r = evaluate(check("kronos_forecasts.json"), new Date("2026-06-05T20:00:00Z"), now);
     expect(r.stale).toBe(false); // 1 trading day <= 2
   });
 
   it("trading-day threshold: stale after >2 trading days", () => {
-    const r = evaluate(check("timesfm_forecasts.json"), new Date("2026-06-02T20:00:00Z"), now);
+    const r = evaluate(check("kronos_forecasts.json"), new Date("2026-06-02T20:00:00Z"), now);
     expect(r.stale).toBe(true); // Tue->Mon = 3 trading days > 2
+  });
+
+  // Regression guard: TimesFM was retired 2026-08-10 (PR #50) and its workflow deleted,
+  // so timesfm_forecasts.json is frozen by design. Leaving it in CHECKS fired a false
+  // "STALE DATA" alert into the Execution Alerts channel every trading day.
+  it("does not check retired artifacts whose producer no longer runs", () => {
+    expect(CHECKS.map(c => c.artifact)).not.toContain("timesfm_forecasts.json");
   });
 });

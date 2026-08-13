@@ -16,11 +16,10 @@ import OpenPositionsPanel from "@/components/OpenPositionsPanel";
 import NavPanel from "@/components/NavPanel";
 import TradeLogPanel from "@/components/TradeLogPanel";
 import RotationPanel from "@/components/RotationPanel";
-import { fetchTimesfmForecasts } from "@/lib/timesfm";
 import { fetchKronosForecasts } from "@/lib/kronos";
 import { fetchForecastSkill } from "@/lib/forecastSkill";
 import { supertrend } from "@/lib/indicators";
-import type { TimesfmForecasts, KronosForecasts, ForecastSkill } from "@/types";
+import type { KronosForecasts, ForecastSkill } from "@/types";
 import type { WorkerState } from "@/types/worker-state";
 
 const MacroPanel   = dynamic(() => import("@/components/MacroPanel"),   { ssr: false });
@@ -59,8 +58,6 @@ export default function Dashboard() {
   const [macroLoading, setMacroLoading] = useState(false);
   const [hkMacroData, setHKMacroData]       = useState<HKMacroData | null>(null);
   const [hkMacroLoading, setHKMacroLoading] = useState(false);
-  const [timesfmData, setTimesfmData] = useState<TimesfmForecasts | null>(null);
-  const [timesfmLoading, setTimesfmLoading] = useState(false);
   const [kronosData, setKronosData] = useState<KronosForecasts | null>(null);
   const [forecastSkill, setForecastSkill] = useState<ForecastSkill | null>(null);
 
@@ -175,16 +172,7 @@ export default function Dashboard() {
     }
   }, [fetchHKMacro, results.length, config.macro, macroData]);
 
-  const fetchTimesfm = useCallback(async () => {
-    setTimesfmLoading(true);
-    try {
-      const data = await fetchTimesfmForecasts();
-      setTimesfmData(data);
-    } catch {
-      setTimesfmData(null);
-    } finally {
-      setTimesfmLoading(false);
-    }
+  const fetchForecasts = useCallback(async () => {
     const k = await fetchKronosForecasts();
     if (k) setKronosData(k);
     const sk = await fetchForecastSkill();
@@ -192,10 +180,10 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (results.length > 0 && !timesfmData) {
-      fetchTimesfm();
+    if (results.length > 0 && !kronosData) {
+      fetchForecasts();
     }
-  }, [results, timesfmData, fetchTimesfm]);
+  }, [results, kronosData, fetchForecasts]);
 
   async function savePortfolio() {
     setSavePortfolioLoading(true);
@@ -362,7 +350,7 @@ export default function Dashboard() {
       setResults(finalResults);
     }
 
-    fetchTimesfm();
+    fetchForecasts();
 
     // Auto-send when there are BUY/SELL signals OR an ST flip within the last 2 bars
     // (covers same-day flips AND yesterday's close, since analysis often runs pre-market)
@@ -384,7 +372,7 @@ export default function Dashboard() {
     setLastUpdated(new Date().toLocaleTimeString());
     setProgressSymbol("");
     setLoading(false);
-  }, [config, fetchUSMacro, fetchHKMacro, fetchTimesfm]);
+  }, [config, fetchUSMacro, fetchHKMacro, fetchForecasts]);
 
   const scrollToCard = useCallback((symbol: string) => {
     const id = `card-${symbol.replace(/\./g, "-")}`;
@@ -564,7 +552,6 @@ export default function Dashboard() {
           <PortfolioSummaryBar
             results={results}
             onRowClick={scrollToCard}
-            timesfmData={timesfmData}
             kronosData={kronosData}
           />
         </div>
@@ -623,7 +610,6 @@ export default function Dashboard() {
                   <StockCard
                     result={result}
                     config={config}
-                    timesfm={timesfmData?.[result.symbol]}
                     kronos={kronosData?.[result.symbol]}
                     forecastSkill={forecastSkill}
                     forcedTab={globalTab ?? undefined}
