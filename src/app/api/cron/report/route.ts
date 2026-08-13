@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
 
   // Always send EOD report — no skip gate (unlike alerts which skip on quiet days)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const message  = buildEodReport(payload as any, market, kronosData, undefined, skill, movers, history);
+  const message  = buildEodReport(payload as any, market, kronosData, skill, movers, history);
   const tgResult = await sendTelegramMessage(message, "reports");
 
   // Persist this run's map as the baseline for the next report (only on a valid run —

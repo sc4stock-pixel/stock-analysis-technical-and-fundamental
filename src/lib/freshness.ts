@@ -37,9 +37,11 @@ interface Check {
   threshold: Threshold;
 }
 
+// NOTE: timesfm_forecasts.json is deliberately NOT checked. TimesFM was retired
+// (PR #50, 2026-08-10) and its workflow removed, so the file is frozen by design —
+// a freshness check on it fires a false STALE DATA alert every trading day.
 export const CHECKS: Check[] = [
   { artifact: "st_params.json", source: { kind: "embedded", file: "st_params.json", field: "last_optimized" }, threshold: { maxAgeHours: 40 * 24 } },
-  { artifact: "timesfm_forecasts.json", source: { kind: "commit", file: "timesfm_forecasts.json" }, threshold: { maxTradingDays: 2, region: "us" } },
   { artifact: "kronos_forecasts.json", source: { kind: "commit", file: "kronos_forecasts.json" }, threshold: { maxTradingDays: 2, region: "us" } },
   { artifact: "av_earnings_cache.json", source: { kind: "commit", file: "av_earnings_cache.json" }, threshold: { maxAgeHours: 9 * 24 } },
   { artifact: "fundamentals_cache.json", source: { kind: "commit", file: "fundamentals_cache.json" }, threshold: { maxAgeHours: 9 * 24 } },

@@ -2,7 +2,10 @@ name: Kronos Forecasts
 
 on:
   schedule:
-    - cron: "30 22 * * *"   # 30 min after TimesFM (0 22) to avoid push races
+    # Was offset 30 min after the TimesFM job (0 22) to avoid push races; TimesFM was
+    # retired 2026-08-10 and this is now the only forecast job. Time kept as-is so the
+    # forecast bar date doesn't shift.
+    - cron: "30 22 * * *"
   workflow_dispatch:
 
 permissions:

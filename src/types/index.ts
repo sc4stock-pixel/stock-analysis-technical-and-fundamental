@@ -450,24 +450,6 @@ export interface RegimeBadge {
   dir: string;
 }
 
-export interface TimesfmPriceTargets {
-  t1: number;
-  t2: number;
-  t3: number;
-  p10: number[];
-  p50: number[];
-  p90: number[];
-  /** Baseline close the forecast was generated from — use this (not Kronos's
-   *  last_price) for TimesFM % moves, so the two models' baselines can't
-   *  diverge when one file is staler than the other. */
-  last_price?: number;
-  historical?: ForecastHistorical;
-}
-
-export interface TimesfmForecasts {
-  [symbol: string]: TimesfmPriceTargets;
-}
-
 export interface ForecastHistorical {
   anchor: number;
   pred: number[];
@@ -492,7 +474,12 @@ export interface ForecastSkill {
     conviction_pct: number; drift_window: number; generated_at_hk: string;
     history_days: number; match_tol_days: number;
   };
-  KRONOS: ModelSkill; NAIVE: ModelSkill; TIMESFM: ModelSkill;
+  KRONOS: ModelSkill; NAIVE: ModelSkill;
+  /** TimesFM was retired from every display surface (PR #50, 2026-08-10), but
+   *  scripts/forecast_probation_audit.py still scores it and writes this key —
+   *  the probation record is deliberately kept auditable. Typed so the shape
+   *  stays honest; no display code reads it. */
+  TIMESFM: ModelSkill;
 }
 
 export interface KronosForecast {

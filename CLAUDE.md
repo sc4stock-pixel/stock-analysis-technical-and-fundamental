@@ -55,7 +55,14 @@ This is a **Next.js 14 App Router** stock analysis dashboard. All analysis runs 
 
 Macro data (US and HK) is fetched in parallel via `/api/macro` and `/api/macro-hk`, then applied as a score adjustment after all stocks complete.
 
-TimesFM forecasts are **not** computed at runtime — they're fetched as a static JSON file from GitHub (`timesfm_forecasts.json`), updated nightly by the GitHub Actions workflow in `.github/workflows/timesfm.yml` which runs `scripts/timesfm_predict.py`.
+Kronos forecasts are **not** computed at runtime — they're fetched as a static JSON file from GitHub (`kronos_forecasts.json`), updated by the GitHub Actions workflow in `.github/workflows/kronos.yml` which runs `scripts/kronos_predict.py`. They are **display-only with no proven edge** — see `STRATEGY.md` and the probation record below.
+
+**TimesFM is retired.** Scored true-out-of-sample for ~11 weeks and dead at every horizon
+(5d 48%, 20d 47%), it was removed from every display surface in PR #50 (2026-08-10) and its
+runtime code deleted entirely. `scripts/timesfm_predict.py`, the frozen `timesfm_forecasts.json`,
+and the `TIMESFM` key in `forecast_skill.json` are kept **deliberately** so
+`scripts/forecast_probation_audit.py` can still reproduce the verdict. Do not re-add a
+freshness check on `timesfm_forecasts.json` — the file is frozen by design.
 
 ### Key library modules (`src/lib/`)
 

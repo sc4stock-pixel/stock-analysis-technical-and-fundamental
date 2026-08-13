@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, TimesfmPriceTargets, ForecastSkill } from "@/types";
+import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, ForecastSkill } from "@/types";
 import { regimeColor } from "@/lib/regime";
 import { kronosRow, naiveRow, convictionFlags, skillBadge } from "@/lib/forecastBox";
 import OverviewTab    from "./tabs/OverviewTab";
@@ -13,7 +13,6 @@ import FundamentalReport from "./FundamentalReport";
 interface Props {
   result: StockAnalysisResult;
   config: AppConfig;
-  timesfm?: TimesfmPriceTargets;
   kronos?: import("@/types").KronosForecast;
   forecastSkill?: ForecastSkill | null;
   forcedTab?: Tab;
@@ -123,7 +122,7 @@ function buildSTView(result: StockAnalysisResult): StockAnalysisResult {
 }
 
 
-export default function StockCard({ result, config, timesfm, kronos, forecastSkill, forcedTab }: Props) {
+export default function StockCard({ result, config, kronos, forecastSkill, forcedTab }: Props) {
   const [tab, setTab] = useState<Tab>("OVERVIEW");
   const [strategy, setStrategy] = useState<Strategy>("score");
 
@@ -314,7 +313,7 @@ export default function StockCard({ result, config, timesfm, kronos, forecastSki
           <div className="p-4 text-[#ff4757] text-xs">{result.error ?? "Error fetching data"}</div>
         ) : (
           <>
-            {tab === "CHART"       && <ChartTab       result={result} config={config} timesfm={timesfm} kronos={kronos} />}
+            {tab === "CHART"       && <ChartTab       result={result} config={config} kronos={kronos} />}
             {tab === "OVERVIEW"    && <OverviewTab    result={activeResult} />}
             {tab === "BACKTEST"    && <BacktestTab    result={activeResult} />}
             {tab === "MONTE CARLO" && <MonteCarloTab  result={

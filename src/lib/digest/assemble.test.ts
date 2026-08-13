@@ -26,7 +26,6 @@ const inputs: DigestInputs = {
     events: [{ ticker: "3033.HK", type: "flip_buy", confirmed: false, barDate: "2026-06-12", session: "intraday" }] as any,
   },
   kronos: { "TSM": { last_price: 421, forward: { p50: [374.45] } }, "AMD": { last_price: 488, forward: { p50: [240] } } },
-  timesfm: { "TSM": { last_price: 421, price_targets: { p50: [418.5] }, st_persistence: { flip_risk: "low" } } },
 };
 
 describe("assembleDigestPrompt", () => {
