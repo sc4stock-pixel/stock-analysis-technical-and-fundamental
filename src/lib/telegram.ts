@@ -1,6 +1,7 @@
 import { StockAnalysisResult, SepaMetadata, TrendTemplateCriteria } from "@/types";
 import { holidayStatus } from "@/lib/telegram-report";
 import { buildAlertModel, clientFlip } from "@/lib/alert-model";
+import { buildReceipt } from "@/lib/reportReceipt";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -113,6 +114,38 @@ function listTtFailures(tt: TrendTemplateCriteria): string {
 
 type ResultWithSepa = ResultWithFlip & { sepa_metadata?: SepaMetadata };
 
+const ttFor = (r: ResultWithSepa): TrendTemplateCriteria | undefined =>
+  r.sepa_metadata?.trend_template_criteria;
+
+// ============================================================
+// Tier classification — exhaustive by construction
+// ============================================================
+/** The execution-alert tiers. `other` is the catch-all net: anything that matches no
+ *  named tier still gets rendered, so a classification gap shows up in the message
+ *  instead of silently shrinking it. */
+export type Tier =
+  | "freshBuy" | "tactical" | "hold" | "emerging" | "stripped" | "watchlist" | "other";
+
+/** Assigns a result to exactly one tier (first match wins). Exported for the coverage test.
+ *  `freshBullishSyms` = symbols with a bullish ST flip within 2 bars. */
+export function tierOf(r: ResultWithSepa, freshBullishSyms: Set<string>): Tier {
+  if (r.st_direction !== 1) return "watchlist";          // ST↓ — passive watchlist
+
+  const met = ttFor(r)?.criteria_met;
+  // No trend-template data at all: don't guess a structure score in either direction
+  // (the old code defaulted to 0 in the buy tiers and 7 in the weak-structure test,
+  // so these names matched nothing). Surface them instead.
+  if (met === undefined) return "other";
+
+  // ST↑ but structure unconfirmed (<5/7) — signal-agnostic, as before.
+  if (met < 5) return freshBullishSyms.has(r.symbol) ? "emerging" : "stripped";
+
+  // ST↑ with confirmed structure (≥5/7)
+  if (r.signal === "BUY")  return met === 7 ? "freshBuy" : "tactical";
+  if (r.signal === "HOLD") return "hold";                // 5/7, 6/7 and 7/7 all land here
+  return "other";                                        // e.g. SELL while ST↑ and TT≥5
+}
+
 // ============================================================
 // Main: buildTelegramMessage — execution alerts to ALERTS channel
 // ============================================================
@@ -158,39 +191,22 @@ export function buildTelegramMessage(
   );
 
   // ---------- Tier classification ----------
-  const ttFor = (r: ResultWithSepa): TrendTemplateCriteria | undefined =>
-    r.sepa_metadata?.trend_template_criteria;
-
-  const isFreshConfluence = (r: ResultWithSepa) =>
-    r.signal === "BUY" && r.st_direction === 1 && (ttFor(r)?.criteria_met ?? 0) === 7;
-
-  const isTacticalBuy = (r: ResultWithSepa) => {
-    if (r.signal !== "BUY" || r.st_direction !== 1) return false;
-    const met = ttFor(r)?.criteria_met ?? 0;
-    return met >= 5 && met < 7;
+  // ONE first-match classifier, not a set of independent filters. Every valid result
+  // lands in exactly one tier and every tier is rendered, so no asset can be dropped
+  // silently. (Independent predicates left ST↑ + TT≥5/7 + non-BUY names in no bucket
+  // at all from 2026-05-26 until 2026-08-14 — GOOGL and 0939.HK vanished from the scan.)
+  const tiers: Record<Tier, ResultWithSepa[]> = {
+    freshBuy: [], tactical: [], hold: [], emerging: [], stripped: [], watchlist: [], other: [],
   };
+  for (const r of valid) tiers[tierOf(r, freshBullishSyms)].push(r);
 
-  const isConfluenceHold = (r: ResultWithSepa) =>
-    r.signal === "HOLD" && r.st_direction === 1 && (ttFor(r)?.criteria_met ?? 0) === 7;
-
-  // ST↑ but trend-template not yet confirmed (< 5/7)
-  const isWeakStructure = (r: ResultWithSepa) =>
-    r.st_direction === 1 && (ttFor(r)?.criteria_met ?? 7) < 5;
-  // Emerging = weak structure BUT a fresh bullish flip → new breakout, not decay
-  const isEmerging = (r: ResultWithSepa) =>
-    isWeakStructure(r) && freshBullishSyms.has(r.symbol);
-  // Stripped = weak structure WITHOUT a fresh flip → genuine deterioration
-  const isStripped = (r: ResultWithSepa) =>
-    isWeakStructure(r) && !freshBullishSyms.has(r.symbol);
-
-  const isWatchlist = (r: ResultWithSepa) => r.st_direction !== 1;
-
-  const freshBuys  = valid.filter(isFreshConfluence);
-  const tacticals  = valid.filter(isTacticalBuy);
-  const holdsTier  = valid.filter(isConfluenceHold);
-  const emerging   = valid.filter(isEmerging);
-  const stripped   = valid.filter(isStripped);
-  const watchlist  = valid.filter(isWatchlist);
+  const freshBuys  = tiers.freshBuy;
+  const tacticals  = tiers.tactical;
+  const holdsTier  = tiers.hold;
+  const emerging   = tiers.emerging;
+  const stripped   = tiers.stripped;
+  const watchlist  = tiers.watchlist;
+  const other      = tiers.other;
 
   const avgScore = (valid.reduce((s, r) => s + r.score, 0) / valid.length).toFixed(1);
 
@@ -232,6 +248,17 @@ export function buildTelegramMessage(
     const gate = tt?.c5_price_above_sma50 === true ? "✓entry"
       : tt?.c5_price_above_sma50 === false ? "⏳SMA50" : "";
     return `${sym} ${chg} ${px} ${ttStr} ${gate}`.trimEnd();
+  };
+
+  // Catch-all row: shows the signal too, since the whole point is "why is this here?".
+  const fmtOtherRow = (r: ResultWithSepa): string => {
+    const sym = dispSym(r.symbol).padEnd(5);
+    const sig = r.signal.padEnd(4);
+    const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
+    const chg = fmtChg(r.change_pct).padStart(6);
+    const tt  = ttFor(r);
+    const ttTag = tt ? `TT${tt.criteria_met}/7` : "TT—";
+    return `${sym} ${sig} ${px} ${chg} ${ttTag}`;
   };
 
   // Watchlist: HK first then US, inline 3-per-line, " · " separator, .HK stripped, no flag
@@ -310,8 +337,8 @@ export function buildTelegramMessage(
   }
 
   if (holdsTier.length > 0) {
-    lines.push(`\n🔵 <b>CONFLUENCE HOLDS (${holdsTier.length})</b> <i>ST↑ HOLD TT7/7</i>`);
-    lines.push(preBlock(holdsTier.map(fmtBuyRow)));
+    lines.push(`\n🔵 <b>HOLDS (${holdsTier.length})</b> <i>ST↑ HOLD TT≥5/7</i>`);
+    lines.push(preBlock(holdsTier.map(fmtTacticalRow)));
   }
 
   if (emerging.length > 0) {
@@ -330,8 +357,33 @@ export function buildTelegramMessage(
     lines.push(...fmtWatchlistLines(watchlist, 3));
   }
 
+  // UNCLASSIFIED — the net. Should always be empty; if it isn't, the tier rules have a
+  // gap and this makes it visible in the message rather than shrinking the row count.
+  if (other.length > 0) {
+    lines.push(`\n❓ <b>UNCLASSIFIED (${other.length})</b> <i>matched no tier — check the data</i>`);
+    lines.push(preBlock(other.map(fmtOtherRow)));
+  }
+
+  // Receipt — reconciles the assets that went in against the rows actually rendered.
+  // Checked against the composed body, so it also catches a tier that was computed
+  // and then never pushed, or a name lost anywhere else in the compose step.
+  const receipt = buildReceipt(
+    valid.map(r => r.symbol),
+    [
+      { label: "buy",       symbols: freshBuys.map(r => r.symbol) },
+      { label: "tactical",  symbols: tacticals.map(r => r.symbol) },
+      { label: "hold",      symbols: holdsTier.map(r => r.symbol) },
+      { label: "emerging",  symbols: emerging.map(r => r.symbol)  },
+      { label: "stripped",  symbols: stripped.map(r => r.symbol)  },
+      { label: "watch",     symbols: watchlist.map(r => r.symbol) },
+      { label: "unclassified", symbols: other.map(r => r.symbol)  },
+    ],
+    { display: dispSym, renderedText: lines.join("\n") },
+  );
+  lines.push(`\n🧾 <i>${htmlEscape(receipt.text)}</i>`);
+
   // Footer
-  lines.push(`\n📊 <i>Avg ${avgScore}/10 · ${valid.length} assets · HKT ${timeStr}</i>`);
+  lines.push(`📊 <i>Avg ${avgScore}/10 · ${valid.length} assets · HKT ${timeStr}</i>`);
 
   return lines.join("\n");
 }

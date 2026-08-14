@@ -71,3 +71,107 @@ describe("buildTelegramMessage — Act on this block", () => {
     expect(block).not.toContain("3033.HK");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tier coverage — the invariant that GOOGL + 0939.HK violated on 2026-08-14.
+// The tier predicates used to be independent filters with no residual net, so
+// ST↑ + TT≥5/7 + signal≠BUY matched NOTHING and vanished from the message while
+// still being counted in the "N assets" footer.
+// ---------------------------------------------------------------------------
+const TT_KEYS = [
+  "c1_price_above_sma150", "c2_price_above_sma200", "c3_sma150_above_sma200",
+  "c4_sma200_trending_up", "c5_price_above_sma50", "c6_above_25pct_of_low52",
+  "c7_within_25pct_of_high52",
+] as const;
+
+/** Synthetic result: no chart_bars → no ST flip → lands in exactly one tier. */
+function stub(
+  symbol: string,
+  signal: string,
+  st_direction: number,
+  met: number | undefined,
+): StockAnalysisResult {
+  const sepa = met === undefined ? undefined : {
+    trend_template_criteria: {
+      criteria_met: met,
+      ...Object.fromEntries(TT_KEYS.map((k, i) => [k, i < met])),
+    },
+  };
+  return {
+    symbol, exchange: "US", signal, score: 5,
+    current_price: 100, change_pct: 1.0, regime: "UPTREND",
+    st_direction, sepa_metadata: sepa,
+  } as unknown as StockAnalysisResult;
+}
+
+describe("buildTelegramMessage — every valid asset is rendered", () => {
+  const signals = ["BUY", "HOLD", "SELL"];
+  const dirs = [1, -1];
+  const mets: Array<number | undefined> = [0, 4, 5, 6, 7, undefined];
+
+  const cases: StockAnalysisResult[] = [];
+  let n = 0;
+  for (const s of signals) for (const d of dirs) for (const m of mets) {
+    cases.push(stub(`ZZ${String(n++).padStart(2, "0")}`, s, d, m));
+  }
+
+  const msg = buildTelegramMessage(cases, "manual");
+
+  it("covers the full signal x st_direction x criteria_met matrix", () => {
+    expect(cases).toHaveLength(36);
+  });
+
+  it("renders every symbol exactly once — no silent drops, no double-counting", () => {
+    const missing: string[] = [];
+    const duplicated: string[] = [];
+    for (const c of cases) {
+      const hits = msg.split(c.symbol).length - 1;
+      if (hits === 0) missing.push(c.symbol);
+      if (hits > 1) duplicated.push(c.symbol);
+    }
+    expect({ missing, duplicated }).toEqual({ missing: [], duplicated: [] });
+  });
+
+  it("footer asset count matches the number of rendered assets", () => {
+    expect(msg).toContain(`${cases.length} assets`);
+  });
+
+  it("leaves the UNCLASSIFIED net empty for every ST↑ case that has a TT score", () => {
+    // Only the missing-TT rows and SELL-while-ST↑ rows may fall through.
+    const unclassified = cases.filter(c =>
+      msg.includes("UNCLASSIFIED") &&
+      msg.slice(msg.indexOf("UNCLASSIFIED")).includes(c.symbol));
+    for (const c of unclassified) {
+      const sepa = (c as unknown as { sepa_metadata?: { trend_template_criteria?: { criteria_met?: number } } }).sepa_metadata;
+      const met = sepa?.trend_template_criteria?.criteria_met;
+      expect(met === undefined || (c.signal === "SELL" && c.st_direction === 1 && met >= 5)).toBe(true);
+    }
+  });
+});
+
+describe("buildTelegramMessage — ST↑ HOLD with confirmed structure (regression)", () => {
+  // The exact live shapes that went missing: GOOGL 6/7 (✗Price>50SMA) and 0939.HK 6/7.
+  const msg = buildTelegramMessage(
+    [stub("GOOGL", "HOLD", 1, 6), stub("SPY", "BUY", 1, 6), stub("MSFT", "HOLD", 1, 7)],
+    "manual",
+  );
+
+  it("puts a 6/7 HOLD in the HOLDS tier, not nowhere", () => {
+    expect(msg).toContain("HOLDS (2)");
+    const block = msg.slice(msg.indexOf("HOLDS (2)"));
+    expect(block).toContain("GOOGL");
+  });
+
+  it("keeps 7/7 HOLDs in the same merged tier", () => {
+    const block = msg.slice(msg.indexOf("HOLDS (2)"));
+    expect(block).toContain("MSFT");
+  });
+
+  it("still routes a 6/7 BUY to TACTICAL BUYS", () => {
+    expect(msg).toContain("TACTICAL BUYS (1)");
+  });
+
+  it("shows the TT flag on hold rows so the structure gap is visible", () => {
+    expect(msg).toContain("TT6/7");
+  });
+});
