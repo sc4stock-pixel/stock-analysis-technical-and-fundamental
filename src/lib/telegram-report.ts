@@ -5,6 +5,7 @@ import { CONVICTION_PCT } from "@/lib/forecastBox";
 import type { StockAnalysisResult } from "@/types";
 import type { BreadthMovers } from "@/lib/breadth-movers";
 import { spreadSuffix, type BreadthPoint } from "@/lib/breadth-history";
+import { buildReceipt } from "@/lib/reportReceipt";
 
 const dispSymForReport = (s: string) => s.replace(".HK", "");
 
@@ -410,7 +411,19 @@ export function buildEodReport(
   const errorNote = failed.length > 0
     ? ` · ⚠️ ${failed.length} failed: ${failed.map(r => htmlEscape(r.symbol)).join(", ")}`
     : "";
-  lines.push(`\n<i>${valid.length} stocks monitored · HKT ${timeStr}${errorNote}</i>`);
+
+  // Receipt — proves every monitored stock reached a section. See reportReceipt.ts.
+  const receipt = buildReceipt(
+    valid.map(r => r.symbol),
+    [
+      { label: "bullish", symbols: bullish.map(r => r.symbol) },
+      { label: "bearish", symbols: bearish.map(r => r.symbol) },
+    ],
+    { display: dispSymForReport, renderedText: lines.join("\n") },
+  );
+  lines.push(`\n🧾 <i>${htmlEscape(receipt.text)}</i>`);
+
+  lines.push(`<i>${valid.length} stocks monitored · HKT ${timeStr}${errorNote}</i>`);
 
   return lines.join("\n");
 }

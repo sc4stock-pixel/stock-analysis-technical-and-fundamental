@@ -1,6 +1,7 @@
 import { StockAnalysisResult, SepaMetadata, TrendTemplateCriteria } from "@/types";
 import { holidayStatus } from "@/lib/telegram-report";
 import { buildAlertModel, clientFlip } from "@/lib/alert-model";
+import { buildReceipt } from "@/lib/reportReceipt";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -363,8 +364,26 @@ export function buildTelegramMessage(
     lines.push(preBlock(other.map(fmtOtherRow)));
   }
 
+  // Receipt — reconciles the assets that went in against the rows actually rendered.
+  // Checked against the composed body, so it also catches a tier that was computed
+  // and then never pushed, or a name lost anywhere else in the compose step.
+  const receipt = buildReceipt(
+    valid.map(r => r.symbol),
+    [
+      { label: "buy",       symbols: freshBuys.map(r => r.symbol) },
+      { label: "tactical",  symbols: tacticals.map(r => r.symbol) },
+      { label: "hold",      symbols: holdsTier.map(r => r.symbol) },
+      { label: "emerging",  symbols: emerging.map(r => r.symbol)  },
+      { label: "stripped",  symbols: stripped.map(r => r.symbol)  },
+      { label: "watch",     symbols: watchlist.map(r => r.symbol) },
+      { label: "unclassified", symbols: other.map(r => r.symbol)  },
+    ],
+    { display: dispSym, renderedText: lines.join("\n") },
+  );
+  lines.push(`\n🧾 <i>${htmlEscape(receipt.text)}</i>`);
+
   // Footer
-  lines.push(`\n📊 <i>Avg ${avgScore}/10 · ${valid.length} assets · HKT ${timeStr}</i>`);
+  lines.push(`📊 <i>Avg ${avgScore}/10 · ${valid.length} assets · HKT ${timeStr}</i>`);
 
   return lines.join("\n");
 }
