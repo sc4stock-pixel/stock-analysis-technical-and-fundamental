@@ -114,3 +114,50 @@ describe("buildReceipt — scale", () => {
     expect(r.text.length).toBeLessThan(150);
   });
 });
+
+describe("buildReceipt — upstream loss (the 2026-08-15 Morning Brief)", () => {
+  // The report was handed 15 results and accounted for all 15. The portfolio held 16:
+  // 0939.HK was never fetched, so reconciling against the report's own input said "✓".
+  const handed = ["AAPL", "MSFT", "GOOGL"];
+  const portfolio = ["AAPL", "MSFT", "GOOGL", "0939.HK"];
+
+  it("says ✓ without the portfolio of record — the old, useless answer", () => {
+    const r = buildReceipt(handed, [{ label: "bullish", symbols: handed }]);
+    expect(r.ok).toBe(true);
+    expect(r.text).toBe("3 in → 3 bullish = 3 ✓");
+  });
+
+  it("names the never-analysed symbol once anchored to the portfolio", () => {
+    const r = buildReceipt(handed, [{ label: "bullish", symbols: handed }], {
+      expected: portfolio, display: s => s.replace(".HK", ""),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.neverAnalysed).toEqual(["0939.HK"]);
+    expect(r.text).toBe("4 in → 3 bullish = 3 ⚠️ 1 NEVER ANALYSED: 0939");
+  });
+
+  it("counts the portfolio, not the short input, in the 'in' figure", () => {
+    const r = buildReceipt(handed, [{ label: "bullish", symbols: handed }], {
+      expected: portfolio,
+    });
+    expect(r.text.startsWith("4 in →")).toBe(true);
+  });
+
+  it("stays ok when the report received the whole portfolio", () => {
+    const all = [...portfolio];
+    const r = buildReceipt(all, [{ label: "bullish", symbols: all }], { expected: portfolio });
+    expect(r.ok).toBe(true);
+    expect(r.neverAnalysed).toEqual([]);
+    expect(r.text).toContain("= 4 ✓");
+  });
+
+  it("reports an upstream loss and an in-report loss together", () => {
+    const r = buildReceipt(handed, [{ label: "bullish", symbols: ["AAPL"] }], {
+      expected: portfolio, display: s => s.replace(".HK", ""),
+    });
+    expect(r.neverAnalysed).toEqual(["0939.HK"]);
+    expect(r.unaccounted.sort()).toEqual(["GOOGL", "MSFT"]);
+    expect(r.text).toContain("NEVER ANALYSED");
+    expect(r.text).toContain("UNACCOUNTED");
+  });
+});

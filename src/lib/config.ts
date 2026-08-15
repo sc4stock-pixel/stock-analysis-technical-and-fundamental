@@ -9,6 +9,7 @@ export const DEFAULT_CONFIG: AppConfig = {
       { symbol: "1810.HK", name: "Xiaomi", exchange: "HK" },
       { symbol: "0175.HK", name: "Geely", exchange: "HK" },
       { symbol: "3033.HK", name: "HSTech ETF", exchange: "HK" },
+      { symbol: "0939.HK", name: "CCB", exchange: "HK" },
       { symbol: "AAPL", name: "Apple", exchange: "US" },
       { symbol: "MSFT", name: "Microsoft", exchange: "US" },
       { symbol: "GOOGL", name: "Alphabet", exchange: "US" },

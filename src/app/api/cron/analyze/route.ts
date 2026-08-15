@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildTelegramMessage, sendTelegramMessage } from "@/lib/telegram";
 import { DEFAULT_CONFIG } from "@/lib/config";
+import { fetchPortfolioUniverse } from "@/lib/portfolioUniverse";
 import { analyzeStock } from "@/lib/analyze-stock";
 import { detectFlip, type ChartBar } from "@/lib/flip";
 import { classifyValidity, degradedAlertText } from "@/lib/pipeline-health";
@@ -13,7 +14,10 @@ export async function POST(req: NextRequest) {
   if (!secret || secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const portfolio = DEFAULT_CONFIG.stocks.PORTFOLIO;
+  // Universe comes from portfolio.json (single source of truth), not the hardcoded
+  // DEFAULT_CONFIG array — those drifted apart and 0939.HK was never scanned.
+  const universe = await fetchPortfolioUniverse();
+  const portfolio = universe.stocks;
   const results = await Promise.all(portfolio.map(s => analyzeStock(s, DEFAULT_CONFIG)));
 
   const payload = results.map((r: Record<string, unknown>) => {
@@ -44,7 +48,7 @@ export async function POST(req: NextRequest) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const message  = buildTelegramMessage(payload as any, "cron");
+  const message  = buildTelegramMessage(payload as any, "cron", portfolio.map(s => s.symbol));
   const tgResult = await sendTelegramMessage(message, "alerts");
 
   return NextResponse.json({

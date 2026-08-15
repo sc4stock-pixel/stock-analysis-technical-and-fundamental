@@ -142,12 +142,21 @@ describe("buildForecastSection — 5d + skill footer", () => {
   it("reports the regime from the trend-following hit rate", () => {
     const lines = buildForecastSection(ordered, kronosData as any, stubSkill);
     const joined = lines.join("\n");
-    // naive 20d = 57% → trending, and it names the opposite as the flip case
-    expect(joined).toContain("trending");
-    expect(joined).toContain("mean-reverting");
-    expect(joined).toContain("behaving as");
-    // the % columns are framed as the market, not the model
-    expect(joined).toContain("describe the <b>market</b>");
+    // naive 20d = 57% → trending
+    expect(joined).toContain("Currently <b>trending</b>");
+    expect(joined).toContain("57%");
+  });
+
+  // Copy trimmed 2026-08-15 at Steven's request: the "diff is the only column about
+  // Kronos" preamble and the "% columns describe the market" explainer were noise.
+  // The data-driven verdict stays — it is the only line that fires on new information.
+  it("keeps the contrarian-rule verdict but drops the two explainers", () => {
+    const joined = buildForecastSection(ordered, kronosData as any, stubSkill).join("\n");
+    expect(joined).toMatch(/no horizon has cleared it|clears? the contrarian rule/);
+    expect(joined).not.toContain("is the only column about Kronos");
+    expect(joined).not.toContain("describe the <b>market</b>");
+    expect(joined).not.toContain("behaving as");
+    expect(joined).not.toContain("fade the 60-day drift");
   });
 
   it("states no edge when nothing clears, and names the horizon when one does", () => {

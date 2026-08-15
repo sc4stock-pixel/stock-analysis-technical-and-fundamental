@@ -61,10 +61,20 @@ def _load_stocks():
     return _STOCKS_FALLBACK
 
 def _prep(df):
-    """yfinance df -> lowercase OHLCV + tz-naive timestamp Series."""
+    """yfinance df -> lowercase OHLCV + tz-naive timestamp Series, NaN bars dropped."""
     out = df.rename(columns={"Open": "open", "High": "high", "Low": "low",
                              "Close": "close", "Volume": "volume"}).copy()
     out = out[["open", "high", "low", "close", "volume"]]
+    # yfinance returns rows with NaN price/volume for several HK tickers (non-trading
+    # days carried into the index, halted sessions). Kronos rejects ANY NaN in its
+    # input, so those tickers failed outright -- 5 of 7 HK names were missing from
+    # kronos_forecasts.json on 2026-08-14 with "Input DataFrame contains NaN values".
+    # Drop the incomplete bars; never forward-fill, which would invent a price the
+    # market never printed.
+    n_nan = int(out.isna().any(axis=1).sum())
+    if n_nan:
+        print(f"  -> dropped {n_nan} bar(s) with NaN OHLCV")
+        out = out.dropna()
     ts = pd.to_datetime(out.index).tz_localize(None)
     out = out.reset_index(drop=True)
     return out, pd.Series(ts)
@@ -98,10 +108,11 @@ def main():
         print(f"Processing {symbol} ...", flush=True)
         try:
             raw = yf.Ticker(symbol).history(period="2y")
-            if len(raw) < LOOKBACK + PRED_LEN + 5:
-                print(f"  -> insufficient data ({len(raw)}), skipping")
-                continue
             df, ts = _prep(raw)
+            # Check AFTER cleaning -- dropped NaN bars must count against the budget.
+            if len(df) < LOOKBACK + PRED_LEN + 5:
+                print(f"  -> insufficient data ({len(df)} usable bars), skipping")
+                continue
             last_price = round(float(df["close"].iloc[-1]), 2)
             last_date = ts.iloc[-1].strftime("%Y-%m-%d")
 
@@ -134,10 +145,21 @@ def main():
         except Exception as e:
             print(f"  -> error: {e}")
 
+    # Receipt -- reconcile what was asked for against what was produced. The file
+    # recorded "stock_count": 11 for months while portfolio.json held 16 and nobody
+    # compared the two. `missing` is written into the file so downstream surfaces can
+    # see the gap too; the workflow fails on it in a later step (after the commit, so
+    # partial forecasts still ship).
+    expected = _load_stocks()
+    missing = [s for s in expected if s not in processed]
     output["_metadata"]["stock_count"] = len(processed)
+    output["_metadata"]["expected_count"] = len(expected)
+    output["_metadata"]["missing"] = missing
     with open("kronos_forecasts.json", "w") as f:
         json.dump(output, f, indent=2)
     print(f"\nkronos_forecasts.json written ({len(processed)} stocks)")
+    print(f"RECEIPT: {len(expected)} in -> {len(processed)} forecast"
+          + (f" = MISSING {len(missing)}: {', '.join(missing)}" if missing else " = OK"))
 
 if __name__ == "__main__":
     main()

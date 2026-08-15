@@ -37,7 +37,11 @@ jobs:
         run: |
           pip install "numpy<2"
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install einops huggingface_hub safetensors tqdm pandas yfinance
+          # yfinance is PINNED. An unpinned resolve moved CI from 1.3.0 to 1.6.0,
+          # whose HK bars carry NaN rows; Kronos rejects NaN, so 5 of 7 HK tickers
+          # silently vanished from kronos_forecasts.json (2026-08-14). Bump this
+          # deliberately and check the RECEIPT line in the log after doing so.
+          pip install einops huggingface_hub safetensors tqdm pandas "yfinance==1.6.0"
 
       - name: Run predictor
         run: python scripts/kronos_predict.py
@@ -67,3 +71,18 @@ jobs:
             git pull --rebase origin main
             git push
           fi
+
+      # Coverage gate -- LAST step on purpose: every artefact (forecasts + skill json)
+      # ships first, then the run goes red if a ticker silently dropped out. Placing
+      # this earlier would make a short-coverage day also skip the skill update.
+      - name: Verify forecast coverage
+        run: |
+          python - <<'EOF'
+          import json, sys
+          m = json.load(open("kronos_forecasts.json"))["_metadata"]
+          miss = m.get("missing", [])
+          exp  = m.get("expected_count", "?")
+          print(f"RECEIPT: {exp} in -> {m['stock_count']} forecast"
+                + (f" -- MISSING {len(miss)}: {', '.join(miss)}" if miss else " -- OK"))
+          sys.exit(1 if miss else 0)
+          EOF
