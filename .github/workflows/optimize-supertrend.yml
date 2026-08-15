@@ -31,7 +31,20 @@ jobs:
         run: python scripts/optimize_supertrend.py
 
       - name: Rebase on latest main (avoid concurrent-push races)
-        run: git pull --rebase --autostash origin main || true
+        run: |
+          git pull --rebase --autostash origin main || {
+            echo "::warning::rebase onto main did not complete; aborting to leave a clean tree"
+            git rebase --abort || true
+          }
+          # `|| true` on its own masks the failure but not its wreckage: a rebase that
+          # stops (conflicts, or a workflow_dispatch on a branch ahead of main) leaves
+          # .git/rebase-merge behind, and every later git command dies with "already a
+          # rebase-merge directory", exit 128. That is how a branch dispatch of
+          # kronos.yml failed on 2026-08-15 *after* the predictor had succeeded.
+          if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+            echo "::warning::stale rebase state detected; clearing it"
+            git rebase --abort || rm -rf .git/rebase-merge .git/rebase-apply
+          fi
 
       - name: Commit updated cache
         uses: stefanzweifel/git-auto-commit-action@v7
