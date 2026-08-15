@@ -31,6 +31,16 @@ export interface ReceiptOptions {
   /** Display transform applied to symbols in the receipt text, e.g. strip ".HK". */
   display?: (symbol: string) => string;
   /**
+   * The portfolio of record. A symbol listed here that never reached the report at all
+   * is reported as NEVER ANALYSED — a loss that happened *upstream*, before the report
+   * was called, which reconciling against the report's own input cannot see.
+   *
+   * On 2026-08-15 the Morning Brief printed "15 in → 8 bullish · 7 bearish = 15 ✓": a
+   * true statement about the 15 results it was handed, while the portfolio held 16 and
+   * 0939.HK had never been fetched.
+   */
+  expected?: readonly string[];
+  /**
    * The report body as it will actually be sent. When supplied, a symbol that no
    * bucket lost but that does not appear in the text is still reported unaccounted —
    * this is what catches a tier that was computed and then never rendered.
@@ -49,6 +59,8 @@ export interface Receipt {
   duplicated: string[];
   /** In a bucket but not in the universe — invented by the report. */
   unexpected: string[];
+  /** In `opts.expected` but never reached the report at all — an upstream loss. */
+  neverAnalysed: string[];
   /** True when the report accounted for its input exactly once each. */
   ok: boolean;
 }
@@ -93,6 +105,11 @@ export function buildReceipt(
   }
   const unexpected = Array.from(counts.keys()).filter(s => !universeSet.has(s));
 
+  // Upstream loss: in the portfolio of record but never handed to the report.
+  const neverAnalysed = opts.expected
+    ? opts.expected.filter(s => !universeSet.has(s))
+    : [];
+
   const parts = buckets
     .filter(b => b.symbols.length > 0)
     .map(b => `${b.symbols.length} ${b.label}`)
@@ -100,6 +117,8 @@ export function buildReceipt(
   const placed = buckets.reduce((n, b) => n + b.symbols.length, 0);
 
   const flags: string[] = [];
+  if (neverAnalysed.length > 0)
+    flags.push(`⚠️ ${neverAnalysed.length} NEVER ANALYSED: ${nameList(neverAnalysed, display, maxNamed)}`);
   if (unaccounted.length > 0)
     flags.push(`⚠️ ${unaccounted.length} UNACCOUNTED: ${nameList(unaccounted, display, maxNamed)}`);
   if (duplicated.length > 0)
@@ -108,8 +127,13 @@ export function buildReceipt(
     flags.push(`⚠️ ${unexpected.length} UNEXPECTED: ${nameList(unexpected, display, maxNamed)}`);
 
   const ok = flags.length === 0;
+  // "in" counts the portfolio of record when one is supplied, so a short input set is
+  // visible in the arithmetic itself rather than hidden behind a self-consistent total.
+  const inCount = opts.expected
+    ? new Set([...opts.expected, ...Array.from(universeSet)]).size
+    : universeSet.size;
   const sum = `= ${placed}${ok ? " ✓" : ""}`;
-  const text = [`${universeSet.size} in → ${parts || "(none)"}`, sum, ...flags].join(" ");
+  const text = [`${inCount} in → ${parts || "(none)"}`, sum, ...flags].join(" ");
 
-  return { text, unaccounted, duplicated, unexpected, ok };
+  return { text, unaccounted, duplicated, unexpected, neverAnalysed, ok };
 }

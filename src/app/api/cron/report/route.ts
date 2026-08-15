@@ -4,6 +4,7 @@ import { sendTelegramMessage } from "@/lib/telegram";
 import { fetchKronosForecasts } from "@/lib/kronos";
 import { fetchForecastSkill } from "@/lib/forecastSkill";
 import { DEFAULT_CONFIG } from "@/lib/config";
+import { fetchPortfolioUniverse } from "@/lib/portfolioUniverse";
 import { analyzeStock } from "@/lib/analyze-stock";
 import { detectFlip, type ChartBar } from "@/lib/flip";
 import { classifyValidity, degradedAlertText } from "@/lib/pipeline-health";
@@ -83,7 +84,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const market = (new URL(req.url).searchParams.get("market") ?? "hk") as "us" | "hk";
-  const portfolio = DEFAULT_CONFIG.stocks.PORTFOLIO;
+  // Universe comes from portfolio.json (single source of truth), not the hardcoded
+  // DEFAULT_CONFIG array — those drifted apart and 0939.HK was never scanned.
+  const universe = await fetchPortfolioUniverse();
+  const portfolio = universe.stocks;
 
   const results = await Promise.all(
     portfolio.map(s => analyzeStock(s, DEFAULT_CONFIG))
@@ -142,7 +146,10 @@ export async function POST(req: NextRequest) {
 
   // Always send EOD report — no skip gate (unlike alerts which skip on quiet days)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const message  = buildEodReport(payload as any, market, kronosData, skill, movers, history);
+  const message  = buildEodReport(
+    payload as any, market, kronosData, skill, movers, history,
+    portfolio.map(s => s.symbol),
+  );
   const tgResult = await sendTelegramMessage(message, "reports");
 
   // Persist this run's map as the baseline for the next report (only on a valid run —

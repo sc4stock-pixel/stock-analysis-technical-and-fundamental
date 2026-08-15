@@ -152,6 +152,7 @@ export function tierOf(r: ResultWithSepa, freshBullishSyms: Set<string>): Tier {
 export function buildTelegramMessage(
   results: ResultWithFlip[],
   source: "manual" | "cron" | "intraday" = "manual",
+  expectedUniverse?: readonly string[],   // portfolio of record; flags NEVER ANALYSED
 ): string {
   const valid = (results as ResultWithSepa[]).filter(r => r.signal !== "ERROR" && !r.error);
   if (valid.length === 0) return "📊 TA Report — no valid results.";
@@ -378,7 +379,7 @@ export function buildTelegramMessage(
       { label: "watch",     symbols: watchlist.map(r => r.symbol) },
       { label: "unclassified", symbols: other.map(r => r.symbol)  },
     ],
-    { display: dispSym, renderedText: lines.join("\n") },
+    { display: dispSym, renderedText: lines.join("\n"), expected: expectedUniverse },
   );
   lines.push(`\n🧾 <i>${htmlEscape(receipt.text)}</i>`);
 

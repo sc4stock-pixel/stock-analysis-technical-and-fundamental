@@ -248,18 +248,15 @@ export function buildForecastSection(
       const regime = n20
         ? `${n20.rate < 0.45 ? "mean-reverting" : n20.rate > 0.55 ? "trending" : "mixed"}`
         : "unknown";
+      // Regime reminder only — the "% columns describe the market" explainer and the
+      // "diff is the only column about Kronos" preamble were cut as noise (2026-08-15).
       const regimeNote = n20
-        ? ` <b>${regime}</b> (trend-following wins ${pc(n20.rate)} at 20d).`
-          + ` If it turns ${regime === "trending" ? "mean-reverting" : "trending"},`
-          + ` expect both % columns to move together — that is the model behaving as`
-          + ` designed, not breaking.`
+        ? ` Currently <b>${regime}</b> (trend-following wins ${pc(n20.rate)} at 20d).`
         : "";
       result.push(
         `\n📈 <b>Kronos vs a one-line contrarian rule</b>`,
         `<pre>${head}\n${rows.join("\n")}</pre>`,
-        `<i>• <b>diff</b> is the only column about Kronos — ${verdict}. It mean-reverts by`
-        + ` construction, so it tracks "fade the 60-day drift" in any regime.`
-        + `\n• the % columns describe the <b>market</b>, not the model. Currently${regimeNote}</i>`
+        `<i>• ${verdict}.${regimeNote}</i>`
       );
     }
   }
@@ -277,6 +274,7 @@ export function buildEodReport(
   skill?: ForecastSkill | null,
   movers?: BreadthMovers | null,   // SMA50 breadth movers vs the prior report's snapshot
   breadthHistory?: BreadthPoint[] | null, // HK-vs-US spread series, for the spread suffix
+  expectedUniverse?: readonly string[],   // portfolio of record; flags NEVER ANALYSED
 ): string {
   const valid = results.filter(r => !r.error && r.current_price > 0);
 
@@ -419,7 +417,7 @@ export function buildEodReport(
       { label: "bullish", symbols: bullish.map(r => r.symbol) },
       { label: "bearish", symbols: bearish.map(r => r.symbol) },
     ],
-    { display: dispSymForReport, renderedText: lines.join("\n") },
+    { display: dispSymForReport, renderedText: lines.join("\n"), expected: expectedUniverse },
   );
   lines.push(`\n🧾 <i>${htmlEscape(receipt.text)}</i>`);
 
