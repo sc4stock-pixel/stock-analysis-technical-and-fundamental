@@ -141,14 +141,28 @@ def binom_p(k, n, p=0.5):
     return math.erfc(abs(z) / math.sqrt(2))
 
 
-def _stat(hits, n):
-    """Package a single stat bucket for JSON output."""
+def _stat(hits, n, overlap=1):
+    """Package a single stat bucket for JSON output.
+
+    `overlap` is the horizon in business days. A daily forecast series over an
+    h-day horizon reuses h-1 of its h days on every consecutive observation, so
+    those observations are NOT independent and raw n overstates the evidence:
+    n_eff = n / h. Raw hits/n/rate/ci_lo/ci_hi/p are emitted unchanged (display
+    surfaces read them); the *_eff fields are what the verdict gate judges, so a
+    bucket can no longer cross the significance line on sample growth alone.
+    """
     if n == 0:
         return None
     lo, hi = wilson(hits, n)
-    return {"hits": hits, "n": n, "rate": round(hits / n, 4),
+    rate = hits / n
+    n_eff = max(1, round(n / max(1, overlap)))
+    hits_eff = rate * n_eff
+    lo_e, _ = wilson(hits_eff, n_eff)
+    return {"hits": hits, "n": n, "rate": round(rate, 4),
             "ci_lo": round(lo, 4), "ci_hi": round(hi, 4),
-            "p": round(binom_p(hits, n), 4)}
+            "p": round(binom_p(hits, n), 4),
+            "n_eff": n_eff, "ci_lo_eff": round(lo_e, 4),
+            "p_eff": round(binom_p(hits_eff, n_eff), 4)}
 
 
 BUCKET_KEY = {"|f|<2%": "lt2", "2-5%": "2to5", ">5%": "gt5"}
@@ -156,17 +170,33 @@ HORIZON_KEY = {"2d": "2d", "5d": "5d", "10d": "10d", "15d": "15d", "20d": "20d"}
 
 
 def _verdict(gt5, horizons, naive_gt5_rate, naive_horizon_rates=None):
-    """Classify model skill vs naive baseline.
+    """Classify model skill vs the BEST naive baseline, on effective sample size.
 
-    EDGE_BROAD now requires the horizon to beat its OWN naive baseline (drift
-    extrapolation over that same horizon), not the 5d naive rate. Without a
-    same-horizon control, a trending market can make raw drift look skillful.
+    EDGE_BROAD requires the horizon to beat its OWN same-horizon naive control,
+    not the 5d naive rate: without that, a trending market makes raw drift look
+    skillful. Two further corrections (2026-08-18):
+
+    1. The control is max(naive, 1 - naive), not naive. Kronos is structurally
+       CONTRARIAN — same-horizon drift extrapolation scores ~41% at 15/20d — so
+       "beat naive" was nearly free: anything above a coin flip cleared a bar set
+       below one. A model only earns an edge claim by beating the better of
+       FOLLOWING and FADING the drift, which is the real alternative on offer.
+    2. Significance is judged on n_eff / p_eff / ci_lo_eff (see _stat), never on
+       raw n. Overlapping daily forecasts made raw n ~h times too large, and the
+       badge flipped EDGE_BROAD <-> EDGE_HIGH_CONVICTION on sample growth at a
+       flat hit rate (55.3% n=206 p=0.125 -> 57.3% n=213 p=0.034, 2026-08-14).
     """
     nhr = naive_horizon_rates or {}
+
+    def control(rate):
+        """Better of following the drift and fading it — the honest bar."""
+        return None if rate is None else max(rate, 1.0 - rate)
+
     def clears(s, nmin, beat_rate):
-        return (s and s["rate"] > 0.5 and s["p"] < 0.05
-                and s["ci_lo"] > 0.5 and s["n"] >= nmin
-                and (beat_rate is None or s["rate"] > beat_rate))
+        bar = control(beat_rate)
+        return (s and s["rate"] > 0.5 and s["p_eff"] < 0.05
+                and s["ci_lo_eff"] > 0.5 and s["n_eff"] >= nmin
+                and (bar is None or s["rate"] > bar))
     if clears(gt5, 20, naive_gt5_rate):
         return "EDGE_HIGH_CONVICTION"
     if any(clears(horizons.get(h), 30, nhr.get(h)) for h in horizons):
@@ -194,15 +224,17 @@ def _build_skill_dict(all_model_data, naive_data, kronos_snaps):
     }
 
     # Naive gt5 rate for the beat-naive gate
-    naive_gt5 = _stat(*naive_data["conv"][">5%"])
+    naive_gt5 = _stat(*naive_data["conv"][">5%"], overlap=CONVICTION_HORIZON)
     naive_gt5_rate = naive_gt5["rate"] if naive_gt5 else None
 
     # NAIVE entry — per-horizon baseline (falls back to h5 for 5d if horizons absent)
     nh_raw = naive_data.get("horizons") or {"5d": naive_data["h5"]}
-    naive_horizons = {HORIZON_KEY[h]: _stat(*nh_raw[h]) for h in nh_raw}
+    naive_horizons = {HORIZON_KEY[h]: _stat(*nh_raw[h], overlap=HORIZONS[h])
+                      for h in nh_raw}
     naive_horizon_rates = {k: (s["rate"] if s else None)
                            for k, s in naive_horizons.items()}
-    naive_buckets = {BUCKET_KEY[b]: _stat(*naive_data["conv"][b])
+    naive_buckets = {BUCKET_KEY[b]: _stat(*naive_data["conv"][b],
+                                         overlap=CONVICTION_HORIZON)
                      for b in naive_data["conv"]}
     result["NAIVE"] = {
         "verdict": "BASELINE",
@@ -216,9 +248,10 @@ def _build_skill_dict(all_model_data, naive_data, kronos_snaps):
         if not md:
             result[model] = {"verdict": "INSUFFICIENT", "horizons": {}, "conviction_5d": {}}
             continue
-        horizons = {HORIZON_KEY[h]: _stat(md["stats"][h][0], md["stats"][h][1])
+        horizons = {HORIZON_KEY[h]: _stat(md["stats"][h][0], md["stats"][h][1],
+                                          overlap=HORIZONS[h])
                     for h in md["stats"]}
-        buckets = {BUCKET_KEY[b]: _stat(*md["conv"][b])
+        buckets = {BUCKET_KEY[b]: _stat(*md["conv"][b], overlap=CONVICTION_HORIZON)
                    for b in md["conv"]}
         gt5 = buckets.get("gt5")
         # Naive gates apply to KRONOS (naive pairs are Kronos's dates); TIMESFM is
@@ -385,9 +418,12 @@ def audit(emit_skill_json=None):
     print()
     print("KEEP/KILL (probation): a model earns KEEP only if some horizon OR the")
     print(">5% conviction bucket shows >50% with p<0.05 AND CI lower-bound >50%,")
-    print("beating the SAME-horizon naive baseline.")
-    print("Caveat: daily forecasts overlap, so effective n << reported n — treat a")
-    print("lone significant bucket as a hypothesis, weight by breadth across tickers.")
+    print("beating max(naive, 1-naive) at the SAME horizon — the better of following")
+    print("and fading the drift. Plain 'beat naive' is not a bar: naive runs ~41% at")
+    print("15/20d, so anything above a coin flip cleared it.")
+    print("Overlap is now priced in: daily forecasts of an h-day horizon share h-1")
+    print("days, so the gate uses n_eff = n/h (p_eff / ci_lo_eff), not raw n. Still")
+    print("weight a lone significant bucket by breadth across tickers.")
 
     # --- Emit forecast_skill.json if requested ---
     if emit_skill_json:
