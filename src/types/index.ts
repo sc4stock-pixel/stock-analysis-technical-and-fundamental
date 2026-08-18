@@ -463,6 +463,11 @@ export type ForecastVerdict =
 
 export interface SkillStat {
   hits: number; n: number; rate: number; ci_lo: number; ci_hi: number; p: number;
+  /** Overlap-adjusted twins of n / ci_lo / p. Daily forecasts of an h-day horizon
+   *  share h-1 days, so n_eff = n/h. The verdict gate judges ONLY these; display
+   *  surfaces keep reading the raw fields above. Optional: snapshots written
+   *  before 2026-08-18 lack them. */
+  n_eff?: number; ci_lo_eff?: number; p_eff?: number;
 }
 export interface ModelSkill {
   horizons: Record<string, SkillStat | null>;
