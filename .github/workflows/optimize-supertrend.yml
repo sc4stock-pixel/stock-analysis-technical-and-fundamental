@@ -2,15 +2,41 @@ name: Optimize SuperTrend Parameters
 
 on:
   schedule:
-    # First Sunday of each month at 02:00 UTC
-    - cron: "0 2 1-7 * 0"
+    # Every Sunday 02:00 UTC; the `gate` job below narrows this to the FIRST Sunday
+    # of the month. The old expression `0 2 1-7 * 0` READ like "first Sunday", but cron
+    # ORs day-of-month with day-of-week when both are restricted — so it actually fired
+    # on days 1-7 AND every Sunday (~10 runs/month, e.g. Aug 2,3,4,5,6,7,9,16).
+    - cron: "0 2 * * 0"
   workflow_dispatch:   # manual trigger via UI or "⚡ OPTIMIZE ST" button
 
 permissions:
   contents: write
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          dom=$(date -u +%-d)
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "manual dispatch — running"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$dom" -le 7 ]; then
+            echo "first Sunday of the month (day $dom) — running"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Sunday but day $dom > 7 — not the first Sunday, skipping"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   optimize:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +53,14 @@ jobs:
       - name: Install dependencies
         run: pip install yfinance pandas numpy
 
+      # continue-on-error so a per-symbol failure does NOT abort the job before the
+      # commit step. On 2026-08-16 one flaky fetch (0700.HK, "database is locked")
+      # exited 1 after 15/16 symbols had optimized cleanly, and every one of those
+      # good results was discarded uncommitted. The failure is re-raised at the end
+      # of the job instead, so the run still goes red — after the params are safe.
       - name: Run SuperTrend optimizer
+        id: optimize
+        continue-on-error: true
         run: python scripts/optimize_supertrend.py
 
       - name: Rebase on latest main (avoid concurrent-push races)
@@ -51,3 +84,11 @@ jobs:
         with:
           commit_message: "chore: update SuperTrend parameter cache"
           file_pattern: "st_params.json"
+
+      - name: Surface optimizer failure (after good params are committed)
+        if: steps.optimize.outcome == 'failure'
+        run: |
+          echo "::error::optimize_supertrend.py exited non-zero — one or more symbols failed."
+          echo "::error::Params for the symbols that succeeded HAVE been committed; failed"
+          echo "::error::symbols kept their previous values. See the optimizer step log."
+          exit 1
