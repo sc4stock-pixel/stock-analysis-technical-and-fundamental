@@ -19,6 +19,7 @@ Dependencies: yfinance pandas numpy   (no local package imports)
 import json
 import math
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from pathlib import Path
@@ -92,6 +93,12 @@ DEFAULT_MULTIPLIER = 3.0
 
 # Output: repo root/st_params.json  (script lives in repo root/scripts/)
 OUTPUT_PATH = Path(__file__).parent.parent / "st_params.json"
+
+# yfinance keeps a shared SQLite timezone cache; with concurrent workers it can raise
+# "database is locked" — a transient race, not a data problem. On 2026-08-16 that flake
+# hit one symbol (0700.HK) and cost the entire run. Retry before giving up on a symbol.
+FETCH_ATTEMPTS = 3
+FETCH_BACKOFF  = 2.0      # seconds before the 1st retry; doubles each attempt
 
 
 # ─── Scheduling ───────────────────────────────────────────────────────────────
@@ -438,16 +445,32 @@ def _apply_wf_gate(best_params: dict, oos: dict, rerun_backtest, symbol: str = "
     return out
 
 
-def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
+def _fetch_history(symbol: str):
+    """Fetch daily bars, retrying transient yfinance errors (see FETCH_ATTEMPTS)."""
     import yfinance as yf  # deferred: keeps module importable for unit tests
 
+    last_err: Exception | None = None
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            return yf.Ticker(symbol).history(
+                period=f"{int(LOOKBACK_DAYS * 1.5)}d", auto_adjust=True
+            )
+        except Exception as e:                      # noqa: BLE001 — retry anything transient
+            last_err = e
+            if attempt < FETCH_ATTEMPTS:
+                delay = FETCH_BACKOFF * (2 ** (attempt - 1))
+                print(f"    \u21bb  {symbol}: fetch attempt {attempt}/{FETCH_ATTEMPTS} failed "
+                      f"({e}); retrying in {delay:.0f}s", flush=True)
+                time.sleep(delay)
+    raise last_err  # type: ignore[misc]
+
+
+def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
     symbol = stock["symbol"]
     print(f"  Optimizing {symbol} ({stock['name']})...", flush=True)
 
     try:
-        df = yf.Ticker(symbol).history(
-            period=f"{int(LOOKBACK_DAYS * 1.5)}d", auto_adjust=True
-        )
+        df = _fetch_history(symbol)
         if df.empty or len(df) < 100:
             print(f"    ⚠  {symbol}: insufficient data ({len(df)} bars)")
             return symbol, None
@@ -484,11 +507,15 @@ def main() -> None:
     today    = date.today()
     next_opt = _next_first_sunday(today)
 
-    # Preserve optimization_count across monthly runs
+    # Preserve optimization_count — and the previous per-symbol params, which are the
+    # carry-forward source when a symbol fails this run (see below).
     opt_count = 0
+    prev_stocks: dict = {}
     if OUTPUT_PATH.exists():
         try:
-            opt_count = json.loads(OUTPUT_PATH.read_text()).get("optimization_count", 0)
+            prev        = json.loads(OUTPUT_PATH.read_text())
+            opt_count   = prev.get("optimization_count", 0)
+            prev_stocks = prev.get("stocks") or {}
         except Exception:
             pass
 
@@ -510,6 +537,15 @@ def main() -> None:
             else:
                 errors.append(symbol)
 
+    # Carry forward the last good params for any symbol that failed this run.
+    # Writing bare `stocks_out` would DROP the failed ticker from st_params.json, and
+    # every consumer silently falls back to the (14, 3) default for a missing symbol —
+    # a wrong-params-without-warning failure, worse than slightly stale params.
+    carried = [s for s in errors if s in prev_stocks]
+    for symbol in carried:
+        stocks_out[symbol] = prev_stocks[symbol]
+    dropped = [s for s in errors if s not in stocks_out]
+
     output = {
         "last_optimized":     today.isoformat(),
         "next_optimization":  next_opt.isoformat(),
@@ -521,9 +557,15 @@ def main() -> None:
     # silently nukes every consumer's params. Sanitize non-finite floats → null.
     OUTPUT_PATH.write_text(json.dumps(_json_safe(output), indent=2))
 
-    print(f"\n✅ Wrote {len(stocks_out)}/{len(PORTFOLIO)} stocks → {OUTPUT_PATH}")
+    fresh = len(stocks_out) - len(carried)
+    print(f"\n✅ Wrote {len(stocks_out)}/{len(PORTFOLIO)} stocks → {OUTPUT_PATH}"
+          f"  ({fresh} optimized, {len(carried)} carried forward)")
     if errors:
         print(f"⚠  Failed symbols: {errors}")
+    if carried:
+        print(f"   ↩  Kept previous params for: {carried}")
+    if dropped:
+        print(f"❌ MISSING from st_params.json (failed with no previous params): {dropped}")
     print(f"   Next optimization scheduled: {next_opt.isoformat()}")
 
     if errors:
