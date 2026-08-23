@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-16T05:24:49Z",
+  "updated": "2026-08-23T05:25:58Z",
   "stocks": [
     "AAPL",
     "MSFT",
@@ -394,6 +394,10 @@
       "frequency": "Q",
       "quarters": [
         {
+          "fiscalDateEnding": "2026-06-30",
+          "reportedEPS": "0.56"
+        },
+        {
           "fiscalDateEnding": "2026-03-31",
           "reportedEPS": "1.37"
         },
@@ -452,10 +456,6 @@
         {
           "fiscalDateEnding": "2022-09-30",
           "reportedEPS": "0.1"
-        },
-        {
-          "fiscalDateEnding": "2022-06-30",
-          "reportedEPS": "1.07"
         }
       ]
     },
@@ -601,6 +601,10 @@
       "frequency": "Q",
       "quarters": [
         {
+          "fiscalDateEnding": "2026-06-30",
+          "reportedEPS": "0.37"
+        },
+        {
           "fiscalDateEnding": "2026-03-31",
           "reportedEPS": "0.18"
         },
@@ -659,10 +663,6 @@
         {
           "fiscalDateEnding": "2022-09-30",
           "reportedEPS": "-0.03"
-        },
-        {
-          "fiscalDateEnding": "2022-06-30",
-          "reportedEPS": "0.03"
         }
       ]
     },
@@ -670,12 +670,16 @@
       "frequency": "H",
       "quarters": [
         {
+          "fiscalDateEnding": "2026-06-30",
+          "reportedEPS": "0.8413"
+        },
+        {
           "fiscalDateEnding": "2025-12-31",
-          "reportedEPS": "0.7482"
+          "reportedEPS": "0.7515"
         },
         {
           "fiscalDateEnding": "2025-06-30",
-          "reportedEPS": "0.9218"
+          "reportedEPS": "0.9185"
         },
         {
           "fiscalDateEnding": "2024-12-31",
@@ -724,14 +728,6 @@
         {
           "fiscalDateEnding": "2019-06-30",
           "reportedEPS": "0.4439"
-        },
-        {
-          "fiscalDateEnding": "2018-12-31",
-          "reportedEPS": "0.6567"
-        },
-        {
-          "fiscalDateEnding": "2018-06-30",
-          "reportedEPS": "0.7433"
         }
       ]
     },
