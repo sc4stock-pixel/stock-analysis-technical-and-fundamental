@@ -2,8 +2,8 @@
   "_metadata": {
     "conviction_pct": 5.0,
     "drift_window": 60,
-    "generated_at_hk": "2026-08-23 07:01 HKT",
-    "history_days": 88,
+    "generated_at_hk": "2026-08-24 07:03 HKT",
+    "history_days": 89,
     "match_tol_days": 4
   },
   "NAIVE": {
