@@ -13,15 +13,18 @@ interface NavApiResponse {
 const ACCENT = "#00d4ff";
 const MUTED  = "#4a6080";
 const BH     = "#8a6d3b"; // muted gold — universe buy-and-hold
+const ASYM   = "#00ff88"; // green — asymmetric 100/40 line
 
-// Compact inline SVG line chart: nav (accent) + benchNav (muted) + bhNav (muted gold).
-// benchNav/bhNav segments are simply absent where null (line stops).
+// Compact inline SVG line chart: nav (accent) + benchNav (muted) + bhNav (muted
+// gold) + asymNav (green). Segments are simply absent where null (line stops) —
+// the asym line starts partway along, on the day the worker began writing it.
 function NavChart({ series }: { series: RegionStats["navSeries"] }) {
   const W = 260, H = 64, PAD = 3;
   const navVals   = series.map(p => p.nav);
   const benchVals = series.filter(p => p.benchNav !== null).map(p => p.benchNav as number);
   const bhVals    = series.filter(p => p.bhNav !== null).map(p => p.bhNav as number);
-  const all = [...navVals, ...benchVals, ...bhVals];
+  const asymVals  = series.filter(p => p.asymNav !== null).map(p => p.asymNav as number);
+  const all = [...navVals, ...benchVals, ...bhVals, ...asymVals];
   const min = Math.min(...all), max = Math.max(...all);
   const span = max - min || 1;
   const x = (i: number) => PAD + (i / (series.length - 1)) * (W - 2 * PAD);
@@ -36,7 +39,12 @@ function NavChart({ series }: { series: RegionStats["navSeries"] }) {
     .map((p, i) => (p.bhNav !== null ? `${x(i).toFixed(1)},${y(p.bhNav).toFixed(1)}` : null))
     .filter((p): p is string => p !== null)
     .join(" ");
+  const asymPts = series
+    .map((p, i) => (p.asymNav !== null ? `${x(i).toFixed(1)},${y(p.asymNav).toFixed(1)}` : null))
+    .filter((p): p is string => p !== null)
+    .join(" ");
   const hasBhLine = bhVals.length >= 2;
+  const hasAsymLine = asymVals.length >= 2;
 
   return (
     <>
@@ -47,6 +55,9 @@ function NavChart({ series }: { series: RegionStats["navSeries"] }) {
         {hasBhLine && (
           <polyline points={bhPts} fill="none" stroke={BH} strokeWidth={1} opacity={0.8} />
         )}
+        {hasAsymLine && (
+          <polyline points={asymPts} fill="none" stroke={ASYM} strokeWidth={1.5} />
+        )}
         <polyline points={navPts} fill="none" stroke={ACCENT} strokeWidth={1.5} />
       </svg>
       <div className="text-[0.66rem] font-mono text-[#4a6080] mt-0.5">
@@ -54,6 +65,11 @@ function NavChart({ series }: { series: RegionStats["navSeries"] }) {
         {hasBhLine && (
           <>
             {" "}· <span style={{ color: BH }}>—</span> buy&amp;hold
+          </>
+        )}
+        {hasAsymLine && (
+          <>
+            {" "}· <span style={{ color: ASYM }}>—</span> asym 100/40
           </>
         )}
       </div>
@@ -106,6 +122,22 @@ function RegionBlock({ region, stats }: { region: "US" | "HK"; stats: RegionStat
           color={
             stats.bhTotalReturnPct !== null
               ? stats.bhTotalReturnPct >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"
+              : undefined
+          }
+        />
+        {/* Asymmetric 100/40 line — shown once it has data. Its day count is
+            far behind `observations` (it started 2026-08-28), so label the
+            sample size rather than inviting a like-for-like read of the two. */}
+        <StatChip
+          label="Asym"
+          value={
+            stats.asymTotalReturnPct !== null
+              ? `${stats.asymTotalReturnPct >= 0 ? "+" : ""}${stats.asymTotalReturnPct.toFixed(1)}% (${stats.asymObservations}d)`
+              : "starting"
+          }
+          color={
+            stats.asymTotalReturnPct !== null
+              ? stats.asymTotalReturnPct >= 0 ? "text-[#00ff88]" : "text-[#ff4757]"
               : undefined
           }
         />
