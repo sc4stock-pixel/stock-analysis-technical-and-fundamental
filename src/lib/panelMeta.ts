@@ -28,6 +28,8 @@ export const PANEL_META: PanelMeta[] = [
       "🚀 Emerging Uptrends — ST↑ + TT<5 with a fresh bullish flip (≤2 bars)",
       "⚠️ Stripped from Buys — ST↑ + TT<5, no fresh flip (deterioration)",
       "⚪ Watchlist — ST↓",
+      "100% / 40% chip — asymmetric TARGET WEIGHT (exposure, not entry state): 100% = full size (in a long, OR out but price above its own 200-day SMA); 40% = floor (out AND below the 200-day). An ST exit on a name still above its 200-day = NO ACTION — hold 100%.",
+      "Exit alerts phrase the weight as the action: TRIM to 40% vs HOLD 100% (above 200D). The book is never fully out of a name — 40% is the minimum.",
       "Regime codes: STR↑ · HV-STR↑ · WK→STR · STR'ng · EXH↑",
     ],
   },

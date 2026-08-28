@@ -1,5 +1,6 @@
 import type { WorkerState } from "@/types/worker-state";
 import { posStateOf } from "@/lib/alert-model";
+import { targetWeightOfWorker } from "@/lib/targetWeight";
 import { DIGEST_EDITORIAL_SPEC } from "./editorialSpec";
 import { pct5d, pct20d, downsideToStopPct, distanceToFlipPct, eventCount, isDefaultParams, fmtPct, fmtKronos } from "./metrics";
 
@@ -13,6 +14,7 @@ const COLUMN_LEGEND = [
   "COLUMN LEGEND — read before interpreting:",
   "- dir: RAW SuperTrend direction (trend telemetry). up alone is NOT a long — the strategy is SuperTrend + 50d SMA: a long is active only when gate=✓. down = exited / no long.",
   "- pos: the strategy's POSITION state. ✓ = IN a long (entered via the SMA50 gate, holds until an ST flip-down even if price has since dipped under SMA50); p = entry signal on the latest bar, fill at next open; ⏳ = dir=up but never entered (below SMA50 — watching for reclaim, NOT long); blank for down names.",
+  "- wgt: TARGET WEIGHT under the asymmetric 100/40 sizing rule (exposure layer, NOT entry state): 100% = full size (in a long, OR out but Close > own 200d SMA); 40% = floor (out AND below the 200d). An exit alert on a name showing 100% means NO ACTION — the 200d leg holds it.",
   "- TT: Trend-Template score 0-7 (structural/fundamental quality; 6-7 = elite).",
   "- px: latest price.",
   "- stop: the live SuperTrend line = the level a close must cross to flip dir (resistance when dir=down, support when dir=up). For an open long it is the EXIT; for a down name it is the BUY / flip-up trigger.",
@@ -48,7 +50,7 @@ function buildResearchIdeasBlock(state: WorkerState): string[] {
 }
 
 export function assembleDigestPrompt({ state, kronos }: DigestInputs): string {
-  const header = "TICK       dir  pos  TT   px       stop     risk%  flip%  K5d    K20d   #ev";
+  const header = "TICK       dir  pos  wgt   TT   px       stop     risk%  flip%  K5d    K20d   #ev";
   const rows: string[] = [];
   for (const [sym, t] of Object.entries(state.tickers)) {
     const kr = kronos[sym] as KronosRawEntry | undefined;
@@ -58,6 +60,8 @@ export function assembleDigestPrompt({ state, kronos }: DigestInputs): string {
       pad(sym, 10) + " " +
       pad(t.dir, 4) + " " +
       pad({ long: "✓", pending: "p", waiting: "⏳" }[posStateOf(t) as string] ?? (t.dir === "up" ? "?" : ""), 4) + " " +
+      // Target weight (asymmetric 100/40 exposure layer — targetWeight.ts)
+      pad(`${targetWeightOfWorker(t)?.weight ?? "—"}%`, 5) + " " +
       pad(`${t.score}/7`, 4) + " " +
       pad(t.price.toFixed(2), 8) + " " +
       pad(t.stop.toFixed(2), 8) + " " +

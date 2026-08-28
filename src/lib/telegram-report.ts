@@ -345,8 +345,13 @@ export function buildEodReport(
         : "🟢 LONG";
       const when = r.barsSince === 0 ? "today" : `${r.barsSince}d ago`;
       const tt = r.ttFlag ? ` ${htmlEscape(r.ttFlag.replace("→", "->"))}` : "";
-      lines.push(`  • <b>${htmlEscape(dispSymForReport(r.symbol))}</b> ${r.change}${tt} (${when}) — ${tag}`);
+      // Asymmetric 100/40 target weight (exposure layer — targetWeight.ts)
+      const w = r.targetWeight != null ? ` · tgt ${r.targetWeight}%` : "";
+      lines.push(`  • <b>${htmlEscape(dispSymForReport(r.symbol))}</b> ${r.change}${tt} (${when}) — ${tag}${w}`);
     });
+    // Legend for the asymmetric 100/40 sizing (targetWeight.ts): shown once,
+    // only when the block is present.
+    lines.push(`  <i>tgt = asymmetric target weight: 100% in position or above own 200D SMA · 40% floor otherwise — an exit above the 200D is HOLD, not sell</i>`);
   }
 
   // ST PROXIMITY — low-priority warnings using cached ST params

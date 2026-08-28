@@ -2,6 +2,7 @@ import { StockAnalysisResult, SepaMetadata, TrendTemplateCriteria } from "@/type
 import { holidayStatus } from "@/lib/telegram-report";
 import { buildAlertModel, clientFlip } from "@/lib/alert-model";
 import { buildReceipt } from "@/lib/reportReceipt";
+import { targetWeightOfResult, exitActionLabel, weightTag } from "@/lib/targetWeight";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -289,9 +290,15 @@ export function buildTelegramMessage(
         : r.posState === "pending" ? "ENTRY" : "LONG";
       const when = r.barsSince === 0 ? "today" : `${r.barsSince}d`;
       const tt = r.ttFlag ? ` ${r.ttFlag.replace("→", "->")}` : "";  // defensive; ttFlag is empty on this surface
-      return `${sym} ${r.change}${tt} (${when}) [${tag}]`;
+      // Target weight (exposure layer, targetWeight.ts) — shown beside the state
+      // tag; NEVER the source of the tag itself (vocabulary contract).
+      const src = valid.find(v => v.symbol === r.symbol);
+      const w = src ? ` ${weightTag(targetWeightOfResult(src))}` : "";
+      return `${sym} ${r.change}${tt} (${when}) [${tag}${w}]`;
     });
-    actBlock = `\n⚡ <b>ACT ON THIS</b>\n${preBlock(rows)}`;
+    // One-line legend for the asymmetric 100/40 weight in the state tags.
+    actBlock = `\n⚡ <b>ACT ON THIS</b>\n${preBlock(rows)}`
+      + `<i>100%/40% = target weight — 100% in position or above own 200D; 40% floor otherwise</i>`;
   }
 
   // ---------- Compose message ----------
@@ -321,7 +328,11 @@ export function buildTelegramMessage(
         : "—";
 
       const detail = htmlEscape(`[ST Stop: ${stopStr} | Violated by ${violatedStr} | Close: ${closeStr}]`);
-      lines.push(`  • 🛑 <b>${htmlEscape(dispSym(r.symbol))}</b>: ST FLIP → 📉 BEARISH (${when})`);
+      // Asymmetric 100/40 sizing (targetWeight.ts): an ST flip-down is a TRIM
+      // to the 40% floor — or NO ACTION when the name still holds its 200-day.
+      // Layer: exposure mapping on top of the layer-2 exit event.
+      const act = exitActionLabel(targetWeightOfResult(r));
+      lines.push(`  • 🛑 <b>${htmlEscape(dispSym(r.symbol))}</b>: ST FLIP → 📉 BEARISH (${when}) → <b>${htmlEscape(act)}</b>`);
       lines.push(`    ${detail}`);
     });
   }
