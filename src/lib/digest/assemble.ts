@@ -14,7 +14,7 @@ const COLUMN_LEGEND = [
   "COLUMN LEGEND — read before interpreting:",
   "- dir: RAW SuperTrend direction (trend telemetry). up alone is NOT a long — the strategy is SuperTrend + 50d SMA: a long is active only when gate=✓. down = exited / no long.",
   "- pos: the strategy's POSITION state. ✓ = IN a long (entered via the SMA50 gate, holds until an ST flip-down even if price has since dipped under SMA50); p = entry signal on the latest bar, fill at next open; ⏳ = dir=up but never entered (below SMA50 — watching for reclaim, NOT long); blank for down names.",
-  "- wgt: TARGET WEIGHT under the asymmetric 100/40 sizing rule (exposure layer, NOT entry state): 100% = full size (in a long, OR out but Close > own 200d SMA); 40% = floor (out AND below the 200d). An exit alert on a name showing 100% means NO ACTION — the 200d leg holds it.",
+  "- wgt: TARGET WEIGHT under the asymmetric sizing rule (exposure layer, NOT entry state), in three tiers: 100% = in an ST long; 70% = ST bearish but Close still above its own 200d SMA (trim tier); 40% = ST bearish AND below the 200d (floor). The book is never flat.",
   "- TT: Trend-Template score 0-7 (structural/fundamental quality; 6-7 = elite).",
   "- px: latest price.",
   "- stop: the live SuperTrend line = the level a close must cross to flip dir (resistance when dir=down, support when dir=up). For an open long it is the EXIT; for a down name it is the BUY / flip-up trigger.",

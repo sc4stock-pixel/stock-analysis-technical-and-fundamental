@@ -1,6 +1,6 @@
 "use client";
 import { StockAnalysisResult } from "@/types";
-import { targetWeightOfResult } from "@/lib/targetWeight";
+import { targetWeightOfResult, weightTone } from "@/lib/targetWeight";
 import { LineChart, Line, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
 
 interface Props { result: StockAnalysisResult; }
@@ -55,6 +55,7 @@ export default function OverviewTab({ result }: Props) {
   // Asymmetric 100/40 exposure (targetWeight.ts). Exposure layer only — it does
   // not change the ST BULLISH/BEARISH stance rendered below.
   const tgtWeight = targetWeightOfResult(result).weight;
+  const tgtTone = weightTone(tgtWeight);
   const optParams = result.st_opt_params;
 
   // Formatted label for optimal params
@@ -124,7 +125,7 @@ export default function OverviewTab({ result }: Props) {
                     <span className="text-[#4a6080]">P&L: <span className={stOpenRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>{stOpenRet >= 0 ? "+" : ""}{stOpenRet.toFixed(1)}%</span></span>
                   )}
                   {stDir !== 1 && <span className="text-[#ff4757]/70">wait for flip</span>}
-                  <span className="text-[#4a6080]">wt: <span className={tgtWeight === 100 ? "text-[#00d4ff]" : "text-[#ffa502]"}>{tgtWeight}%</span></span>
+                  <span className="text-[#4a6080]">wt: <span className={tgtTone === "full" ? "text-[#00d4ff]" : tgtTone === "trim" ? "text-[#7dd3fc]" : "text-[#ffa502]"}>{tgtWeight}%</span></span>
                 </div>
 
                 {/* ── ST Status strip with optimized params ── */}
@@ -143,12 +144,12 @@ export default function OverviewTab({ result }: Props) {
                   )}
                   {/* Asymmetric target weight — held size, regardless of stance */}
                   <span className={`border rounded px-1 py-0.5 text-[0.55rem] font-bold ${
-                      tgtWeight === 100
-                        ? "text-[#00d4ff] border-[#00d4ff]/35 bg-[#00d4ff]/10"
-                        : "text-[#ffa502] border-[#ffa502]/40 bg-[#ffa502]/10"}`}
-                    title={tgtWeight === 100
-                      ? "Held at 100% — in an ST long, or price is above its own 200-day SMA"
-                      : "Held at the 40% floor — no ST long AND below its own 200-day SMA"}>
+                      tgtTone === "full" ? "text-[#00d4ff] border-[#00d4ff]/35 bg-[#00d4ff]/10"
+                      : tgtTone === "trim" ? "text-[#7dd3fc] border-[#7dd3fc]/35 bg-[#7dd3fc]/10"
+                      : "text-[#ffa502] border-[#ffa502]/40 bg-[#ffa502]/10"}`}
+                    title={tgtTone === "full" ? "100% — in an ST long"
+                      : tgtTone === "trim" ? "70% trim — ST bearish, still above its own 200-day SMA"
+                      : "40% floor — ST bearish AND below its own 200-day SMA"}>
                     wt {tgtWeight}%
                   </span>
                   {/* Optimized params badge */}

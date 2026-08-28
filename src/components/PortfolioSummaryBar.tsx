@@ -1,6 +1,6 @@
 "use client";
 import { useState, useCallback } from "react";
-import { targetWeightOfResult } from "@/lib/targetWeight";
+import { targetWeightOfResult, weightTone } from "@/lib/targetWeight";
 import { StockAnalysisResult, KronosForecasts } from "@/types";
 import { kronosRow, naiveRow, convictionFlags, ForecastRowData } from "@/lib/forecastBox";
 import InfoTooltip from "@/components/InfoTooltip";
@@ -299,13 +299,15 @@ export default function PortfolioSummaryBar({ results, onRowClick, kronosData }:
                   <td className="px-2 py-1.5 text-center font-mono text-xs whitespace-nowrap">
                     {(() => {
                       const w = targetWeightOfResult(r).weight;
+                      const tone = weightTone(w);
+                      const cls = tone === "full" ? "text-[#00d4ff] border-[#00d4ff]/35 bg-[#00d4ff]/10"
+                        : tone === "trim" ? "text-[#7dd3fc] border-[#7dd3fc]/35 bg-[#7dd3fc]/10"
+                        : "text-[#ffa502] border-[#ffa502]/40 bg-[#ffa502]/10";
+                      const tip = tone === "full" ? "100% — in an ST long"
+                        : tone === "trim" ? "70% trim — ST bearish, still above its own 200-day SMA"
+                        : "40% floor — ST bearish AND below its own 200-day SMA";
                       return (
-                        <span className={`font-bold px-1 py-0.5 rounded border text-[0.65rem] ${
-                            w === 100 ? "text-[#00d4ff] border-[#00d4ff]/35 bg-[#00d4ff]/10"
-                                      : "text-[#ffa502] border-[#ffa502]/40 bg-[#ffa502]/10"}`}
-                          title={w === 100
-                            ? "Held at 100% — in an ST long, or above its own 200-day SMA"
-                            : "Held at the 40% floor — no ST long AND below its own 200-day SMA"}>
+                        <span className={`font-bold px-1 py-0.5 rounded border text-[0.65rem] ${cls}`} title={tip}>
                           {w}%
                         </span>
                       );
