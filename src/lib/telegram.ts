@@ -199,8 +199,10 @@ export function buildTelegramMessage(
   // ---------- Row renderers ----------
   // Monospace rows (no <b>; escaping done by preBlock). .HK stripped throughout.
   const pctVs200 = (r: ResultWithSepa): string => {
+    // Prefer the scalar: chart_bars is stripped from the cron payload, so
+    // reading the 200-day from it made this column vanish in the live alert.
     const bars = r.chart_bars;
-    const s200 = bars?.[bars.length - 1]?.sma200;
+    const s200 = r.backtest?.sma_200 ?? bars?.[bars.length - 1]?.sma200;
     if (!s200 || s200 <= 0 || !r.current_price) return "";
     const d = (r.current_price / s200 - 1) * 100;
     return `${d >= 0 ? "+" : ""}${d.toFixed(1)}% vs 200d`;

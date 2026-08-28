@@ -194,7 +194,7 @@ function buildMetrics(
     stop_loss_price: calcStopLoss(bars, config.risk.atrMultiplier),
     fib_targets: calcFibTargets(bars),
     week_52_high: week52High, week_52_low: week52Low,
-    sma_20: last.sma20, sma_50: last.sma50, ema_20: last.ema20 ?? null,
+    sma_20: last.sma20, sma_50: last.sma50, sma_200: last.sma200 ?? null, ema_20: last.ema20 ?? null,
     candlestick_patterns: detectCandlestickPatterns(bars, 5),
   };
 }
@@ -454,7 +454,7 @@ function buildEmptyResults(
     support_level: calcSupport(bars), resistance_level: calcResistance(bars),
     stop_loss_price: calcStopLoss(bars, config.risk.atrMultiplier),
     fib_targets: calcFibTargets(bars), week_52_high: week52High, week_52_low: week52Low,
-    sma_20: last.sma20, sma_50: last.sma50, ema_20: last.ema20 ?? null,
+    sma_20: last.sma20, sma_50: last.sma50, sma_200: last.sma200 ?? null, ema_20: last.ema20 ?? null,
     candlestick_patterns: detectCandlestickPatterns(bars, 5),
   };
 }

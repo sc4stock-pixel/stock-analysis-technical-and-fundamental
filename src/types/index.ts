@@ -186,6 +186,10 @@ export interface BacktestResult {
   week_52_low: number | null;
   sma_20: number | null;
   sma_50: number | null;
+  /** Latest SMA200. Carried as a SCALAR because chart_bars is stripped from the
+   *  cron payload for size — sourcing the 200-day from chart_bars silently
+   *  dropped the "% vs 200d" column from the live Telegram alert (2026-08-28). */
+  sma_200: number | null;
   ema_20: number | null;
   // Patterns
   candlestick_patterns: CandlestickPattern[];
