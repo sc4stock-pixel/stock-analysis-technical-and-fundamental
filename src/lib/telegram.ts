@@ -222,7 +222,13 @@ export function buildTelegramMessage(
     // still held at 100% (ST is long), but its structure is failing.
     const flag = met !== undefined && met < 5 ? " ⚠ structural"
       : tt ? (listTtFailures(tt) ? ` ✗${listTtFailures(tt)}` : "") : "";
-    return `${sym} ${sig} ${sc} ${px} ${chg}  ${ttStr}${flag}`;
+    // Distance to the 200-day on FULL rows too, because it decides how far this
+    // name falls if ST flips: above the 200-day it steps down to 70%, below it
+    // it drops straight to the 40% floor. A name can be TT-healthy and still be
+    // below its 200-day, so the ⚠ structural flag does not cover this.
+    const d200 = pctVs200(r);
+    const drop = d200 && d200.startsWith("-") ? " ↓40 if flip" : "";
+    return `${sym} ${sig} ${sc} ${px} ${chg}  ${ttStr}  ${d200}${drop}${flag}`.trimEnd();
   };
 
   // TRIM / FLOOR buckets: no ST long, so distance to the 200-day is the number
