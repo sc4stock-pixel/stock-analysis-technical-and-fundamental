@@ -349,6 +349,9 @@ export function buildEodReport(
       const w = r.targetWeight != null ? ` · tgt ${r.targetWeight}%` : "";
       lines.push(`  • <b>${htmlEscape(dispSymForReport(r.symbol))}</b> ${r.change}${tt} (${when}) — ${tag}${w}`);
     });
+    // Legend for the asymmetric 100/40 sizing (targetWeight.ts): shown once,
+    // only when the block is present.
+    lines.push(`  <i>tgt = asymmetric target weight: 100% in position or above own 200D SMA · 40% floor otherwise — an exit above the 200D is HOLD, not sell</i>`);
   }
 
   // ST PROXIMITY — low-priority warnings using cached ST params

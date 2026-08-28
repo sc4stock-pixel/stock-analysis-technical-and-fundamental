@@ -296,7 +296,9 @@ export function buildTelegramMessage(
       const w = src ? ` ${weightTag(targetWeightOfResult(src))}` : "";
       return `${sym} ${r.change}${tt} (${when}) [${tag}${w}]`;
     });
-    actBlock = `\n⚡ <b>ACT ON THIS</b>\n${preBlock(rows)}`;
+    // One-line legend for the asymmetric 100/40 weight in the state tags.
+    actBlock = `\n⚡ <b>ACT ON THIS</b>\n${preBlock(rows)}`
+      + `<i>100%/40% = target weight — 100% in position or above own 200D; 40% floor otherwise</i>`;
   }
 
   // ---------- Compose message ----------
