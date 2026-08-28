@@ -91,7 +91,7 @@ export const PANEL_META: PanelMeta[] = [
   {
     id: "nav",
     label: "Autopilot Realized NAV",
-    meaning: "Realized NAV of the published Autopilot signals (equal-weight, prev-EOD SuperTrend longs, others cash) vs benchmark (SPY / HSI).",
+    meaning: "Realized NAV of the published Autopilot signals (equal-weight, prev-EOD SuperTrend longs, others cash) vs benchmark (SPY / HSI), with the asymmetric 100/40 line alongside.",
     cadence: "Accrues one entry per region per EOD Autopilot run.",
     detail: [
       "NAV — compounded daily returns of the published signal portfolio, normalized to 1.0 at inception",
@@ -99,6 +99,8 @@ export const PANEL_META: PanelMeta[] = [
       "Return % — total compounded return · Ann. Sharpe — daily mean/sd × √252 · Max DD — worst peak-to-trough",
       "Alpha / Beta — OLS regression vs benchmark, annualized; appear after 60 paired observations",
       "Buy & Hold — always-long equal-weight of the same ticker universe, same compounding; the strategy-vs-B&H gap isolates the timing contribution (line/chip absent until all entries carry B&H data)",
+      "Asym (green) — the asymmetric 100/40 book: each name weighted by its target weight (100% in a long or above its own 200-day SMA, 40% floor otherwise). Started 2026-08-28, so its day count is FAR behind the NAV line's — the chip shows it (e.g. \"+1.2% (14d)\"). Do NOT read the two totals as like-for-like until the samples match.",
+      "⚠️ The main NAV line keys on RAW SuperTrend dir, not the strategy's SMA50 gate — so it goes long on below-SMA50 flips that alerts label WAIT, and measures a looser strategy than the one traded. Left unchanged to preserve the only continuous series (α/β need 60 obs). The Asym line uses the correct gate.",
     ],
   },
   {
