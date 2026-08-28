@@ -212,3 +212,30 @@ describe("buildTelegramMessage — % vs 200d survives a slimmed payload", () => 
     expect(msg).toMatch(/-8\.3% vs 200d/);
   });
 });
+
+// 2026-08-28: a 100% name BELOW its 200-day drops straight to the 40% floor if ST
+// flips (skipping the 70% trim tier). TT<5 does not imply it, so the row must say so.
+describe("buildTelegramMessage — 100% rows disclose their flip-drop", () => {
+  const long = (symbol: string, price: number, sma200: number, met: number): StockAnalysisResult => ({
+    symbol, exchange: "US", signal: "HOLD", score: 5,
+    current_price: price, change_pct: 0.5, regime: "UPTREND",
+    st_direction: 1, st_open_return_pct: 4.2,     // an open ST long -> 100% bucket
+    backtest: { sma_200: sma200 },
+    sepa_metadata: { trend_template_criteria: {
+      criteria_met: met, c2_price_above_sma200: price > sma200 } },
+  } as unknown as StockAnalysisResult);
+
+  it("marks a TT-healthy 100% name that is below its 200-day", () => {
+    const msg = buildTelegramMessage([long("BYD", 92.95, 97.0, 6)], "cron");
+    expect(msg).toContain("100% · ST LONG");
+    expect(msg).toContain("vs 200d");
+    expect(msg).toContain("↓40 if flip");
+    expect(msg).not.toContain("⚠ structural");   // TT 6/7 — the flag would NOT catch it
+  });
+
+  it("does not mark a 100% name above its 200-day", () => {
+    const msg = buildTelegramMessage([long("NVDA", 227.98, 195.0, 7)], "cron");
+    expect(msg).toContain("vs 200d");
+    expect(msg).not.toContain("↓40 if flip");
+  });
+});
