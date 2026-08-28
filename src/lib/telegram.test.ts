@@ -49,26 +49,28 @@ function bullishBelowSma50Result(): StockAnalysisResult {
 describe("buildTelegramMessage — SMA50 entry gate tag", () => {
   const msg = buildTelegramMessage([bullishBelowSma50Result()], "manual");
   it("tags a below-SMA50 flip as [WAIT], not [LONG]", () => {
-    const block = msg.slice(msg.indexOf("ACT ON THIS"));
+    const block = msg.slice(msg.indexOf("WEIGHT CHANGES"));
     expect(block).toContain("awaiting SMA50");
     // The tag may carry the asymmetric target weight (e.g. "[WAIT 40%]") —
     // assert on the state word, not the exact bracket contents.
-    expect(block).toContain("[WAIT");
-    expect(block).not.toContain("[LONG");
+    // Weight-first report: a below-SMA50 flip is NOT in the 100% ST LONG bucket,
+    // and the change line marks it as awaiting the gate.
+    expect(block).toContain("awaiting SMA50");
+    expect(block).not.toMatch(/100% · ST LONG[\s\S]*BYD/);
   });
 });
 
 describe("buildTelegramMessage — Act on this block", () => {
   const msg = buildTelegramMessage([bearishHKResult()], "manual");
   it("includes an ACT ON THIS section", () => {
-    expect(msg).toContain("ACT ON THIS");
+    expect(msg).toContain("WEIGHT CHANGES");
   });
   it("renders the client-stance exit copy", () => {
-    expect(msg).toContain("exited uptrend");
+    expect(msg).toContain("100% →");   // a bearish flip lowers exposure from full
   });
   it("strips .HK from the ticker in the block", () => {
     // the Act-on-this <pre> row should show 3033, never 3033.HK
-    const block = msg.slice(msg.indexOf("ACT ON THIS"));
+    const block = msg.slice(msg.indexOf("WEIGHT CHANGES"));
     expect(block).toContain("3033");
     expect(block).not.toContain("3033.HK");
   });
@@ -153,27 +155,34 @@ describe("buildTelegramMessage — every valid asset is rendered", () => {
 
 describe("buildTelegramMessage — ST↑ HOLD with confirmed structure (regression)", () => {
   // The exact live shapes that went missing: GOOGL 6/7 (✗Price>50SMA) and 0939.HK 6/7.
+  // The invariant is EXHAUSTIVENESS — every valid name must be rendered in some
+  // bucket. It is deliberately not asserted per-bucket: which bucket a name lands
+  // in is the sizing rule's job (targetWeight.test.ts), and pinning it here would
+  // make this regression test fail every time the rule is retuned.
   const msg = buildTelegramMessage(
     [stub("GOOGL", "HOLD", 1, 6), stub("SPY", "BUY", 1, 6), stub("MSFT", "HOLD", 1, 7)],
     "manual",
   );
 
-  it("puts a 6/7 HOLD in the HOLDS tier, not nowhere", () => {
-    expect(msg).toContain("HOLDS (2)");
-    const block = msg.slice(msg.indexOf("HOLDS (2)"));
-    expect(block).toContain("GOOGL");
+  it("renders every name — none silently dropped", () => {
+    for (const sym of ["GOOGL", "SPY", "MSFT"]) expect(msg).toContain(sym);
   });
 
-  it("keeps 7/7 HOLDs in the same merged tier", () => {
-    const block = msg.slice(msg.indexOf("HOLDS (2)"));
-    expect(block).toContain("MSFT");
+  it("reconciles all three in the receipt", () => {
+    expect(msg).toMatch(/3 in →/);
+    expect(msg).toContain("= 3 ✓");
   });
 
-  it("still routes a 6/7 BUY to TACTICAL BUYS", () => {
-    expect(msg).toContain("TACTICAL BUYS (1)");
+  it("never lands a name in UNCLASSIFIED", () => {
+    expect(msg).not.toContain("UNCLASSIFIED");
   });
 
-  it("shows the TT flag on hold rows so the structure gap is visible", () => {
-    expect(msg).toContain("TT6/7");
+  it("keeps the BUY/HOLD signal visible as a row field", () => {
+    expect(msg).toMatch(/\bBUY\b/);
+    expect(msg).toMatch(/\bHOLD\b/);
+  });
+
+  it("shows the TT score so the structure gap is still visible", () => {
+    expect(msg).toContain("6/7");
   });
 });

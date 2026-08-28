@@ -1,6 +1,7 @@
 import { SepaMetadata, TrendTemplateCriteria, KronosForecasts, ForecastSkill, SkillStat } from "@/types";
 import { htmlEscape } from "@/lib/telegram";
 import { buildAlertModel } from "@/lib/alert-model";
+import { targetWeightOfResult } from "@/lib/targetWeight";
 import { CONVICTION_PCT } from "@/lib/forecastBox";
 import type { StockAnalysisResult } from "@/types";
 import type { BreadthMovers } from "@/lib/breadth-movers";
@@ -386,14 +387,16 @@ export function buildEodReport(
 
   // ST BULLISH — monospace block for column alignment
   if (bullish.length > 0) {
-    lines.push(`\n🟢 <b>ST BULLISH (${bullish.length})</b> — ranked by SEPA`);
+    lines.push(`\n🟢 <b>ST BULLISH (${bullish.length})</b> — wt · SEPA · chg`);
     const maxSymLen = Math.max(...bullish.map(r => r.symbol.length));
     const rows: string[] = [];
     bullish.forEach((r) => {
       const sepa = r.sepa_metadata ? fmtSepa(r.sepa_metadata) : "—";
       const chg  = fmtChg(r.change_pct);
       const sym  = r.symbol.padEnd(maxSymLen);
-      rows.push(`${sym} ${sepa} ${chg}`);
+      // Target weight (targetWeight.ts) — ST direction alone no longer implies size.
+      const w = `${targetWeightOfResult(r).weight}%`.padStart(4);
+      rows.push(`${sym} ${w} ${sepa} ${chg}`);
     });
     // Wrap in <pre> so Telegram renders monospace and preserves column alignment
     lines.push(`<pre>${rows.join("\n")}</pre>`);
@@ -401,7 +404,11 @@ export function buildEodReport(
 
   // ST BEARISH — consolidated inline lists grouped by exchange flag (3 per line)
   if (bearish.length > 0) {
-    lines.push(`\n🔴 <b>ST BEARISH (${bearish.length})</b>`);
+    // ST bearish no longer means flat: these are held at 70% (above the 200-day)
+    // or the 40% floor. Split the header so the label cannot imply "not held".
+    const bTrim = bearish.filter(r => targetWeightOfResult(r).weight > 40).length;
+    const bFloor = bearish.length - bTrim;
+    lines.push(`\n🔴 <b>ST BEARISH (${bearish.length})</b> <i>held: ${bTrim} @70% · ${bFloor} @40%</i>`);
     lines.push(...groupedInline(bearish, 3));
   }
 

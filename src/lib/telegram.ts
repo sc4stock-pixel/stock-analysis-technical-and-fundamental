@@ -2,7 +2,7 @@ import { StockAnalysisResult, SepaMetadata, TrendTemplateCriteria } from "@/type
 import { holidayStatus } from "@/lib/telegram-report";
 import { buildAlertModel, clientFlip } from "@/lib/alert-model";
 import { buildReceipt } from "@/lib/reportReceipt";
-import { targetWeightOfResult, exitActionLabel, weightTag } from "@/lib/targetWeight";
+import { targetWeightOfResult, exitActionLabel, weightTone } from "@/lib/targetWeight";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -119,32 +119,18 @@ const ttFor = (r: ResultWithSepa): TrendTemplateCriteria | undefined =>
   r.sepa_metadata?.trend_template_criteria;
 
 // ============================================================
-// Tier classification — exhaustive by construction
+// Weight-bucket classification — the report is organised by the exposure the
+// strategy wants, not by "should I buy this" (STRATEGY.md position sizing).
 // ============================================================
-/** The execution-alert tiers. `other` is the catch-all net: anything that matches no
- *  named tier still gets rendered, so a classification gap shows up in the message
- *  instead of silently shrinking it. */
-export type Tier =
-  | "freshBuy" | "tactical" | "hold" | "emerging" | "stripped" | "watchlist" | "other";
+/** The three exposure buckets. Every valid result lands in exactly one, so a
+ *  classification gap shows up as a missing name in the receipt rather than a
+ *  silently shrunken message. */
+export type Bucket = "full" | "trim" | "floor";
 
-/** Assigns a result to exactly one tier (first match wins). Exported for the coverage test.
- *  `freshBullishSyms` = symbols with a bullish ST flip within 2 bars. */
-export function tierOf(r: ResultWithSepa, freshBullishSyms: Set<string>): Tier {
-  if (r.st_direction !== 1) return "watchlist";          // ST↓ — passive watchlist
-
-  const met = ttFor(r)?.criteria_met;
-  // No trend-template data at all: don't guess a structure score in either direction
-  // (the old code defaulted to 0 in the buy tiers and 7 in the weak-structure test,
-  // so these names matched nothing). Surface them instead.
-  if (met === undefined) return "other";
-
-  // ST↑ but structure unconfirmed (<5/7) — signal-agnostic, as before.
-  if (met < 5) return freshBullishSyms.has(r.symbol) ? "emerging" : "stripped";
-
-  // ST↑ with confirmed structure (≥5/7)
-  if (r.signal === "BUY")  return met === 7 ? "freshBuy" : "tactical";
-  if (r.signal === "HOLD") return "hold";                // 5/7, 6/7 and 7/7 all land here
-  return "other";                                        // e.g. SELL while ST↑ and TT≥5
+/** Assigns a result to its weight bucket. This is a RENDERING grouping derived
+ *  from targetWeight.ts — never a second derivation of the sizing rule. */
+export function bucketOf(r: ResultWithSepa): Bucket {
+  return weightTone(targetWeightOfResult(r).weight);
 }
 
 // ============================================================
@@ -176,6 +162,7 @@ export function buildTelegramMessage(
   const holiday = holidayStatus();
   const holidayTag = holiday ? ` (Holiday Close — ${htmlEscape(holiday.label)})` : "";
   const dataState = `📅 <i>Data State: ${dateStr}${holidayTag}</i>`;
+  // avgBookLine is appended after the buckets are known (see compose).
 
   // ---------- ST flips (recent, ≤2 bars) ----------
   const todayFlips = valid
@@ -192,118 +179,85 @@ export function buildTelegramMessage(
     todayFlips.filter(x => x.flipType === "BULLISH").map(x => x.r.symbol),
   );
 
-  // ---------- Tier classification ----------
-  // ONE first-match classifier, not a set of independent filters. Every valid result
-  // lands in exactly one tier and every tier is rendered, so no asset can be dropped
-  // silently. (Independent predicates left ST↑ + TT≥5/7 + non-BUY names in no bucket
-  // at all from 2026-05-26 until 2026-08-14 — GOOGL and 0939.HK vanished from the scan.)
-  const tiers: Record<Tier, ResultWithSepa[]> = {
-    freshBuy: [], tactical: [], hold: [], emerging: [], stripped: [], watchlist: [], other: [],
-  };
-  for (const r of valid) tiers[tierOf(r, freshBullishSyms)].push(r);
+  // ---------- Weight-bucket assembly ----------
+  // ONE classifier, exhaustive by construction: every valid result lands in exactly
+  // one exposure bucket, so a name can never be silently dropped (the 2026-05/08
+  // tier-gap bug that lost GOOGL and 0939.HK from the scan).
+  const buckets: Record<Bucket, ResultWithSepa[]> = { full: [], trim: [], floor: [] };
+  for (const r of valid) buckets[bucketOf(r)].push(r);
 
-  const freshBuys  = tiers.freshBuy;
-  const tacticals  = tiers.tactical;
-  const holdsTier  = tiers.hold;
-  const emerging   = tiers.emerging;
-  const stripped   = tiers.stripped;
-  const watchlist  = tiers.watchlist;
-  const other      = tiers.other;
+  // Within a bucket, sort by score desc so the strongest names read first.
+  const byScore = (a: ResultWithSepa, b: ResultWithSepa) => (b.score ?? 0) - (a.score ?? 0);
+  buckets.full.sort(byScore); buckets.trim.sort(byScore); buckets.floor.sort(byScore);
+
+  const avgWeight = valid.length
+    ? valid.reduce((acc, r) => acc + targetWeightOfResult(r).weight, 0) / valid.length
+    : 0;
 
   const avgScore = (valid.reduce((s, r) => s + r.score, 0) / valid.length).toFixed(1);
 
   // ---------- Row renderers ----------
   // Monospace rows (no <b>; escaping done by preBlock). .HK stripped throughout.
-  const fmtBuyRow = (r: ResultWithSepa): string => {
+  const pctVs200 = (r: ResultWithSepa): string => {
+    const bars = r.chart_bars;
+    const s200 = bars?.[bars.length - 1]?.sma200;
+    if (!s200 || s200 <= 0 || !r.current_price) return "";
+    const d = (r.current_price / s200 - 1) * 100;
+    return `${d >= 0 ? "+" : ""}${d.toFixed(1)}% vs 200d`;
+  };
+
+  // FULL bucket: the strategy is long, so signal + structure are what matter.
+  const fmtFullRow = (r: ResultWithSepa): string => {
     const sym = dispSym(r.symbol).padEnd(5);
+    const sig = (r.signal ?? "").padEnd(4);
     const sc  = r.score.toFixed(1);
-    const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
+    const px  = fmtPrice(r.current_price, r.exchange).padStart(8);
     const chg = fmtChg(r.change_pct).padStart(6);
-    return `${sym} ${sc} ${px} ${chg} ${regimeAbbr(r.regime)}`;
+    const tt  = ttFor(r);
+    const met = tt?.criteria_met;
+    const ttStr = met === undefined ? "  —" : `${met}/7`;
+    // TT<5 is the old "stripped from buys" idea, kept as a row flag: the name is
+    // still held at 100% (ST is long), but its structure is failing.
+    const flag = met !== undefined && met < 5 ? " ⚠ structural"
+      : tt ? (listTtFailures(tt) ? ` ✗${listTtFailures(tt)}` : "") : "";
+    return `${sym} ${sig} ${sc} ${px} ${chg}  ${ttStr}${flag}`;
   };
 
-  const fmtTacticalRow = (r: ResultWithSepa): string => {
+  // TRIM / FLOOR buckets: no ST long, so distance to the 200-day is the number
+  // that decides the weight and the one worth watching.
+  const fmtWeightRow = (r: ResultWithSepa): string => {
     const sym = dispSym(r.symbol).padEnd(5);
+    // Keep the score signal here too: a BUY in the trim/floor buckets means the
+    // score model likes the name while ST does not — i.e. a re-entry candidate.
+    const sig = (r.signal ?? "").padEnd(4);
     const sc  = r.score.toFixed(1);
-    const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
+    const px  = fmtPrice(r.current_price, r.exchange).padStart(8);
     const chg = fmtChg(r.change_pct).padStart(6);
-    const tt  = ttFor(r);
-    const ttTag = tt ? `TT${tt.criteria_met}/7 ✗${listTtFailures(tt)}` : "TT—";
-    return `${sym} ${sc} ${px} ${chg} ${ttTag}`;
+    const met = ttFor(r)?.criteria_met;
+    const ttStr = met === undefined ? "  —" : `${met}/7`;
+    const d200 = pctVs200(r);
+    return `${sym} ${sig} ${sc} ${px} ${chg}  ${ttStr}  ${d200}`.trimEnd();
   };
 
-  const fmtStrippedRow = (r: ResultWithSepa): string => {
-    const sym = dispSym(r.symbol).padEnd(5);
-    const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
-    const tt  = ttFor(r);
-    const ttTag = tt ? `TT${tt.criteria_met}/7 ✗${listTtFailures(tt)}` : "TT—";
-    return `${sym} ${px} ${ttTag}`;
-  };
-
-  const fmtEmergingRow = (r: ResultWithSepa): string => {
-    const sym = dispSym(r.symbol).padEnd(5);
-    const chg = fmtChg(r.change_pct).padStart(6);
-    const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
-    const tt  = ttFor(r);
-    const ttStr = tt ? `TT${tt.criteria_met}/7` : "TT—";
-    // Strategy SMA50 gate (TT c5): a flip below SMA50 is NOT an entry yet.
-    const gate = tt?.c5_price_above_sma50 === true ? "✓entry"
-      : tt?.c5_price_above_sma50 === false ? "⏳SMA50" : "";
-    return `${sym} ${chg} ${px} ${ttStr} ${gate}`.trimEnd();
-  };
-
-  // Catch-all row: shows the signal too, since the whole point is "why is this here?".
-  const fmtOtherRow = (r: ResultWithSepa): string => {
-    const sym = dispSym(r.symbol).padEnd(5);
-    const sig = r.signal.padEnd(4);
-    const px  = fmtPrice(r.current_price, r.exchange).padStart(7);
-    const chg = fmtChg(r.change_pct).padStart(6);
-    const tt  = ttFor(r);
-    const ttTag = tt ? `TT${tt.criteria_met}/7` : "TT—";
-    return `${sym} ${sig} ${px} ${chg} ${ttTag}`;
-  };
-
-  // Watchlist: HK first then US, inline 3-per-line, " · " separator, .HK stripped, no flag
-  const fmtWatchlistLines = (stocks: ResultWithSepa[], perLine = 3): string[] => {
-    const hk = stocks.filter(r => r.exchange === "HK");
-    const us = stocks.filter(r => r.exchange !== "HK");
-    const lines: string[] = [];
-    for (const group of [hk, us]) {
-      for (let i = 0; i < group.length; i += perLine) {
-        const chunk = group.slice(i, i + perLine);
-        const parts = chunk.map(r => `${htmlEscape(dispSym(r.symbol))} ${fmtChg(r.change_pct)}`);
-        lines.push(`  ${parts.join(" · ")}`);
-      }
-    }
-    return lines;
-  };
-
-  // Act-on-this — client-stance (Engine A has no worker events → pass []).
-  const actRows = buildAlertModel([], {}, valid as unknown as StockAnalysisResult[]).actOnThis;
-  let actBlock = "";
-  if (actRows.length > 0) {
-    const rows = actRows.map(r => {
-      const sym = dispSym(r.symbol).padEnd(6);
-      // Tag = the position state machine: LONG only when the strategy holds.
-      const tag = r.stance === "out" ? "OUT"
-        : r.posState === "waiting" ? "WAIT"
-        : r.posState === "pending" ? "ENTRY" : "LONG";
-      const when = r.barsSince === 0 ? "today" : `${r.barsSince}d`;
-      const tt = r.ttFlag ? ` ${r.ttFlag.replace("→", "->")}` : "";  // defensive; ttFlag is empty on this surface
-      // Target weight (exposure layer, targetWeight.ts) — shown beside the state
-      // tag; NEVER the source of the tag itself (vocabulary contract).
-      const src = valid.find(v => v.symbol === r.symbol);
-      const w = src ? ` ${weightTag(targetWeightOfResult(src))}` : "";
-      return `${sym} ${r.change}${tt} (${when}) [${tag}${w}]`;
-    });
-    // One-line legend for the asymmetric 100/40 weight in the state tags.
-    actBlock = `\n⚡ <b>ACT ON THIS</b>\n${preBlock(rows)}`
-      + `<i>100%/40% = target weight — 100% in position or above own 200D; 40% floor otherwise</i>`;
-  }
+  // ---------- Weight-change line ----------
+  // The one line worth reading on a quiet day. A weight change is exactly a
+  // fresh ST flip (entry -> full, exit -> trim/floor); everything else holds.
+  const changes = todayFlips.map(({ r, flipType, barsSince }) => {
+    const to = targetWeightOfResult(r).weight;
+    // A bullish flip raises exposure (the gate decides to what); a bearish flip
+    // lowers it from full. Vocabulary contract: this is EXPOSURE, never "LONG".
+    const from = flipType === "BULLISH" ? "40/70" : "100";
+    const when = barsSince === 0 ? "today" : `${barsSince}d`;
+    const gate = flipType === "BULLISH" && to !== 100 ? " · awaiting SMA50" : "";
+    return `${dispSym(r.symbol).padEnd(6)} ${from}% → ${to}%  (${when})${gate}`;
+  });
+  const changeLine = changes.length
+    ? `\n🔔 <b>WEIGHT CHANGES (${changes.length})</b>\n${preBlock(changes)}`
+    : `\n✅ <i>No weight changes today</i>`;
 
   // ---------- Compose message ----------
   const lines: string[] = [headerLine, dataState];
-  if (actBlock) lines.push(actBlock);
+  lines.push(changeLine);
 
   // ACTIONABLE EXITS — top priority
   if (exitSignals.length > 0) {
@@ -337,43 +291,22 @@ export function buildTelegramMessage(
     });
   }
 
-  // Buy/hold tiers — each rendered as a full-width monospace <pre> table
-  if (freshBuys.length > 0) {
-    lines.push(`\n🟢 <b>CONFLUENCE BUYS (${freshBuys.length})</b> <i>ST↑ BUY TT7/7</i>`);
-    lines.push(preBlock(freshBuys.map(fmtBuyRow)));
+  // ---------- Weight buckets ----------
+  // Organised by the exposure the strategy wants, not by "should I buy this".
+  // Each name appears exactly once.
+  if (buckets.full.length > 0) {
+    lines.push(`\n🟢 <b>100% · ST LONG (${buckets.full.length})</b>`);
+    lines.push(preBlock(buckets.full.map(fmtFullRow)));
   }
 
-  if (tacticals.length > 0) {
-    lines.push(`\n🟢 <b>TACTICAL BUYS (${tacticals.length})</b> <i>ST↑ BUY TT≥5/7</i>`);
-    lines.push(preBlock(tacticals.map(fmtTacticalRow)));
+  if (buckets.trim.length > 0) {
+    lines.push(`\n🔵 <b>70% · TRIM (${buckets.trim.length})</b> <i>ST bearish, still above 200d</i>`);
+    lines.push(preBlock(buckets.trim.map(fmtWeightRow)));
   }
 
-  if (holdsTier.length > 0) {
-    lines.push(`\n🔵 <b>HOLDS (${holdsTier.length})</b> <i>ST↑ HOLD TT≥5/7</i>`);
-    lines.push(preBlock(holdsTier.map(fmtTacticalRow)));
-  }
-
-  if (emerging.length > 0) {
-    lines.push(`\n🚀 <b>EMERGING UPTRENDS (${emerging.length})</b> <i>fresh ST↑ flip, TT&lt;5</i>`);
-    lines.push(preBlock(emerging.map(fmtEmergingRow)));
-  }
-
-  if (stripped.length > 0) {
-    lines.push(`\n⚠️ <b>STRIPPED FROM BUYS (${stripped.length})</b> <i>structural fail, TT&lt;5</i>`);
-    lines.push(preBlock(stripped.map(fmtStrippedRow)));
-  }
-
-  // PASSIVE WATCHLIST — ST↓ (inline, not a table)
-  if (watchlist.length > 0) {
-    lines.push(`\n⚪ <b>WATCHLIST ST↓ (${watchlist.length})</b>`);
-    lines.push(...fmtWatchlistLines(watchlist, 3));
-  }
-
-  // UNCLASSIFIED — the net. Should always be empty; if it isn't, the tier rules have a
-  // gap and this makes it visible in the message rather than shrinking the row count.
-  if (other.length > 0) {
-    lines.push(`\n❓ <b>UNCLASSIFIED (${other.length})</b> <i>matched no tier — check the data</i>`);
-    lines.push(preBlock(other.map(fmtOtherRow)));
+  if (buckets.floor.length > 0) {
+    lines.push(`\n🟠 <b>40% · FLOOR (${buckets.floor.length})</b> <i>ST bearish, below 200d</i>`);
+    lines.push(preBlock(buckets.floor.map(fmtWeightRow)));
   }
 
   // Receipt — reconciles the assets that went in against the rows actually rendered.
@@ -382,20 +315,16 @@ export function buildTelegramMessage(
   const receipt = buildReceipt(
     valid.map(r => r.symbol),
     [
-      { label: "buy",       symbols: freshBuys.map(r => r.symbol) },
-      { label: "tactical",  symbols: tacticals.map(r => r.symbol) },
-      { label: "hold",      symbols: holdsTier.map(r => r.symbol) },
-      { label: "emerging",  symbols: emerging.map(r => r.symbol)  },
-      { label: "stripped",  symbols: stripped.map(r => r.symbol)  },
-      { label: "watch",     symbols: watchlist.map(r => r.symbol) },
-      { label: "unclassified", symbols: other.map(r => r.symbol)  },
+      { label: "full",  symbols: buckets.full.map(r => r.symbol)  },
+      { label: "trim",  symbols: buckets.trim.map(r => r.symbol)  },
+      { label: "floor", symbols: buckets.floor.map(r => r.symbol) },
     ],
     { display: dispSym, renderedText: lines.join("\n"), expected: expectedUniverse },
   );
   lines.push(`\n🧾 <i>${htmlEscape(receipt.text)}</i>`);
 
   // Footer
-  lines.push(`📊 <i>Avg ${avgScore}/10 · ${valid.length} assets · HKT ${timeStr}</i>`);
+  lines.push(`📊 <i>Avg book ${avgWeight.toFixed(0)}% · Avg score ${avgScore}/10 · ${valid.length} assets · HKT ${timeStr}</i>`);
 
   return lines.join("\n");
 }
