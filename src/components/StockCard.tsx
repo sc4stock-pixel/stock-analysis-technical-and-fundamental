@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import { targetWeightOfResult } from "@/lib/targetWeight";
 import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, ForecastSkill } from "@/types";
 import { regimeColor } from "@/lib/regime";
 import { kronosRow, naiveRow, convictionFlags, skillBadge } from "@/lib/forecastBox";
@@ -147,6 +148,9 @@ export default function StockCard({ result, config, kronos, forecastSkill, force
 
   const chg = result.change_pct ?? 0;
   const stDir = result.st_direction ?? -1;
+  // Asymmetric 100/40 held size (exposure layer — targetWeight.ts). Separate
+  // from the ST stance badge beside it, which stays a pure layer-1 indicator.
+  const tgtWeight = targetWeightOfResult(result).weight;
 
   return (
     <div className="card flex flex-col">
@@ -165,6 +169,15 @@ export default function StockCard({ result, config, kronos, forecastSkill, force
                 : "border-[#ff4757]/30 text-[#ff4757] bg-[#ff4757]/5"
             }`}>
               {stDir === 1 ? "🟢 ST" : "🔴 ST"}
+            </span>
+            <span className={`text-xs px-1 py-0.5 rounded border font-mono font-bold ${
+              tgtWeight === 100
+                ? "border-[#00d4ff]/35 text-[#00d4ff] bg-[#00d4ff]/10"
+                : "border-[#ffa502]/40 text-[#ffa502] bg-[#ffa502]/10"
+            }`} title={tgtWeight === 100
+                ? "Held at 100% — in an ST long, or above its own 200-day SMA"
+                : "Held at the 40% floor — no ST long AND below its own 200-day SMA"}>
+              wt {tgtWeight}%
             </span>
             {result.sepa_metadata && (() => {
               const s = result.sepa_metadata;

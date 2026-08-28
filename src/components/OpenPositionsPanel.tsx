@@ -3,6 +3,7 @@ import { useState, useMemo } from "react";
 import { StockAnalysisResult } from "@/types";
 import { supertrend, sma } from "@/lib/indicators";
 import InfoTooltip from "@/components/InfoTooltip";
+import { targetWeightOfResult, WEIGHT_FLOOR } from "@/lib/targetWeight";
 
 interface Props {
   results: StockAnalysisResult[];
@@ -24,12 +25,20 @@ interface OpenPosition {
   optLabel: string;
   sma50AtEntry: number | null;
   blockedBySma: boolean; // flip happened but sma50 blocked — waiting
+  /** Asymmetric target weight (100 / 40). Under 100/40 the book is NEVER flat,
+   *  so a name with no ST long is still a held position at some weight. */
+  targetWeight: number;
+  /** True when there is no ST long — the row is a floor/hold-only holding and
+   *  has no entry price, P&L or R-multiple to show. */
+  weightOnly: boolean;
 }
 
 // ── Reconstruct open position from bar-by-bar simulation ─────
 // Mirrors the logic in pipeline.ts runSupertrendBacktest +
 // open position detection, with SMA50 filter applied.
-function detectOpenPosition(result: StockAnalysisResult): OpenPosition | null {
+type SimulatedPosition = Omit<OpenPosition, "targetWeight" | "weightOnly">;
+
+function detectOpenPosition(result: StockAnalysisResult): SimulatedPosition | null {
   const bars = result.chart_bars;
   if (!bars || bars.length < 52) return null;
 
@@ -165,24 +174,46 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
   const positions = useMemo(() => {
     const pos: OpenPosition[] = [];
     for (const r of results) {
-      // Only process if ST direction is bullish
-      if ((r.st_direction ?? -1) !== 1) continue;
-      const p = detectOpenPosition(r);
-      if (p) pos.push(p);
+      if (r.signal === "ERROR" || r.error) continue;
+      const tw = targetWeightOfResult(r).weight;
+      // An ST long -> full simulated position row (entry, P&L, R).
+      const p = (r.st_direction ?? -1) === 1 ? detectOpenPosition(r) : null;
+      if (p) { pos.push({ ...p, targetWeight: tw, weightOnly: false }); continue; }
+      // No ST long, but under the asymmetric rule the book still HOLDS this
+      // name (100% above its own 200-day, else the 40% floor). Show it as a
+      // weight-only row rather than omitting it — omitting understated the
+      // book by roughly half.
+      pos.push({
+        symbol: r.symbol, name: r.name, exchange: r.exchange,
+        entryDate: "—", entryPrice: 0, currentPrice: r.current_price,
+        stopPrice: r.st_value > 0 ? r.st_value : 0,
+        daysHeld: 0, pnlPct: 0, rMultiple: 0,
+        stopDistPct: r.st_stop_distance_pct ?? 0,
+        optLabel: `ATR${r.st_opt_params?.atrPeriod ?? 10}×${r.st_opt_params?.multiplier ?? 3}`,
+        sma50AtEntry: null, blockedBySma: false,
+        targetWeight: tw, weightOnly: true,
+      });
     }
-    // Sort by P&L% descending
-    pos.sort((a, b) => b.pnlPct - a.pnlPct);
+    // ST longs first (they carry P&L), then weight-only rows; each by P&L desc.
+    pos.sort((a, b) => Number(a.weightOnly) - Number(b.weightOnly) || b.pnlPct - a.pnlPct);
     return pos;
   }, [results]);
 
   if (positions.length === 0) return null;
 
-  // Aggregate stats
-  const avgPnl     = positions.reduce((s, p) => s + p.pnlPct, 0) / positions.length;
-  const winners    = positions.filter(p => p.pnlPct > 0).length;
-  const avgDays    = Math.round(positions.reduce((s, p) => s + p.daysHeld, 0) / positions.length);
-  const avgR       = positions.reduce((s, p) => s + p.rMultiple, 0) / positions.length;
-  const atRisk     = positions.filter(p => p.stopDistPct < 3).length;
+  // Aggregate stats — P&L/R/days come from ST LONGS ONLY. Weight-only rows have
+  // no entry price, so folding their zeros in would drag every average toward 0.
+  const longs      = positions.filter(p => !p.weightOnly);
+  const nL         = longs.length || 1;
+  const avgPnl     = longs.reduce((s, p) => s + p.pnlPct, 0) / nL;
+  const winners    = longs.filter(p => p.pnlPct > 0).length;
+  const avgDays    = Math.round(longs.reduce((s, p) => s + p.daysHeld, 0) / nL);
+  const avgR       = longs.reduce((s, p) => s + p.rMultiple, 0) / nL;
+  // "Near stop" only matters for an ST long — and it now means a TRIM to the
+  // floor, not an exit (and nothing at all when the name is above its 200-day).
+  const atRisk     = longs.filter(p => p.stopDistPct < 3 && p.targetWeight === WEIGHT_FLOOR).length;
+  const atFloor    = positions.filter(p => p.targetWeight === WEIGHT_FLOOR).length;
+  const avgWeight  = positions.reduce((s, p) => s + p.targetWeight, 0) / positions.length;
 
   return (
     <div className="mx-4 my-3 rounded border border-[#00ff88]/30 bg-[#00ff88]/3">
@@ -194,10 +225,17 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
       >
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-[#00ff88] text-xs font-bold tracking-widest">
-            🟢 OPEN ST POSITIONS
+            🟢 BOOK &amp; ST POSITIONS
           </span>
           <InfoTooltip id="positions" />
-          <span className="text-[#4a6080] text-xs">({positions.length})</span>
+          <span className="text-[#4a6080] text-xs">
+            ({longs.length} ST long / {positions.length} held)
+          </span>
+          <span className="text-[#1e2d4a]">|</span>
+          <span className="text-[#4a6080] text-xs">
+            Avg wt <span className="text-[#00d4ff] font-bold">{avgWeight.toFixed(0)}%</span>
+            {atFloor > 0 && <span className="text-[#ffa502]"> · {atFloor} at floor</span>}
+          </span>
           <span className="text-[#1e2d4a]">|</span>
           <span className="text-[#4a6080] text-xs">
             Avg P&L{" "}
@@ -217,8 +255,9 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
             </span>
           </span>
           {atRisk > 0 && (
-            <span className="text-[#ff4757] text-xs font-bold border border-[#ff4757]/40 rounded px-1.5 py-0.5 blink">
-              ⚠️ {atRisk} NEAR STOP
+            <span className="text-[#ffa502] text-xs font-bold border border-[#ffa502]/40 rounded px-1.5 py-0.5"
+                  title="Close to the ST line AND below the 200-day — a stop hit trims to 40%, it does not exit">
+              ⚠️ {atRisk} NEAR TRIM
             </span>
           )}
         </div>
@@ -233,6 +272,7 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
               <thead>
                 <tr className="bg-[#0f1629] border-b border-[#1e2d4a] text-[#4a6080] uppercase tracking-wider">
                   <th className="text-left px-2 py-1.5 font-mono font-normal">Symbol</th>
+                  <th className="text-right px-2 py-1.5 font-mono font-normal">Target wt</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Entry Date</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Entry $</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Current $</th>
@@ -246,7 +286,8 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
               </thead>
               <tbody>
                 {positions.map((pos, idx) => {
-                  const isNearStop = pos.stopDistPct < 3;
+                  const isNearStop = !pos.weightOnly && pos.stopDistPct < 3
+                                     && pos.targetWeight === WEIGHT_FLOOR;
                   const isWinner   = pos.pnlPct > 0;
                   const isHighR    = pos.rMultiple >= 2;
 
@@ -266,14 +307,29 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
                         <div className="text-[#4a6080] text-[0.6rem] truncate max-w-[70px]">{pos.name}</div>
                       </td>
 
+                      {/* Target weight — the asymmetric 100/40 exposure */}
+                      <td className="px-2 py-1.5 text-right">
+                        <span className={`font-mono font-bold text-[0.65rem] px-1.5 py-0.5 rounded border ${
+                            pos.targetWeight === 100
+                              ? "bg-[#00d4ff]/10 border-[#00d4ff]/35 text-[#00d4ff]"
+                              : "bg-[#ffa502]/12 border-[#ffa502]/40 text-[#ffa502]"}`}
+                          title={pos.targetWeight === 100
+                            ? (pos.weightOnly
+                                ? "Held at full size: no ST long, but price is above its own 200-day SMA"
+                                : "Held at full size: ST long")
+                            : "Floor: no ST long AND below its own 200-day SMA"}>
+                          {pos.targetWeight}%
+                        </span>
+                      </td>
+
                       {/* Entry Date */}
                       <td className="px-2 py-1.5 text-right font-mono text-[#6b85a0]">
-                        {fmtDate(pos.entryDate)}
+                        {pos.weightOnly ? "—" : fmtDate(pos.entryDate)}
                       </td>
 
                       {/* Entry Price */}
                       <td className="px-2 py-1.5 text-right font-mono text-[#c8d8f0]">
-                        {pos.entryPrice.toFixed(2)}
+                        {pos.weightOnly ? "—" : pos.entryPrice.toFixed(2)}
                       </td>
 
                       {/* Current Price */}
@@ -283,8 +339,8 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
 
                       {/* P&L % */}
                       <td className={`px-2 py-1.5 text-right font-mono font-bold
-                        ${isWinner ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
-                        {pos.pnlPct >= 0 ? "+" : ""}{pos.pnlPct.toFixed(1)}%
+                        ${pos.weightOnly ? "text-[#4a6080]" : isWinner ? "text-[#00ff88]" : "text-[#ff4757]"}`}>
+                        {pos.weightOnly ? "—" : `${pos.pnlPct >= 0 ? "+" : ""}${pos.pnlPct.toFixed(1)}%`}
                       </td>
 
                       {/* Stop Price */}
@@ -302,7 +358,7 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
 
                       {/* Days Held */}
                       <td className="px-2 py-1.5 text-right font-mono text-[#6b85a0]">
-                        {pos.daysHeld}d
+                        {pos.weightOnly ? "—" : `${pos.daysHeld}d`}
                       </td>
 
                       {/* R-Multiple */}
@@ -310,8 +366,8 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
                         ${isHighR ? "text-[#00ff88]"
                           : pos.rMultiple > 0 ? "text-[#00d4ff]"
                           : "text-[#ff4757]"}`}>
-                        {pos.rMultiple >= 0 ? "+" : ""}{pos.rMultiple.toFixed(2)}R
-                        {isHighR && " 🔥"}
+                        {pos.weightOnly ? "—" : `${pos.rMultiple >= 0 ? "+" : ""}${pos.rMultiple.toFixed(2)}R`}
+                        {!pos.weightOnly && isHighR && " 🔥"}
                       </td>
 
                       {/* Params */}
@@ -327,7 +383,7 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
 
           {/* Footer note */}
           <div className="mt-2 text-[0.6rem] text-[#2a3d5a] font-mono">
-            Entry determined by ST bullish flip + SMA50 filter · Stop = trailing ST line (optimized params) · Click row to jump to card
+            Asymmetric 100/40: every name is held — 100% while in an ST long OR above its own 200-day SMA, 40% floor otherwise. Rows with “—” have no ST long, so no entry price or P&amp;L; they are still held at the shown weight. A stop hit TRIMS to 40%, it does not exit. Avg P&amp;L / R / days cover ST longs only. Click row to jump to card
           </div>
         </div>
       )}

@@ -1,5 +1,6 @@
 "use client";
 import { StockAnalysisResult } from "@/types";
+import { targetWeightOfResult } from "@/lib/targetWeight";
 import { LineChart, Line, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
 
 interface Props { result: StockAnalysisResult; }
@@ -51,6 +52,9 @@ export default function OverviewTab({ result }: Props) {
   const stDir     = result.st_direction ?? -1;
   const stDist    = result.st_stop_distance_pct ?? 0;
   const stOpenRet = result.st_open_return_pct;
+  // Asymmetric 100/40 exposure (targetWeight.ts). Exposure layer only — it does
+  // not change the ST BULLISH/BEARISH stance rendered below.
+  const tgtWeight = targetWeightOfResult(result).weight;
   const optParams = result.st_opt_params;
 
   // Formatted label for optimal params
@@ -120,6 +124,7 @@ export default function OverviewTab({ result }: Props) {
                     <span className="text-[#4a6080]">P&L: <span className={stOpenRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>{stOpenRet >= 0 ? "+" : ""}{stOpenRet.toFixed(1)}%</span></span>
                   )}
                   {stDir !== 1 && <span className="text-[#ff4757]/70">wait for flip</span>}
+                  <span className="text-[#4a6080]">wt: <span className={tgtWeight === 100 ? "text-[#00d4ff]" : "text-[#ffa502]"}>{tgtWeight}%</span></span>
                 </div>
 
                 {/* ── ST Status strip with optimized params ── */}
@@ -136,6 +141,16 @@ export default function OverviewTab({ result }: Props) {
                   {stDir === 1 && stOpenRet !== null && stOpenRet !== undefined && (
                     <span className="text-[#4a6080]">open: <span className={stOpenRet >= 0 ? "text-[#00ff88]" : "text-[#ffa502]"}>{stOpenRet >= 0 ? "+" : ""}{stOpenRet.toFixed(1)}%</span></span>
                   )}
+                  {/* Asymmetric target weight — held size, regardless of stance */}
+                  <span className={`border rounded px-1 py-0.5 text-[0.55rem] font-bold ${
+                      tgtWeight === 100
+                        ? "text-[#00d4ff] border-[#00d4ff]/35 bg-[#00d4ff]/10"
+                        : "text-[#ffa502] border-[#ffa502]/40 bg-[#ffa502]/10"}`}
+                    title={tgtWeight === 100
+                      ? "Held at 100% — in an ST long, or price is above its own 200-day SMA"
+                      : "Held at the 40% floor — no ST long AND below its own 200-day SMA"}>
+                    wt {tgtWeight}%
+                  </span>
                   {/* Optimized params badge */}
                   {optLabel && (
                     <span className="ml-auto text-[#ffa502]/70 border border-[#ffa502]/30 rounded px-1 py-0.5 text-[0.55rem]">
