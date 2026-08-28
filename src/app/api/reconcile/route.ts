@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { targetWeight as targetWeight_ } from "@/lib/targetWeight";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import { supertrend, sma } from "@/lib/indicators";
 import { computeTrendTemplateCriteria } from "@/lib/trendTemplate";
@@ -19,6 +20,7 @@ interface ReconcileTicker {
   score: number;   // 7-criterion TT count
   entryReady: boolean; // strategy SMA50 gate: dir up AND c5 (see STRATEGY.md)
   inLong: boolean;     // strategy position state (STRATEGY.md state machine)
+  targetWeight: number; // asymmetric exposure (STRATEGY.md position sizing)
   barDate: string; // YYYY-MM-DD of the last bar used for computation
 }
 
@@ -48,11 +50,18 @@ async function computeOne(symbol: string): Promise<ReconcileTicker | null> {
   const entryReady = dir === "up" && tt.c5_price_above_sma50 === true;
   // Strategy position state — independent recompute of the worker's inLong so
   // Tier-2 catches the two engines disagreeing about holding a position.
-  const { inLong } = simulatePositionState(closes, dirArr, sigArr, sma(closes, 50));
+  const { inLong, entryPending } = simulatePositionState(closes, dirArr, sigArr, sma(closes, 50));
+  // Independent recompute of the worker's targetWeight. Without this the daily
+  // drift check is blind to the field that decides POSITION SIZE — a worker/web
+  // disagreement there would move real money silently.
+  const { weight: targetWeight } = targetWeight_({
+    inPosition: inLong || entryPending,
+    aboveSma200: tt.c2_price_above_sma200,
+  });
   const barDate = ohlcv.bars[ohlcv.bars.length - 1].date;
 
   return { dir, atrPeriod: p.atrPeriod, mult: p.multiplier,
-           score: tt.criteria_met, entryReady, inLong, barDate };
+           score: tt.criteria_met, entryReady, inLong, targetWeight, barDate };
 }
 
 export async function GET(req: NextRequest) {
