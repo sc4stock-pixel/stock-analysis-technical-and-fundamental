@@ -3,6 +3,7 @@ import { reconcileWorkerEvents, entryReadyOf } from "@/lib/worker-events";
 import type { StockAnalysisResult } from "@/types";
 import type { WorkerEvent, WorkerTickerState } from "@/types/worker-state";
 import { supertrend } from "@/lib/indicators";
+import { targetWeightOfWorker, targetWeightOfResult } from "@/lib/targetWeight";
 
 export const ACT_WINDOW_SESSIONS = 10;
 export const FLIP_ALERT_DAYS = 3;
@@ -41,6 +42,9 @@ export interface ActionableRow {
   entryReady?: boolean;
   /** Strategy position state for long-stance rows (see PosState). */
   posState?: PosState;
+  /** Asymmetric 100/40 target weight (exposure layer, targetWeight.ts).
+   *  NEVER the basis for LONG/entry wording — display beside the state tag. */
+  targetWeight?: number;
   whipsaw: boolean;
   rawCount?: number;     // raw events folded (whipsaw caption)
   ttFlag?: string;       // e.g. "+ TT 5→4"
@@ -255,7 +259,18 @@ export function buildAlertModel(
   const clientRows = clientActionable(clientResults, reportedTickers, now)
     .filter(r => isActionable(r, opts.heldSet));
 
-  const actOnThis = [...workerRows, ...clientRows]
+  // Attach the asymmetric 100/40 target weight (single derivation:
+  // targetWeight.ts). Worker rows use KV state; client rows use the pipeline
+  // result. Exposure layer only — the tag/state fields above stay untouched.
+  const bySym = new Map(clientResults.map(r => [r.symbol, r]));
+  const withWeight = (r: ActionableRow): ActionableRow => {
+    const tw = r.source === "worker"
+      ? targetWeightOfWorker(tickers[r.symbol])
+      : (bySym.has(r.symbol) ? targetWeightOfResult(bySym.get(r.symbol)!) : undefined);
+    return tw ? { ...r, targetWeight: tw.weight } : r;
+  };
+
+  const actOnThis = [...workerRows, ...clientRows].map(withWeight)
     .sort((a, b) => a.severity - b.severity || a.barsSince - b.barsSince);
 
   return { actOnThis, auditLog: reconciled, otherAlerts: extractOtherAlerts(clientResults) };

@@ -85,6 +85,19 @@ function ActRow({ r }: { r: ActionableRow }) {
             : r.posState === "pending" ? "🕒 ENTRY · ST↑"
             : "LONG · ST↑"}
         </span>
+        {/* Asymmetric 100/40 target weight (exposure layer — targetWeight.ts).
+            Displays exposure only; never alters the state pill above. */}
+        {r.targetWeight != null && (
+          <span className={`font-mono text-[0.6rem] font-bold px-1.5 py-0.5 rounded border ${
+              r.targetWeight === 100
+                ? "bg-[#00d4ff]/10 border-[#00d4ff]/35 text-[#00d4ff]"
+                : "bg-[#ffa502]/12 border-[#ffa502]/40 text-[#ffa502]"}`}
+            title={r.targetWeight === 100
+              ? "Target 100% — in position, or price above its own 200-day SMA"
+              : "Target 40% floor — no position AND price below its own 200-day SMA"}>
+            {r.targetWeight}%
+          </span>
+        )}
       </div>
       {r.whipsaw && r.rawCount != null && (
         <div className="font-mono text-[0.6rem] text-[#4a6080] pl-7 pb-1.5">{r.rawCount} raw events folded → see audit log</div>

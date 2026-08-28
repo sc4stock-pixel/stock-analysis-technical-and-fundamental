@@ -51,8 +51,10 @@ describe("buildTelegramMessage — SMA50 entry gate tag", () => {
   it("tags a below-SMA50 flip as [WAIT], not [LONG]", () => {
     const block = msg.slice(msg.indexOf("ACT ON THIS"));
     expect(block).toContain("awaiting SMA50");
-    expect(block).toContain("[WAIT]");
-    expect(block).not.toContain("[LONG]");
+    // The tag may carry the asymmetric target weight (e.g. "[WAIT 40%]") —
+    // assert on the state word, not the exact bracket contents.
+    expect(block).toContain("[WAIT");
+    expect(block).not.toContain("[LONG");
   });
 });
 

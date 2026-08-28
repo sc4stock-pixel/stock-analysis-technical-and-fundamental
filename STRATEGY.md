@@ -67,6 +67,36 @@ worker-vs-web daily.
 - Trade-log records store the gate **at signal time**; live surfaces show it
   **now** — they may legitimately differ (e.g. META 2026-07-01).
 
+## Position sizing — the asymmetric 100/40 target weight (added 2026-08-27)
+
+The state machine above is UNCHANGED. On top of it, every name carries a
+**target weight** — the exposure the strategy wants, as % of the name's full
+allocation:
+
+| State | Target weight |
+|---|---|
+| LONG or ENTRY-PENDING | **100%** |
+| OUT, Close > own SMA200 (TT c2) | **100%** — trend intact, hold |
+| OUT, Close ≤ own SMA200 | **40%** — floor; never 0 |
+| OUT, SMA200 unknown | 40% — a data gap must not report full size |
+
+Consequences:
+- An ST flip-down is a **TRIM to 40%**, not a full exit — and when the name is
+  still above its own 200-day it is **NO ACTION** (weight stays 100%).
+- The floor means the book is never flat a name. Chosen over 0/100 on evidence:
+  beats it in 12/16 portfolio names on both the 7-year daily backtest and the
+  23-month OOS replay (2026-08-26/27; exp_oos_replay.py ASYM variants).
+- **Vocabulary contract extension:** target weight is EXPOSURE, not entry
+  state. A 100% weight via the SMA200 leg alone must never render as
+  LONG/entry. The state tags (LONG/ENTRY/WAIT/OUT) keep their existing
+  derivations; the weight is displayed beside them.
+- Single derivation: web `src/lib/targetWeight.ts`
+  (`targetWeightOfWorker` for KV state — criteria[1]=c2; `targetWeightOfResult`
+  for pipeline results) · worker `signals.py compute_target_weight`. No surface
+  may re-derive the mapping inline.
+- Trade-log `/fill` semantics are UNCHANGED: fills record what was actually
+  traded; the weight is the advisory target, not a fill instruction.
+
 ## Rules for new development
 
 1. **Read this file before touching any signal-adjacent code.**

@@ -345,7 +345,9 @@ export function buildEodReport(
         : "🟢 LONG";
       const when = r.barsSince === 0 ? "today" : `${r.barsSince}d ago`;
       const tt = r.ttFlag ? ` ${htmlEscape(r.ttFlag.replace("→", "->"))}` : "";
-      lines.push(`  • <b>${htmlEscape(dispSymForReport(r.symbol))}</b> ${r.change}${tt} (${when}) — ${tag}`);
+      // Asymmetric 100/40 target weight (exposure layer — targetWeight.ts)
+      const w = r.targetWeight != null ? ` · tgt ${r.targetWeight}%` : "";
+      lines.push(`  • <b>${htmlEscape(dispSymForReport(r.symbol))}</b> ${r.change}${tt} (${when}) — ${tag}${w}`);
     });
   }
 
