@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { targetWeightOfResult } from "@/lib/targetWeight";
+import { targetWeightOfResult, weightTone } from "@/lib/targetWeight";
 import { StockAnalysisResult, AppConfig, CandlestickPattern, BacktestResult, ForecastSkill } from "@/types";
 import { regimeColor } from "@/lib/regime";
 import { kronosRow, naiveRow, convictionFlags, skillBadge } from "@/lib/forecastBox";
@@ -151,6 +151,7 @@ export default function StockCard({ result, config, kronos, forecastSkill, force
   // Asymmetric 100/40 held size (exposure layer — targetWeight.ts). Separate
   // from the ST stance badge beside it, which stays a pure layer-1 indicator.
   const tgtWeight = targetWeightOfResult(result).weight;
+  const tgtTone = weightTone(tgtWeight);
 
   return (
     <div className="card flex flex-col">
@@ -171,12 +172,12 @@ export default function StockCard({ result, config, kronos, forecastSkill, force
               {stDir === 1 ? "🟢 ST" : "🔴 ST"}
             </span>
             <span className={`text-xs px-1 py-0.5 rounded border font-mono font-bold ${
-              tgtWeight === 100
-                ? "border-[#00d4ff]/35 text-[#00d4ff] bg-[#00d4ff]/10"
-                : "border-[#ffa502]/40 text-[#ffa502] bg-[#ffa502]/10"
-            }`} title={tgtWeight === 100
-                ? "Held at 100% — in an ST long, or above its own 200-day SMA"
-                : "Held at the 40% floor — no ST long AND below its own 200-day SMA"}>
+              tgtTone === "full" ? "border-[#00d4ff]/35 text-[#00d4ff] bg-[#00d4ff]/10"
+              : tgtTone === "trim" ? "border-[#7dd3fc]/35 text-[#7dd3fc] bg-[#7dd3fc]/10"
+              : "border-[#ffa502]/40 text-[#ffa502] bg-[#ffa502]/10"
+            }`} title={tgtTone === "full" ? "100% — in an ST long"
+                : tgtTone === "trim" ? "70% trim — ST bearish, still above its own 200-day SMA"
+                : "40% floor — ST bearish AND below its own 200-day SMA"}>
               wt {tgtWeight}%
             </span>
             {result.sepa_metadata && (() => {

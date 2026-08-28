@@ -5,8 +5,19 @@
 // mapping on top of it:
 //
 //   in position (LONG or ENTRY-PENDING)        -> 100%
-//   out of position, Close > own SMA200        -> 100%   (trend intact: hold)
+//   out of position, Close > own SMA200        ->  70%   (TRIM tier)
 //   out of position, Close <= own SMA200       ->  40%   (floor, never 0)
+//
+// The 70% trim tier was added 2026-08-28. The rule originally held 100% while
+// price was above its own 200-day regardless of SuperTrend, which left ST doing
+// nothing at all in bull markets. Decomposing the two levers showed why that
+// mattered less than it looked, and where the cost actually sits:
+//   Y (trim when ST breaks while ABOVE the 200-day): 100->70 costs 1.1pp CAGR,
+//     buys 2.6pp less drawdown, and leaves Sharpe 0.70 / Calmar 0.48 UNCHANGED
+//     across all five start-date offsets. Effectively free.
+//   X (trim when ST is long but BELOW the 200-day): expensive — full "AND"
+//     (X=Y=40) cost 5.3pp CAGR and 0.06 Sharpe, concentrated in the trending
+//     winners (NVDA -27.7pp). REJECTED; an ST long stays at 100% either way.
 //
 // Validated 2026-08-26/27: beats the 0/100 mapping in 12/16 portfolio names on
 // BOTH the 7-year daily backtest and the 23-month OOS replay (exp_oos_replay.py
@@ -25,6 +36,8 @@ import type { WorkerTickerState } from "@/types/worker-state";
 
 /** Full exposure, percent. */
 export const WEIGHT_FULL = 100;
+/** Trim tier — out of position but price still above its own 200-day. */
+export const WEIGHT_TRIM = 70;
 /** Floor exposure, percent — held when out of position below the 200-day. */
 export const WEIGHT_FLOOR = 40;
 
@@ -36,16 +49,26 @@ export interface TargetWeightInputs {
 }
 
 export interface TargetWeight {
-  /** 100 or 40 (percent of the name's full allocation). */
+  /** 100, 70 or 40 (percent of the name's full allocation). */
   weight: number;
   /** Why: which leg produced the weight (drives per-surface copy). */
-  reason: "in_position" | "above_sma200" | "floor" | "unknown_sma200";
+  reason: "in_position" | "trim_above_sma200" | "floor" | "unknown_sma200";
+}
+
+/** Semantic tier for rendering. Surfaces switch on THIS, never on the raw
+ *  number — adding the 70% tier broke every `weight === 100 ? a : b` in the app. */
+export type WeightTone = "full" | "trim" | "floor";
+
+export function weightTone(weight: number): WeightTone {
+  if (weight >= WEIGHT_FULL) return "full";
+  if (weight > WEIGHT_FLOOR) return "trim";
+  return "floor";
 }
 
 /** Core mapping — the only place the 100/40 rule exists. */
 export function targetWeight(inp: TargetWeightInputs): TargetWeight {
   if (inp.inPosition) return { weight: WEIGHT_FULL, reason: "in_position" };
-  if (inp.aboveSma200 === true) return { weight: WEIGHT_FULL, reason: "above_sma200" };
+  if (inp.aboveSma200 === true) return { weight: WEIGHT_TRIM, reason: "trim_above_sma200" };
   if (inp.aboveSma200 === false) return { weight: WEIGHT_FLOOR, reason: "floor" };
   // SMA200 unknown (short history / stale KV): fail toward the floor so a data
   // gap can never silently report full size on a broken trend.
@@ -84,7 +107,8 @@ export function weightTag(tw: TargetWeight | undefined): string {
 /** One-line action phrasing for alert surfaces. Exit alerts use this so an ST
  *  flip-down no longer reads as "sell everything". */
 export function exitActionLabel(tw: TargetWeight): string {
-  return tw.weight === WEIGHT_FULL
-    ? `HOLD ${WEIGHT_FULL}% (above 200D)`
+  if (tw.weight >= WEIGHT_FULL) return `HOLD ${WEIGHT_FULL}%`;
+  return tw.weight > WEIGHT_FLOOR
+    ? `TRIM to ${WEIGHT_TRIM}% (above 200D)`
     : `TRIM to ${WEIGHT_FLOOR}%`;
 }

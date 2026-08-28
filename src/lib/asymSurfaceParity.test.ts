@@ -41,6 +41,17 @@ describe("asymmetric 100/40 cross-surface parity", () => {
     expect(usesHelper || usesRowField).toBe(true);
   });
 
+  const TSX_SURFACES = WEIGHT_BEARING_SURFACES.filter(f => f.endsWith(".tsx"));
+
+  it.each(TSX_SURFACES)("%s switches on weightTone, not the raw number", (file) => {
+    const src = read(file);
+    // Adding the 70% trim tier broke every `weight === 100 ? a : b`. Surfaces
+    // must branch on the semantic tone so the next tier change cannot silently
+    // render a middle tier with the floor's styling.
+    expect(src).not.toMatch(/targetWeight\s*===\s*100|tgtWeight\s*===\s*100|\bw\s*===\s*100\b/);
+    expect(src).toMatch(/weightTone/);
+  });
+
   it.each(WEIGHT_BEARING_SURFACES)("%s does not hardcode the 100/40 rule inline", (file) => {
     const src = read(file);
     // The mapping lives in ONE place. A surface re-deriving "close > sma200 ? 100 : 40"

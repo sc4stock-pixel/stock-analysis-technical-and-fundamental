@@ -76,13 +76,27 @@ allocation:
 | State | Target weight |
 |---|---|
 | LONG or ENTRY-PENDING | **100%** |
-| OUT, Close > own SMA200 (TT c2) | **100%** — trend intact, hold |
+| OUT, Close > own SMA200 (TT c2) | **70%** — trim tier |
 | OUT, Close ≤ own SMA200 | **40%** — floor; never 0 |
 | OUT, SMA200 unknown | 40% — a data gap must not report full size |
 
+**Why 70 and not 100 on the middle leg (2026-08-28).** The rule originally held
+100% above the 200-day regardless of SuperTrend, which left ST inert in bull
+markets — roughly 75% of the sample. Decomposing the two levers over 7y/16 names:
+
+| lever | change | effect |
+|---|---|---|
+| trim when ST breaks while ABOVE the 200-day | 100 → **70** | −1.1pp CAGR, −2.6pp drawdown, Sharpe 0.70 and Calmar 0.48 **unchanged** at all 5 start offsets |
+| trim when ST is long but BELOW the 200-day | 100 → 40 | −5.3pp CAGR, −0.06 Sharpe, damage concentrated in trending winners (NVDA −27.7pp) — **REJECTED** |
+
+So the middle leg trims and the ST-long leg does not. Full "AND" sizing
+(100% only when ST-long AND above the 200-day) was tested and rejected: it beat
+this rule on drawdown in 14/16 names but lost on Sharpe in 12/16, because
+trimming on every ST flip re-introduces the whipsaw leak the floor exists to fix.
+
 Consequences:
-- An ST flip-down is a **TRIM to 40%**, not a full exit — and when the name is
-  still above its own 200-day it is **NO ACTION** (weight stays 100%).
+- An ST flip-down is a **TRIM**, never a full exit: to **70%** while the name
+  still holds its own 200-day, to the **40% floor** below it.
 - The floor means the book is never flat a name. Chosen over 0/100 on evidence:
   beats it in 12/16 portfolio names on both the 7-year daily backtest and the
   23-month OOS replay (2026-08-26/27; exp_oos_replay.py ASYM variants).
@@ -90,6 +104,8 @@ Consequences:
   state. A 100% weight via the SMA200 leg alone must never render as
   LONG/entry. The state tags (LONG/ENTRY/WAIT/OUT) keep their existing
   derivations; the weight is displayed beside them.
+- Surfaces switch on `weightTone()` (`full`/`trim`/`floor`), never on the raw
+  number — adding the 70% tier broke every `weight === 100 ? a : b` in the app.
 - Single derivation: web `src/lib/targetWeight.ts`
   (`targetWeightOfWorker` for KV state — criteria[1]=c2; `targetWeightOfResult`
   for pipeline results) · worker `signals.py compute_target_weight`. No surface

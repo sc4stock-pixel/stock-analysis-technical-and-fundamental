@@ -3,7 +3,7 @@ import { useState, useMemo } from "react";
 import { StockAnalysisResult } from "@/types";
 import { supertrend, sma } from "@/lib/indicators";
 import InfoTooltip from "@/components/InfoTooltip";
-import { targetWeightOfResult, WEIGHT_FLOOR } from "@/lib/targetWeight";
+import { targetWeightOfResult, weightTone, WEIGHT_FLOOR } from "@/lib/targetWeight";
 
 interface Props {
   results: StockAnalysisResult[];
@@ -309,17 +309,20 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
 
                       {/* Target weight — the asymmetric 100/40 exposure */}
                       <td className="px-2 py-1.5 text-right">
-                        <span className={`font-mono font-bold text-[0.65rem] px-1.5 py-0.5 rounded border ${
-                            pos.targetWeight === 100
-                              ? "bg-[#00d4ff]/10 border-[#00d4ff]/35 text-[#00d4ff]"
-                              : "bg-[#ffa502]/12 border-[#ffa502]/40 text-[#ffa502]"}`}
-                          title={pos.targetWeight === 100
-                            ? (pos.weightOnly
-                                ? "Held at full size: no ST long, but price is above its own 200-day SMA"
-                                : "Held at full size: ST long")
-                            : "Floor: no ST long AND below its own 200-day SMA"}>
-                          {pos.targetWeight}%
-                        </span>
+                        {(() => {
+                          const tone = weightTone(pos.targetWeight);
+                          const cls = tone === "full" ? "bg-[#00d4ff]/10 border-[#00d4ff]/35 text-[#00d4ff]"
+                            : tone === "trim" ? "bg-[#7dd3fc]/10 border-[#7dd3fc]/35 text-[#7dd3fc]"
+                            : "bg-[#ffa502]/12 border-[#ffa502]/40 text-[#ffa502]";
+                          const tip = tone === "full" ? "Full size — in an ST long"
+                            : tone === "trim" ? "Trimmed to 70% — ST bearish, but price still above its own 200-day SMA"
+                            : "Floor 40% — ST bearish AND below its own 200-day SMA";
+                          return (
+                            <span className={`font-mono font-bold text-[0.65rem] px-1.5 py-0.5 rounded border ${cls}`} title={tip}>
+                              {pos.targetWeight}%
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* Entry Date */}
@@ -383,7 +386,7 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
 
           {/* Footer note */}
           <div className="mt-2 text-[0.6rem] text-[#2a3d5a] font-mono">
-            Asymmetric 100/40: every name is held — 100% while in an ST long OR above its own 200-day SMA, 40% floor otherwise. Rows with “—” have no ST long, so no entry price or P&amp;L; they are still held at the shown weight. A stop hit TRIMS to 40%, it does not exit. Avg P&amp;L / R / days cover ST longs only. Click row to jump to card
+            Asymmetric sizing: every name is held — 100% in an ST long · 70% when ST is bearish but price holds its own 200-day SMA · 40% floor below it. Rows with “—” have no ST long, so no entry price or P&amp;L; they are still held at the shown weight. A stop hit TRIMS to 40%, it does not exit. Avg P&amp;L / R / days cover ST longs only. Click row to jump to card
           </div>
         </div>
       )}
