@@ -1,7 +1,7 @@
 import { SepaMetadata, TrendTemplateCriteria, KronosForecasts, ForecastSkill, SkillStat } from "@/types";
 import { htmlEscape } from "@/lib/telegram";
 import { buildAlertModel } from "@/lib/alert-model";
-import { targetWeightOfResult } from "@/lib/targetWeight";
+import { targetWeightOfResult, targetWeight, WEIGHT_FULL, WEIGHT_FLOOR } from "@/lib/targetWeight";
 import { CONVICTION_PCT } from "@/lib/forecastBox";
 import type { StockAnalysisResult } from "@/types";
 import type { BreadthMovers } from "@/lib/breadth-movers";
@@ -128,6 +128,11 @@ function groupedInline(stocks: SlimResult[], perLine = 3): string[] {
 const PROXIMITY_THRESHOLD_PCT = 2.0;
 
 type ProximityHit = { r: SlimResult; kind: "near_stop" | "near_bull_flip"; dist: number };
+
+/** Close > own SMA200, from TT criterion c2 — the same source targetWeight.ts uses. */
+function aboveSma200Of(r: { sepa_metadata?: { trend_template_criteria?: { c2_price_above_sma200?: boolean } } }): boolean | undefined {
+  return r.sepa_metadata?.trend_template_criteria?.c2_price_above_sma200;
+}
 
 function detectProximity(valid: SlimResult[]): ProximityHit[] {
   const hits: ProximityHit[] = [];
@@ -355,16 +360,30 @@ export function buildEodReport(
     lines.push(`  <i>tgt = asymmetric target weight: 100% in position or above own 200D SMA · 40% floor otherwise — an exit above the 200D is HOLD, not sell</i>`);
   }
 
-  // ST PROXIMITY — low-priority warnings using cached ST params
+  // WEIGHT MOVES NEARBY — what an imminent ST flip would do to the POSITION SIZE.
+  // Under asymmetric sizing "Near Stop" is no longer one thing: a name above its
+  // own 200-day steps down to the trim tier, one below it drops straight to the
+  // floor, and a bearish name approaching a bullish flip is an ADD, not a warning.
+  // Rendering them identically buried the severe case among routine ones.
   if (proximity.length > 0) {
-    lines.push(`\n⚠️ <b>ST PROXIMITY</b> (within ${PROXIMITY_THRESHOLD_PCT.toFixed(0)}%)`);
-    proximity.forEach(({ r, kind, dist }) => {
-      const label = kind === "near_stop" ? "Near Stop" : "Near Bullish Flip";
-      const detail = kind === "near_stop"
-        ? `price ${dist.toFixed(1)}% above ST`
-        : `price ${Math.abs(dist).toFixed(1)}% below ST`;
-      lines.push(`  • <b>${htmlEscape(r.symbol)}</b>: ${label} (${detail})`);
+    lines.push(`\n⚠️ <b>WEIGHT MOVES NEARBY</b> (within ${PROXIMITY_THRESHOLD_PCT.toFixed(0)}% of the ST line)`);
+    const rows = proximity.map(({ r, kind, dist }) => {
+      const now = targetWeightOfResult(r).weight;
+      // Post-flip weight: a bullish flip enters the strategy (full size); a
+      // bearish flip leaves it, landing on the trim tier or the floor by the
+      // name's own 200-day. Single derivation — targetWeight.ts decides both.
+      const after = kind === "near_bull_flip"
+        ? WEIGHT_FULL
+        : targetWeight({ inPosition: false, aboveSma200: aboveSma200Of(r) }).weight;
+      const arrow = after > now ? "↑" : "↓";
+      const where = kind === "near_stop"
+        ? `${dist.toFixed(1)}% above ST line`
+        : `${Math.abs(dist).toFixed(1)}% below ST line`;
+      // Flag only the case that skips the trim tier — the one worth acting on.
+      const severe = after === WEIGHT_FLOOR && now === WEIGHT_FULL ? " · skips trim tier" : "";
+      return `${arrow} ${dispSymForReport(r.symbol).padEnd(8)} ${String(now).padStart(3)}% → ${String(after).padStart(3)}%  (${where})${severe}`;
     });
+    lines.push(`<pre>${htmlEscape(rows.join("\n"))}</pre>`);
   }
 
   // Market breadth
@@ -396,7 +415,10 @@ export function buildEodReport(
       const sym  = r.symbol.padEnd(maxSymLen);
       // Target weight (targetWeight.ts) — ST direction alone no longer implies size.
       const w = `${targetWeightOfResult(r).weight}%`.padStart(4);
-      rows.push(`${sym} ${w} ${sepa} ${chg}`);
+      // Parity with the execution alert: a 100% name BELOW its own 200-day drops
+      // straight to the floor if ST flips, skipping the trim tier.
+      const drop = aboveSma200Of(r) === false ? " ↓40" : "";
+      rows.push(`${sym} ${w} ${sepa} ${chg}${drop}`);
     });
     // Wrap in <pre> so Telegram renders monospace and preserves column alignment
     lines.push(`<pre>${rows.join("\n")}</pre>`);
@@ -406,10 +428,19 @@ export function buildEodReport(
   if (bearish.length > 0) {
     // ST bearish no longer means flat: these are held at 70% (above the 200-day)
     // or the 40% floor. Split the header so the label cannot imply "not held".
-    const bTrim = bearish.filter(r => targetWeightOfResult(r).weight > 40).length;
-    const bFloor = bearish.length - bTrim;
-    lines.push(`\n🔴 <b>ST BEARISH (${bearish.length})</b> <i>held: ${bTrim} @70% · ${bFloor} @40%</i>`);
-    lines.push(...groupedInline(bearish, 3));
+    // Group by WEIGHT, not by exchange: the header already says how many sit in
+    // each tier, and grouping by flag made it impossible to tell which was which.
+    const trimNames  = bearish.filter(r => targetWeightOfResult(r).weight > WEIGHT_FLOOR);
+    const floorNames = bearish.filter(r => targetWeightOfResult(r).weight === WEIGHT_FLOOR);
+    lines.push(`\n🔴 <b>ST BEARISH (${bearish.length})</b> <i>all held — none flat</i>`);
+    if (trimNames.length > 0) {
+      lines.push(`  <b>@70%</b> <i>above own 200d</i>`);
+      lines.push(...groupedInline(trimNames, 3));
+    }
+    if (floorNames.length > 0) {
+      lines.push(`  <b>@40%</b> <i>below own 200d</i>`);
+      lines.push(...groupedInline(floorNames, 3));
+    }
   }
 
   // FORECASTS — Kronos 5d forecast table

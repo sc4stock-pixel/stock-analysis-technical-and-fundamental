@@ -185,3 +185,40 @@ describe("buildForecastSection — 5d + skill footer", () => {
     expect(joined).not.toContain("Kronos vs a one-line contrarian rule");
   });
 });
+
+// 2026-08-28: under asymmetric sizing "Near Stop" is three different events.
+// The EOD report must say what an imminent flip does to POSITION SIZE.
+describe("buildEodReport — WEIGHT MOVES NEARBY", () => {
+  const nearStop = (symbol: string, aboveSma200: boolean, dist: number): unknown => ({
+    symbol, exchange: "US", signal: "HOLD", score: 5, current_price: 100,
+    change_pct: 0.4, st_direction: 1, st_stop_distance_pct: dist,
+    st_open_return_pct: 3.0,                       // in an ST long -> 100% now
+    sepa_metadata: { sepa_score: 1, trend_template: aboveSma200,
+      trend_template_criteria: { criteria_met: 5, c2_price_above_sma200: aboveSma200 } },
+  });
+  const nearBullFlip = (symbol: string, dist: number): unknown => ({
+    symbol, exchange: "US", signal: "HOLD", score: 5, current_price: 100,
+    change_pct: 0.4, st_direction: -1, st_stop_distance_pct: dist,
+    st_open_return_pct: null,
+    sepa_metadata: { sepa_score: 1, trend_template: true,
+      trend_template_criteria: { criteria_met: 6, c2_price_above_sma200: true } },
+  });
+
+  it("a 100% name BELOW its 200-day shows the floor drop and is flagged severe", () => {
+    const msg = buildEodReport([nearStop("HSTECH", false, 1.1)] as never, "hk");
+    expect(msg).toContain("WEIGHT MOVES NEARBY");
+    expect(msg).toMatch(/↓ HSTECH\s+100% →\s+40%/);
+    expect(msg).toContain("skips trim tier");
+  });
+
+  it("a 100% name ABOVE its 200-day steps down to the trim tier, not the floor", () => {
+    const msg = buildEodReport([nearStop("SPY", true, 1.7)] as never, "us");
+    expect(msg).toMatch(/↓ SPY\s+100% →\s+70%/);
+    expect(msg).not.toContain("skips trim tier");
+  });
+
+  it("a near bullish flip is an ADD (up arrow), never a warning to trim", () => {
+    const msg = buildEodReport([nearBullFlip("TSM", -1.6)] as never, "us");
+    expect(msg).toMatch(/↑ TSM\s+70% →\s+100%/);
+  });
+});
