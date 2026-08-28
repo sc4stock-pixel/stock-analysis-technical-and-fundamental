@@ -186,3 +186,29 @@ describe("buildTelegramMessage — ST↑ HOLD with confirmed structure (regressi
     expect(msg).toContain("6/7");
   });
 });
+
+// Regression (2026-08-28): the live alert lost its "% vs 200d" column because
+// pctVs200 read chart_bars, which /api/cron/analyze strips for payload size.
+// The 200-day must come from the backtest SCALAR so it survives slimming.
+describe("buildTelegramMessage — % vs 200d survives a slimmed payload", () => {
+  const slim = (symbol: string, price: number, sma200: number): StockAnalysisResult => ({
+    symbol, exchange: "US", signal: "HOLD", score: 5,
+    current_price: price, change_pct: 0.5, regime: "DOWNTREND",
+    st_direction: -1,                       // ST bearish -> trim/floor bucket
+    backtest: { sma_200: sma200 },          // scalar present
+    sepa_metadata: { trend_template_criteria: {
+      criteria_met: 6, c2_price_above_sma200: price > sma200 } },
+    // NOTE: no chart_bars — exactly what the cron payload looks like.
+  } as unknown as StockAnalysisResult);
+
+  it("renders the 200-day distance with chart_bars absent", () => {
+    const msg = buildTelegramMessage([slim("TSM", 427.3, 369.0)], "cron");
+    expect(msg).toContain("vs 200d");
+    expect(msg).toContain("+15.8% vs 200d");
+  });
+
+  it("renders it for a floor name too", () => {
+    const msg = buildTelegramMessage([slim("META", 571.1, 622.8)], "cron");
+    expect(msg).toMatch(/-8\.3% vs 200d/);
+  });
+});
