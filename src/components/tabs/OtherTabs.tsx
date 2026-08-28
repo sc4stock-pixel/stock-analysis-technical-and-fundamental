@@ -138,7 +138,9 @@ export function TradingPlanTab({ result }: Props) {
           </div>
           <div className="border-t border-[#1e2d4a] my-1" />
           <div className="flex justify-between">
-            <span className="text-[#ff4757] text-xs">{isSTMode ? "ST Stop Line" : "Stop Loss"}</span>
+            <span className="text-[#ff4757] text-xs" title={isSTMode
+              ? "Asymmetric 100/40: breaching this TRIMS to the 40% floor — and is no action at all while price holds its own 200-day SMA. It is not a full exit."
+              : undefined}>{isSTMode ? "ST Stop Line" : "Stop Loss"}</span>
             <span className="text-[#ff4757] text-xs font-mono">
               {stop ? stop.toFixed(2) : "—"}{risk && price > 0 ? ` (${((risk / price) * 100).toFixed(1)}%)` : ""}
             </span>
@@ -194,7 +196,7 @@ export function TradingPlanTab({ result }: Props) {
         <Row label="Resistance" value={bt.resistance_level?.toFixed(2) ?? "—"} color="text-[#ff4757]" />
         <Row label="Current"    value={price > 0 ? price.toFixed(2) : "—"} color="text-[#00d4ff]" />
         <Row label="Support"    value={bt.support_level?.toFixed(2) ?? "—"} color="text-[#00ff88]" />
-        <Row label={isSTMode ? "ST Stop Line" : "Stop Loss"} value={bt.stop_loss_price?.toFixed(2) ?? "—"} color="text-[#ff4757]" />
+        <Row label={isSTMode ? "ST Stop Line (→ trim to 40%)" : "Stop Loss"} value={bt.stop_loss_price?.toFixed(2) ?? "—"} color="text-[#ff4757]" />
         <Row label="52W High" value={bt.week_52_high?.toFixed(2) ?? "—"} />
         <Row label="52W Low"  value={bt.week_52_low?.toFixed(2) ?? "—"} />
         {fib?.swing_low && <Row label="Swing Low (base)" value={fib.swing_low.toFixed(2)} />}

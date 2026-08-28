@@ -65,9 +65,15 @@ export const PANEL_META: PanelMeta[] = [
   },
   {
     id: "positions",
-    label: "Open Positions",
-    meaning: "Currently held positions with live SuperTrend state.",
+    label: "Book & ST Positions",
+    meaning: "Every held name with its asymmetric target weight, plus live SuperTrend state for the ones in an ST long.",
     cadence: "Each analysis run.",
+    detail: [
+      "Target wt — asymmetric 100/40 exposure: 100% while in an ST long OR while price is above its own 200-day SMA; 40% floor otherwise. Under this rule the book is NEVER flat, so EVERY name appears here — not just ST longs.",
+      "Rows showing “—” for entry / P&L / R-multiple have no ST long. They are still held, at the weight shown.",
+      "Avg P&L · Win · Avg days · Avg R are computed over ST LONGS ONLY — folding in weight-only rows would drag every average toward zero.",
+      "⚠️ NEAR TRIM (not NEAR STOP) — within 3% of the ST line AND below the 200-day, so a breach trims to the 40% floor. While price holds its 200-day, a breach is no action at all.",
+    ],
   },
   {
     id: "stock",

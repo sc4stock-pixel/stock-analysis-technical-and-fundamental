@@ -1,5 +1,6 @@
 "use client";
 import { useState, useCallback } from "react";
+import { targetWeightOfResult } from "@/lib/targetWeight";
 import { StockAnalysisResult, KronosForecasts } from "@/types";
 import { kronosRow, naiveRow, convictionFlags, ForecastRowData } from "@/lib/forecastBox";
 import InfoTooltip from "@/components/InfoTooltip";
@@ -65,7 +66,7 @@ const numColor = (v: number | null | undefined, good = 0) =>
   v == null || isNaN(Number(v)) ? "text-[#4a6080]" : Number(v) >= good ? "text-[#00ff88]" : "text-[#ff4757]";
 
 type ColKey =
-  | "symbol" | "price" | "change_pct" | "regime" | "grade" | "score"
+  | "symbol" | "price" | "change_pct" | "regime" | "grade" | "score" | "tgt_wt"
   | "signal" | "st_status" | "sepa" | "k_5d" | "naive_5d" | "rsi" | "macd_hist"
   | "sc_500d" | "st_500d" | "sc_250d" | "st_250d"
   | "sc_sharpe" | "sc_alpha" | "st_sharpe" | "st_alpha";
@@ -90,6 +91,8 @@ const COLS: ColDef[] = [
   { key: "grade",      label: "Grd",        align: "center", sortVal: r => r.score ?? 0 },
   { key: "score",      label: "Score",      align: "right",  sortVal: r => r.score ?? 0 },
   { key: "signal",     label: "Signal",     align: "center", sortVal: r => r.signal === "BUY" ? 2 : r.signal === "HOLD" ? 1 : 0 },
+  // NOTE: column order here MUST match the <td> order in the row body below.
+  { key: "tgt_wt",     label: "Wt",         align: "center", sortVal: r => targetWeightOfResult(r).weight },
   { key: "st_status",  label: "ST",         align: "center", sortVal: r => (r.st_direction ?? -1) === 1 ? 1 : 0 },
   { key: "sepa",       label: "SEPA",       align: "center", sortVal: r => r.sepa_metadata?.sepa_score ?? -1 },
   { key: "k_5d",       label: "K 5d",       labelColor: K_HDR, align: "right",
@@ -292,6 +295,22 @@ export default function PortfolioSummaryBar({ results, onRowClick, kronosData }:
                   </td>
                   {/* Signal */}
                   <td className="px-2 py-1.5 text-center">{signalBadge(r.signal)}</td>
+                  {/* Target weight — asymmetric 100/40 exposure (targetWeight.ts) */}
+                  <td className="px-2 py-1.5 text-center font-mono text-xs whitespace-nowrap">
+                    {(() => {
+                      const w = targetWeightOfResult(r).weight;
+                      return (
+                        <span className={`font-bold px-1 py-0.5 rounded border text-[0.65rem] ${
+                            w === 100 ? "text-[#00d4ff] border-[#00d4ff]/35 bg-[#00d4ff]/10"
+                                      : "text-[#ffa502] border-[#ffa502]/40 bg-[#ffa502]/10"}`}
+                          title={w === 100
+                            ? "Held at 100% — in an ST long, or above its own 200-day SMA"
+                            : "Held at the 40% floor — no ST long AND below its own 200-day SMA"}>
+                          {w}%
+                        </span>
+                      );
+                    })()}
+                  </td>
                   {/* ST Status */}
                   <td className="px-2 py-1.5 text-center font-mono text-xs whitespace-nowrap">
                     {(() => {
