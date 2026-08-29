@@ -222,3 +222,35 @@ describe("buildEodReport — WEIGHT MOVES NEARBY", () => {
     expect(msg).toMatch(/↑ TSM\s+70% →\s+100%/);
   });
 });
+
+// 2026-08-29: the ST BULLISH weight was hoisted to a per-tier subheader. It must
+// NOT be hardcoded to 100% — "ST bullish" is st_direction===1, which is NOT the
+// same as being in an ST long: a name that flipped up BELOW its SMA50 never
+// entered and belongs at 70%/40% while still appearing in this block.
+describe("buildEodReport — ST BULLISH weight subheaders", () => {
+  const bull = (symbol: string, inLong: boolean, aboveSma200: boolean): unknown => ({
+    symbol, exchange: "US", signal: "HOLD", score: 5, current_price: 100,
+    change_pct: 1.0, st_direction: 1,
+    st_open_return_pct: inLong ? 3.0 : null,
+    sepa_metadata: { sepa_score: 1, trend_template: aboveSma200,
+      trend_template_criteria: { criteria_met: 6, c2_price_above_sma200: aboveSma200 } },
+  });
+
+  it("hoists the weight to a subheader and drops it from each row", () => {
+    const msg = buildEodReport([bull("NVDA", true, true), bull("MSFT", true, true)] as never, "us");
+    expect(msg).toContain("ST BULLISH (2)");
+    expect(msg).toContain("@100%");
+    expect(msg).not.toMatch(/NVDA\s+100%/);   // no per-row repetition
+  });
+
+  it("does NOT assume every ST-bullish name is 100% — a below-SMA50 flip sits at 70%", () => {
+    const msg = buildEodReport([bull("NVDA", true, true), bull("GOOGL", false, true)] as never, "us");
+    expect(msg).toContain("@100%");
+    expect(msg).toContain("@70%");            // the un-entered name is NOT lumped in at 100%
+  });
+
+  it("still marks a 100% name below its own 200-day", () => {
+    const msg = buildEodReport([bull("HSTECH", true, false)] as never, "hk");
+    expect(msg).toContain("↓40");
+  });
+});
