@@ -357,7 +357,7 @@ export function buildEodReport(
     });
     // Legend for the asymmetric 100/40 sizing (targetWeight.ts): shown once,
     // only when the block is present.
-    lines.push(`  <i>tgt = asymmetric target weight: 100% in position or above own 200D SMA · 40% floor otherwise — an exit above the 200D is HOLD, not sell</i>`);
+    lines.push(`  <i>tgt = asymmetric target weight — 100% in an ST long · 70% when ST is bearish but price holds its own 200D SMA · 40% floor below it. A flip is always a TRIM, never a sell.</i>`);
   }
 
   // WEIGHT MOVES NEARBY — what an imminent ST flip would do to the POSITION SIZE.
@@ -406,22 +406,31 @@ export function buildEodReport(
 
   // ST BULLISH — monospace block for column alignment
   if (bullish.length > 0) {
-    lines.push(`\n🟢 <b>ST BULLISH (${bullish.length})</b> — wt · SEPA · chg`);
+    // Weight is hoisted into a per-tier subheader instead of repeating on every
+    // row (Steven, 2026-08-29 — it was redundant). NOT hardcoded to 100%: this
+    // block is `st_direction === 1`, which is NOT the same as "in an ST long".
+    // A name that flipped up BELOW its SMA50 never entered, so it shows here at
+    // 70% or 40%. Grouping keeps that correct instead of asserting a uniform tier.
+    lines.push(`\n🟢 <b>ST BULLISH (${bullish.length})</b> — SEPA · chg`);
     const maxSymLen = Math.max(...bullish.map(r => r.symbol.length));
-    const rows: string[] = [];
-    bullish.forEach((r) => {
-      const sepa = r.sepa_metadata ? fmtSepa(r.sepa_metadata) : "—";
-      const chg  = fmtChg(r.change_pct);
-      const sym  = r.symbol.padEnd(maxSymLen);
-      // Target weight (targetWeight.ts) — ST direction alone no longer implies size.
-      const w = `${targetWeightOfResult(r).weight}%`.padStart(4);
-      // Parity with the execution alert: a 100% name BELOW its own 200-day drops
-      // straight to the floor if ST flips, skipping the trim tier.
-      const drop = aboveSma200Of(r) === false ? " ↓40" : "";
-      rows.push(`${sym} ${w} ${sepa} ${chg}${drop}`);
-    });
-    // Wrap in <pre> so Telegram renders monospace and preserves column alignment
-    lines.push(`<pre>${rows.join("\n")}</pre>`);
+    const byWeight = new Map<number, typeof bullish>();
+    for (const r of bullish) {
+      const w = targetWeightOfResult(r).weight;
+      (byWeight.get(w) ?? byWeight.set(w, []).get(w)!).push(r);
+    }
+    for (const w of Array.from(byWeight.keys()).sort((a, b) => b - a)) {
+      const group = byWeight.get(w)!;
+      lines.push(`  <b>@${w}%</b>`);
+      const rows = group.map((r) => {
+        const sepa = r.sepa_metadata ? fmtSepa(r.sepa_metadata) : "—";
+        const chg  = fmtChg(r.change_pct);
+        const sym  = r.symbol.padEnd(maxSymLen);
+        // A 100% name BELOW its own 200-day skips the trim tier if ST flips.
+        const drop = w === WEIGHT_FULL && aboveSma200Of(r) === false ? " ↓40" : "";
+        return `${sym} ${sepa} ${chg}${drop}`;
+      });
+      lines.push(`<pre>${rows.join("\n")}</pre>`);
+    }
   }
 
   // ST BEARISH — consolidated inline lists grouped by exchange flag (3 per line)
