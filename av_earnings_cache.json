@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-23T05:25:58Z",
+  "updated": "2026-08-30T10:16:19Z",
   "stocks": [
     "AAPL",
     "MSFT",
@@ -288,6 +288,10 @@
       "frequency": "Q",
       "quarters": [
         {
+          "fiscalDateEnding": "2026-07-31",
+          "reportedEPS": "2.22"
+        },
+        {
           "fiscalDateEnding": "2026-04-30",
           "reportedEPS": "1.87"
         },
@@ -330,10 +334,6 @@
         {
           "fiscalDateEnding": "2023-10-31",
           "reportedEPS": "0.402"
-        },
-        {
-          "fiscalDateEnding": "2023-07-31",
-          "reportedEPS": "0.27"
         }
       ]
     },
@@ -532,6 +532,10 @@
       "frequency": "Q",
       "quarters": [
         {
+          "fiscalDateEnding": "2026-06-30",
+          "reportedEPS": "0.902"
+        },
+        {
           "fiscalDateEnding": "2026-03-31",
           "reportedEPS": "0.448"
         },
@@ -589,11 +593,7 @@
         },
         {
           "fiscalDateEnding": "2022-09-30",
-          "reportedEPS": "1.96"
-        },
-        {
-          "fiscalDateEnding": "2022-06-30",
-          "reportedEPS": "1.24"
+          "reportedEPS": "3.2"
         }
       ]
     },
@@ -735,6 +735,10 @@
       "frequency": "Q",
       "quarters": [
         {
+          "fiscalDateEnding": "2026-06-30",
+          "reportedEPS": "0.32"
+        },
+        {
           "fiscalDateEnding": "2026-03-31",
           "reportedEPS": "0.33"
         },
@@ -792,11 +796,7 @@
         },
         {
           "fiscalDateEnding": "2022-09-30",
-          "reportedEPS": "0.34"
-        },
-        {
-          "fiscalDateEnding": "2022-06-30",
-          "reportedEPS": "0.65"
+          "reportedEPS": "0.99"
         }
       ]
     }
