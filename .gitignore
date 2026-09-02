@@ -29,3 +29,9 @@ yarn-error.log*
 next-env.d.ts
 *.tsbuildinfo
 .env.local
+
+# Local Claude account export bundle — delivered to the user directly.
+# Kept out of git: this repo is public and the bundle contains cloud session IDs
+# and personal account preferences. Remove these lines to commit it deliberately.
+claude-export/
+claude-export.tar.gz
