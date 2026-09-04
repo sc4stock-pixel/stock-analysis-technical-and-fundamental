@@ -66,6 +66,49 @@ export async function fetchYahooOHLCV(
   return null;
 }
 
+// ── Null-Close repair (mirrors autopilot worker/data_source.py) ──────────
+// Yahoo sometimes publishes a COMPLETED session's bar with `close: null` while
+// Open/High/Low/Volume are populated and `meta.regularMarketPrice` holds the
+// real settle — seen on all 9 US tickers on 2026-09-03. The old code dropped
+// that bar, so the web ended one session behind the worker while still showing
+// the newer price in `currentPrice`. Two consequences, both silent:
+//   * the app mixed a 09-03 price against SMAs/stops computed through 09-02;
+//   * /api/reconcile skips any name whose barDates differ, so the drift check
+//     compared 0/9 US names and reported "drift: 0" (see reconcile.py).
+//
+// A settle may only be substituted when it is unambiguously FINAL, hence two
+// conservative guards (the second is the web-only analogue of the worker's
+// `repair_final_bar=False` for intraday runs):
+const SETTLE_QUOTE_MIN_AGE_MS = 60 * 60 * 1000; // quote must have stopped moving
+
+/** UTC calendar day (YYYY-MM-DD) of a unix-seconds timestamp. */
+const utcDay = (tsSec: number): string =>
+  new Date(tsSec * 1000).toISOString().split("T")[0];
+
+/**
+ * Settled close for the bar dated `barTsSec`, or null when it can't be trusted.
+ *
+ * Guard 1 — `meta.regularMarketTime` must fall on the bar's own UTC day, so a
+ *           quote belonging to a different session is never borrowed.
+ * Guard 2 — that quote must be at least an hour old. During a live session
+ *           `regularMarketTime` tracks the clock, so a fresh timestamp means
+ *           intraday (a live quote is NOT a close) and the bar must be dropped.
+ */
+export function settledCloseForBar(
+  meta: Record<string, unknown> | undefined | null,
+  barTsSec: number,
+  nowMs: number = Date.now(),
+): number | null {
+  if (!meta) return null;
+  const px = meta.regularMarketPrice;
+  const ts = meta.regularMarketTime;
+  if (typeof px !== "number" || !Number.isFinite(px) || px <= 0) return null;
+  if (typeof ts !== "number" || !Number.isFinite(ts)) return null;
+  if (utcDay(ts) !== utcDay(barTsSec)) return null;        // guard 1: same session
+  if (nowMs - ts * 1000 < SETTLE_QUOTE_MIN_AGE_MS) return null; // guard 2: not live
+  return px;
+}
+
 async function fetchYahooOHLCVOnce(
   symbol: string,
   lookbackDays: number
@@ -92,16 +135,40 @@ async function fetchYahooOHLCVOnce(
     if (!ohlcv || timestamps.length === 0) return null;
 
     const bars: RawOHLCV[] = [];
+    const lastIdx = timestamps.length - 1;
+    let finalBarDropped = false;
     for (let i = 0; i < timestamps.length; i++) {
       const o = ohlcv.open?.[i];
       const h = ohlcv.high?.[i];
       const l = ohlcv.low?.[i];
       const c = ohlcv.close?.[i];
       const v = ohlcv.volume?.[i];
-      if (o == null || h == null || l == null || c == null || c <= 0) continue;
+      if (o == null || h == null || l == null) continue;
+
+      let close = c;
+      if ((c == null || c <= 0) && i === lastIdx) {
+        // Final bar with no Close. Recover the settle rather than dropping the
+        // bar — but only if the settle lands inside the bar's own [low, high],
+        // which is the last available proof that it belongs to this session.
+        const settle = settledCloseForBar(meta, timestamps[i]);
+        if (settle != null && settle >= l && settle <= h) {
+          console.warn(
+            `[marketData] ${symbol}: repaired null close on ${utcDay(timestamps[i])} -> ${settle}`
+          );
+          close = settle;
+        } else {
+          console.warn(
+            `[marketData] ${symbol}: dropped incomplete bar ${utcDay(timestamps[i])} (null Close, no trusted settle)`
+          );
+          finalBarDropped = true;
+          continue;
+        }
+      }
+      if (close == null || close <= 0) continue;
+
       bars.push({
-        date:   new Date(timestamps[i] * 1000).toISOString().split("T")[0],
-        open: o, high: h, low: l, close: c, volume: v ?? 0,
+        date:   utcDay(timestamps[i]),
+        open: o, high: h, low: l, close, volume: v ?? 0,
       });
     }
     if (bars.length < 50) return null;
@@ -126,7 +193,12 @@ async function fetchYahooOHLCVOnce(
         : null;
     };
 
-    if (secondLast && secondLast.close > 0 && currentPrice > 0) {
+    if (finalBarDropped) {
+      // bars now end one session early, so secondLast is TWO sessions back and
+      // measuring against it would report a two-day move as one day's. Yahoo's
+      // own quote change is struck against the correct prior close — prefer it.
+      changePct = metaChangePct() ?? 0;
+    } else if (secondLast && secondLast.close > 0 && currentPrice > 0) {
       changePct = ((currentPrice - secondLast.close) / secondLast.close) * 100;
     } else {
       changePct = metaChangePct() ?? 0;
