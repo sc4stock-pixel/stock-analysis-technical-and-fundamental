@@ -20,7 +20,7 @@ const COLUMN_LEGEND = [
   "- stop: the live SuperTrend line = the level a close must cross to flip dir (resistance when dir=down, support when dir=up). For an open long it is the EXIT; for a down name it is the BUY / flip-up trigger.",
   "- risk%: distance from px DOWN to stop for open longs (dir=up only) = downside cushion before the trailing exit. Blank for down names.",
   "- flip%: signed distance from px to the flip line (stop). + = stop above px, must rally that % to flip up (down names, a potential buy); − = stop below px, must fall that % to flip down (open longs). ~0% = knife-edge, about to flip. THIS is the actionable trigger to watch.",
-  "- K5d / K20d: Kronos 5-day and 20-day model projection (% vs current price). K5d with >5% predicted move = high-conviction signal; \"noise\" (>25%) = discard.",
+  "- K5d / K20d: Kronos 5-day and 20-day model projection (% vs current price). DISPLAY-ONLY with NO proven edge — the 2026-07-21 probation full sample killed the 5d high-conviction thesis (the >5% bucket decayed 81% → ~56%, p=0.12). A >5% K5d (✦) is a LARGE MOVE data point only — magnitude, never a signal or a reason to act. Sub-5% is noise. \"noise\" (>25%) = a mean-reversion artifact; discard.",
   "- #ev: count of recent flip events (whipsaw proxy; high = unreliable, low-follow-through signals).",
   "- *opt: optimized params; absent = default ATR10 x3.0.",
 ].join("\n");
