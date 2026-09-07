@@ -52,7 +52,10 @@ describe("assembleDigestPrompt", () => {
     expect(p).toContain("the BUY / flip-up trigger");
     expect(p).toContain("flip line (stop)");
     expect(p).toContain("K5d");
-    expect(p).toContain("high-conviction");
+    // Kronos doctrine must be the RETIRED one: display-only, no proven edge, and
+    // never phrased as a "high-conviction signal" (probation killed it, 2026-07-21).
+    expect(p).toContain("DISPLAY-ONLY with NO proven edge");
+    expect(p).not.toContain("high-conviction signal");
     expect(p).not.toContain("TimesFM");
   });
 });
