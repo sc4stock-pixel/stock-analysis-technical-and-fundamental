@@ -3,7 +3,17 @@ import { useState, useMemo } from "react";
 import { StockAnalysisResult } from "@/types";
 import { supertrend, sma } from "@/lib/indicators";
 import InfoTooltip from "@/components/InfoTooltip";
-import { targetWeightOfResult, weightTone, WEIGHT_FLOOR } from "@/lib/targetWeight";
+import { targetWeightOfResult, weightTone, WEIGHT_FLOOR, WEIGHT_TRIM, WEIGHT_FULL } from "@/lib/targetWeight";
+
+/** Fixed top of the trigger-ladder scale, in percent. Deliberately NOT auto-scaled
+ *  to the day's widest name — a quiet book must not render like a dangerous one. */
+const LADDER_SCALE = 12;
+/** Inside this distance the trigger is live for the coming session. */
+const LADDER_NEAR = 2;
+
+type SortKey = "weight" | "dist";
+/** First click on each column: heaviest exposure first, nearest trigger first. */
+const SORT_FIRST_DIR: Record<SortKey, 1 | -1> = { weight: -1, dist: 1 };
 
 interface Props {
   results: StockAnalysisResult[];
@@ -31,6 +41,10 @@ interface OpenPosition {
   /** True when there is no ST long — the row is a floor/hold-only holding and
    *  has no entry price, P&L or R-multiple to show. */
   weightOnly: boolean;
+  /** Close > own SMA200 (TT c2). Drives WHERE a 100% name lands when it flips
+   *  down: the 70% trim tier, or straight to the 40% floor (skip-the-trim).
+   *  undefined = unknown, which falls toward the trim tier. */
+  aboveSma200?: boolean;
 }
 
 // ── Reconstruct open position from bar-by-bar simulation ─────
@@ -176,9 +190,10 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
     for (const r of results) {
       if (r.signal === "ERROR" || r.error) continue;
       const tw = targetWeightOfResult(r).weight;
+      const above200 = r.sepa_metadata?.trend_template_criteria?.c2_price_above_sma200;
       // An ST long -> full simulated position row (entry, P&L, R).
       const p = (r.st_direction ?? -1) === 1 ? detectOpenPosition(r) : null;
-      if (p) { pos.push({ ...p, targetWeight: tw, weightOnly: false }); continue; }
+      if (p) { pos.push({ ...p, targetWeight: tw, weightOnly: false, aboveSma200: above200 }); continue; }
       // No ST long, but under the asymmetric rule the book still HOLDS this
       // name (100% above its own 200-day, else the 40% floor). Show it as a
       // weight-only row rather than omitting it — omitting understated the
@@ -191,13 +206,61 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
         stopDistPct: r.st_stop_distance_pct ?? 0,
         optLabel: `ATR${r.st_opt_params?.atrPeriod ?? 10}×${r.st_opt_params?.multiplier ?? 3}`,
         sma50AtEntry: null, blockedBySma: false,
-        targetWeight: tw, weightOnly: true,
+        targetWeight: tw, weightOnly: true, aboveSma200: above200,
       });
     }
     // ST longs first (they carry P&L), then weight-only rows; each by P&L desc.
     pos.sort((a, b) => Number(a.weightOnly) - Number(b.weightOnly) || b.pnlPct - a.pnlPct);
     return pos;
   }, [results]);
+
+  // Click-to-sort on Target wt / Stop Dist. Three-state cycle: default order ->
+  // preferred direction -> reversed -> back to default. Ties fall back to symbol
+  // so the row order never jitters between renders.
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
+  function toggleSort(key: SortKey) {
+    setSort(prev => {
+      if (!prev || prev.key !== key) return { key, dir: SORT_FIRST_DIR[key] };
+      if (prev.dir === SORT_FIRST_DIR[key]) return { key, dir: (SORT_FIRST_DIR[key] * -1) as 1 | -1 };
+      return null;
+    });
+  }
+  const sorted = useMemo(() => {
+    if (!sort) return positions;
+    return [...positions].sort((a, b) =>
+      sort.dir * (sort.key === "weight" ? a.targetWeight - b.targetWeight : a.stopDistPct - b.stopDistPct)
+      || a.symbol.localeCompare(b.symbol));
+  }, [positions, sort]);
+
+  const sortHead = (key: SortKey, label: string) => (
+    <th
+      className="text-right px-2 py-1.5 font-mono font-normal cursor-pointer select-none whitespace-nowrap hover:text-[#c8d8f0]"
+      onClick={() => toggleSort(key)}
+      title={`Sort by ${label} — click again to reverse, a third time to restore the default order`}
+    >
+      {label}
+      <span className="ml-1 text-[#00d4ff]">{sort?.key === key ? (sort.dir === 1 ? "▲" : "▼") : ""}</span>
+    </th>
+  );
+
+  // Trigger ladder: the whole book's distance to the level that moves it, grouped
+  // by current weight tier and nearest-first inside each tier. Mirrors the email
+  // pre-session trigger card (100 / 70 / 40 groups) on the same numbers.
+  const ladderGroups = useMemo(() => {
+    const tiers: Array<{ weight: number; label: string }> = [
+      { weight: WEIGHT_FULL,  label: `AT ${WEIGHT_FULL}% — a close below trims to ${WEIGHT_TRIM}%` },
+      { weight: WEIGHT_TRIM,  label: `AT ${WEIGHT_TRIM}% — a close above restores ${WEIGHT_FULL}%` },
+      { weight: WEIGHT_FLOOR, label: `AT ${WEIGHT_FLOOR}% — a close above restores ${WEIGHT_FULL}%` },
+    ];
+    return tiers
+      .map(t => ({
+        ...t,
+        members: positions
+          .filter(p => p.targetWeight === t.weight)
+          .sort((a, b) => a.stopDistPct - b.stopDistPct || a.symbol.localeCompare(b.symbol)),
+      }))
+      .filter(g => g.members.length > 0);
+  }, [positions]);
 
   if (positions.length === 0) return null;
 
@@ -272,20 +335,20 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
               <thead>
                 <tr className="bg-[#0f1629] border-b border-[#1e2d4a] text-[#4a6080] uppercase tracking-wider">
                   <th className="text-left px-2 py-1.5 font-mono font-normal">Symbol</th>
-                  <th className="text-right px-2 py-1.5 font-mono font-normal">Target wt</th>
+                  {sortHead("weight", "Target wt")}
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Entry Date</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Entry $</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Current $</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">P&L %</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Stop $</th>
-                  <th className="text-right px-2 py-1.5 font-mono font-normal">Stop Dist</th>
+                  {sortHead("dist", "Stop Dist")}
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Days</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">R-Mult</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Params</th>
                 </tr>
               </thead>
               <tbody>
-                {positions.map((pos, idx) => {
+                {sorted.map((pos, idx) => {
                   const isNearStop = !pos.weightOnly && pos.stopDistPct < 3
                                      && pos.targetWeight === WEIGHT_FLOOR;
                   const isWinner   = pos.pnlPct > 0;
@@ -382,6 +445,69 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Trigger ladder — every held name's distance to the level that moves
+              the book, grouped by tier. Same numbers as the email trigger card. */}
+          <div className="mt-2.5 pt-2 border-t border-[#1e2d4a]/50">
+            <div className="flex items-baseline justify-between mb-1">
+              <span className="text-[0.6rem] text-[#4a6080] font-mono tracking-wider">
+                TRIGGER LADDER
+              </span>
+              <span className="text-[0.6rem] text-[#2a3d5a] font-mono">
+                0 · {LADDER_NEAR}% · 6% · {LADDER_SCALE}% · ! = inside {LADDER_NEAR}%
+              </span>
+            </div>
+
+            {ladderGroups.map(g => (
+              <div key={g.weight} className="mb-1.5">
+                <div className="text-[0.6rem] text-[#4a6080] font-mono mb-0.5">{g.label}</div>
+                {g.members.map(p => {
+                  const near = p.stopDistPct < LADDER_NEAR;
+                  const tone = weightTone(p.targetWeight);
+                  const fill = near ? "#ff4757"
+                    : tone === "full" ? "#00d4ff"
+                    : tone === "trim" ? "#7dd3fc"
+                    : "#ffa502";
+                  // Where this row lands if it flips. A 100% name below its own
+                  // 200-day skips the trim tier and drops straight to the floor.
+                  const dest = p.targetWeight >= WEIGHT_FULL
+                    ? (p.aboveSma200 === false ? WEIGHT_FLOOR : WEIGHT_TRIM)
+                    : WEIGHT_FULL;
+                  const showDest = p.targetWeight >= WEIGHT_FULL && dest !== WEIGHT_TRIM;
+                  const word = p.targetWeight >= WEIGHT_FULL ? "below" : "above";
+                  return (
+                    <div
+                      key={p.symbol}
+                      className="flex items-center gap-1.5 font-mono text-[0.65rem] leading-[13px]"
+                      title={`${p.symbol} — a close ${word} ${p.stopPrice > 0 ? p.stopPrice.toFixed(2) : "—"} moves it to ${dest}%`}
+                    >
+                      <span className="w-2 text-[#ff4757]">{near ? "!" : ""}</span>
+                      <span className="w-[54px] text-[#c8d8f0]">{p.symbol}</span>
+                      <span className="w-[52px] text-right text-[#4a6080]">
+                        {p.stopPrice > 0 ? p.stopPrice.toFixed(2) : "—"}
+                      </span>
+                      <span className="relative flex-1 h-[7px] bg-[#141d33] rounded-sm">
+                        <span
+                          className="absolute left-0 top-0 h-[7px] rounded-sm"
+                          style={{ width: `${Math.min(p.stopDistPct / LADDER_SCALE, 1) * 100}%`, background: fill }}
+                        />
+                        <span className="absolute left-[16.7%] top-[-2px] h-[11px] w-px bg-[#3d5478]" />
+                        <span className="absolute left-[50%] top-[-2px] h-[11px] w-px bg-[#2a3d5a]" />
+                      </span>
+                      <span className={`w-[34px] text-right ${near ? "text-[#ff4757]" : "text-[#6b85a0]"}`}>
+                        {p.stopDistPct.toFixed(1)}%
+                      </span>
+                      {showDest && <span className="w-[30px] text-right text-[#ffa502]">&rarr;{dest}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+
+            <div className="mt-1 text-[0.6rem] text-[#2a3d5a] font-mono">
+              Bar = % away from the level that moves the book · fixed 0&ndash;{LADDER_SCALE}% scale · a flip-up also needs Close &gt; SMA50 to license a long
+            </div>
           </div>
 
           {/* Footer note */}
