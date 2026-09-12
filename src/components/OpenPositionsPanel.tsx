@@ -227,8 +227,12 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
   }
   const sorted = useMemo(() => {
     if (!sort) return positions;
+    // Distance sorts on the MAGNITUDE: st_stop_distance_pct is signed, so a
+    // bearish name (line above price) is negative. Sorted raw, the names
+    // FURTHEST from flipping would lead the "nearest first" order.
+    const d = (p: OpenPosition) => Math.abs(p.stopDistPct);
     return [...positions].sort((a, b) =>
-      sort.dir * (sort.key === "weight" ? a.targetWeight - b.targetWeight : a.stopDistPct - b.stopDistPct)
+      sort.dir * (sort.key === "weight" ? a.targetWeight - b.targetWeight : d(a) - d(b))
       || a.symbol.localeCompare(b.symbol));
   }, [positions, sort]);
 
@@ -242,25 +246,6 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
       <span className="ml-1 text-[#00d4ff]">{sort?.key === key ? (sort.dir === 1 ? "▲" : "▼") : ""}</span>
     </th>
   );
-
-  // Trigger ladder: the whole book's distance to the level that moves it, grouped
-  // by current weight tier and nearest-first inside each tier. Mirrors the email
-  // pre-session trigger card (100 / 70 / 40 groups) on the same numbers.
-  const ladderGroups = useMemo(() => {
-    const tiers: Array<{ weight: number; label: string }> = [
-      { weight: WEIGHT_FULL,  label: `AT ${WEIGHT_FULL}% — a close below trims to ${WEIGHT_TRIM}%` },
-      { weight: WEIGHT_TRIM,  label: `AT ${WEIGHT_TRIM}% — a close above restores ${WEIGHT_FULL}%` },
-      { weight: WEIGHT_FLOOR, label: `AT ${WEIGHT_FLOOR}% — a close above restores ${WEIGHT_FULL}%` },
-    ];
-    return tiers
-      .map(t => ({
-        ...t,
-        members: positions
-          .filter(p => p.targetWeight === t.weight)
-          .sort((a, b) => a.stopDistPct - b.stopDistPct || a.symbol.localeCompare(b.symbol)),
-      }))
-      .filter(g => g.members.length > 0);
-  }, [positions]);
 
   if (positions.length === 0) return null;
 
@@ -331,7 +316,7 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
       {!collapsed && (
         <div className="px-3 pb-3 border-t border-[#1e2d4a]/50">
           <div className="overflow-x-auto mt-2 rounded border border-[#1e2d4a]">
-            <table className="w-full text-xs min-w-[700px]">
+            <table className="w-full text-xs min-w-[780px]">
               <thead>
                 <tr className="bg-[#0f1629] border-b border-[#1e2d4a] text-[#4a6080] uppercase tracking-wider">
                   <th className="text-left px-2 py-1.5 font-mono font-normal">Symbol</th>
@@ -342,6 +327,12 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
                   <th className="text-right px-2 py-1.5 font-mono font-normal">P&L %</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Stop $</th>
                   {sortHead("dist", "Stop Dist")}
+                  <th
+                    className="text-right px-2 py-1.5 font-mono font-normal whitespace-nowrap"
+                    title={`Bar = how far price is from the level that moves the book, either side of it, on a fixed 0-${LADDER_SCALE}% scale (ticks at ${LADDER_NEAR}% and 6%); red = inside ${LADDER_NEAR}%. Arrow = the weight it lands on if it flips. Sort with Stop Dist`}
+                  >
+                    Trigger
+                  </th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Days</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">R-Mult</th>
                   <th className="text-right px-2 py-1.5 font-mono font-normal">Params</th>
@@ -353,6 +344,26 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
                                      && pos.targetWeight === WEIGHT_FLOOR;
                   const isWinner   = pos.pnlPct > 0;
                   const isHighR    = pos.rMultiple >= 2;
+
+                  // Trigger bar — the Stop Dist number drawn on a fixed scale,
+                  // plus WHERE the row lands if it flips. A 100% name below its
+                  // own 200-day skips the trim tier and drops straight to 40%.
+                  // Magnitude, not the signed value: the ST line sits ABOVE the
+                  // price for a bearish name, so its stop distance is negative
+                  // while it still has to travel that far to flip back up. Same
+                  // abs() the email trigger card uses.
+                  const trigDist = Math.abs(pos.stopDistPct);
+                  const nearTrig = trigDist < LADDER_NEAR;
+                  const tone     = weightTone(pos.targetWeight);
+                  const trigFill = nearTrig ? "#ff4757"
+                    : tone === "full" ? "#00d4ff"
+                    : tone === "trim" ? "#7dd3fc"
+                    : "#ffa502";
+                  const trigDest = pos.targetWeight >= WEIGHT_FULL
+                    ? (pos.aboveSma200 === false ? WEIGHT_FLOOR : WEIGHT_TRIM)
+                    : WEIGHT_FULL;
+                  const skipTrim = pos.targetWeight >= WEIGHT_FULL && trigDest === WEIGHT_FLOOR;
+                  const trigWord = pos.targetWeight >= WEIGHT_FULL ? "below" : "above";
 
                   return (
                     <tr
@@ -422,6 +433,33 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
                         {pos.stopDistPct.toFixed(1)}%
                       </td>
 
+                      {/* Trigger — distance drawn on the fixed 0-12% scale, with
+                          the weight a flip lands on. Same numbers as the email
+                          pre-session trigger card, one row instead of a second
+                          block. */}
+                      <td className="px-2 py-1.5">
+                        <div
+                          className="flex items-center justify-end gap-1"
+                          title={`${pos.symbol} — ${trigDist.toFixed(1)}% away; a close ${trigWord} ${pos.stopPrice > 0 ? pos.stopPrice.toFixed(2) : "—"} moves it to ${trigDest}%${skipTrim ? " (below its 200-day, so it skips the 70% tier)" : ""}`}
+                        >
+                          <span className="relative block h-[7px] w-[36px] bg-[#141d33] rounded-sm shrink-0">
+                            <span
+                              className="absolute left-0 top-0 h-[7px] rounded-sm"
+                              style={{
+                                width: `${Math.min(trigDist / LADDER_SCALE, 1) * 100}%`,
+                                background: trigFill,
+                              }}
+                            />
+                            {/* Scale ticks: 2% (live for the next session) and 6%. */}
+                            <span className="absolute left-[16.7%] top-[-2px] h-[11px] w-px bg-[#3d5478]" />
+                            <span className="absolute left-[50%] top-[-2px] h-[11px] w-px bg-[#2a3d5a]" />
+                          </span>
+                          <span className={`font-mono text-[0.6rem] ${nearTrig ? "text-[#ff4757]" : skipTrim ? "text-[#ffa502]" : "text-[#6b85a0]"}`}>
+                            &rarr;{trigDest}
+                          </span>
+                        </div>
+                      </td>
+
                       {/* Days Held */}
                       <td className="px-2 py-1.5 text-right font-mono text-[#6b85a0]">
                         {pos.weightOnly ? "—" : `${pos.daysHeld}d`}
@@ -447,72 +485,11 @@ export default function OpenPositionsPanel({ results, onSymbolClick }: Props) {
             </table>
           </div>
 
-          {/* Trigger ladder — every held name's distance to the level that moves
-              the book, grouped by tier. Same numbers as the email trigger card. */}
-          <div className="mt-2.5 pt-2 border-t border-[#1e2d4a]/50">
-            <div className="flex items-baseline justify-between mb-1">
-              <span className="text-[0.6rem] text-[#4a6080] font-mono tracking-wider">
-                TRIGGER LADDER
-              </span>
-              <span className="text-[0.6rem] text-[#2a3d5a] font-mono">
-                0 · {LADDER_NEAR}% · 6% · {LADDER_SCALE}% · ! = inside {LADDER_NEAR}%
-              </span>
-            </div>
-
-            {ladderGroups.map(g => (
-              <div key={g.weight} className="mb-1.5">
-                <div className="text-[0.6rem] text-[#4a6080] font-mono mb-0.5">{g.label}</div>
-                {g.members.map(p => {
-                  const near = p.stopDistPct < LADDER_NEAR;
-                  const tone = weightTone(p.targetWeight);
-                  const fill = near ? "#ff4757"
-                    : tone === "full" ? "#00d4ff"
-                    : tone === "trim" ? "#7dd3fc"
-                    : "#ffa502";
-                  // Where this row lands if it flips. A 100% name below its own
-                  // 200-day skips the trim tier and drops straight to the floor.
-                  const dest = p.targetWeight >= WEIGHT_FULL
-                    ? (p.aboveSma200 === false ? WEIGHT_FLOOR : WEIGHT_TRIM)
-                    : WEIGHT_FULL;
-                  const showDest = p.targetWeight >= WEIGHT_FULL && dest !== WEIGHT_TRIM;
-                  const word = p.targetWeight >= WEIGHT_FULL ? "below" : "above";
-                  return (
-                    <div
-                      key={p.symbol}
-                      className="flex items-center gap-1.5 font-mono text-[0.65rem] leading-[13px]"
-                      title={`${p.symbol} — a close ${word} ${p.stopPrice > 0 ? p.stopPrice.toFixed(2) : "—"} moves it to ${dest}%`}
-                    >
-                      <span className="w-2 text-[#ff4757]">{near ? "!" : ""}</span>
-                      <span className="w-[54px] text-[#c8d8f0]">{p.symbol}</span>
-                      <span className="w-[52px] text-right text-[#4a6080]">
-                        {p.stopPrice > 0 ? p.stopPrice.toFixed(2) : "—"}
-                      </span>
-                      <span className="relative flex-1 h-[7px] bg-[#141d33] rounded-sm">
-                        <span
-                          className="absolute left-0 top-0 h-[7px] rounded-sm"
-                          style={{ width: `${Math.min(p.stopDistPct / LADDER_SCALE, 1) * 100}%`, background: fill }}
-                        />
-                        <span className="absolute left-[16.7%] top-[-2px] h-[11px] w-px bg-[#3d5478]" />
-                        <span className="absolute left-[50%] top-[-2px] h-[11px] w-px bg-[#2a3d5a]" />
-                      </span>
-                      <span className={`w-[34px] text-right ${near ? "text-[#ff4757]" : "text-[#6b85a0]"}`}>
-                        {p.stopDistPct.toFixed(1)}%
-                      </span>
-                      {showDest && <span className="w-[30px] text-right text-[#ffa502]">&rarr;{dest}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-
-            <div className="mt-1 text-[0.6rem] text-[#2a3d5a] font-mono">
-              Bar = % away from the level that moves the book · fixed 0&ndash;{LADDER_SCALE}% scale · a flip-up also needs Close &gt; SMA50 to license a long
-            </div>
-          </div>
-
           {/* Footer note */}
           <div className="mt-2 text-[0.6rem] text-[#2a3d5a] font-mono">
             Asymmetric sizing: every name is held — 100% in an ST long · 70% when ST is bearish but price holds its own 200-day SMA · 40% floor below it. Rows with “—” have no ST long, so no entry price or P&amp;L; they are still held at the shown weight. A stop hit TRIMS to 40%, it does not exit. Avg P&amp;L / R / days cover ST longs only. Click row to jump to card
+            <br />
+            Trigger: bar = how far price is from the level that moves the book, either side of it, on a fixed 0&ndash;{LADDER_SCALE}% scale (ticks at {LADDER_NEAR}% and 6%, red inside {LADDER_NEAR}%); the arrow is the weight it lands on — a 100% name below its own 200-day skips the trim tier and drops straight to {WEIGHT_FLOOR}%. A flip-up also needs Close &gt; SMA50 to license a long. Sort by Target wt or Stop Dist
           </div>
         </div>
       )}
