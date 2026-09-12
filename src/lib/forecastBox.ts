@@ -90,7 +90,9 @@ export function skillBadge(
   switch (k?.verdict) {
     // Only the 5d high-conviction bucket earns an "edge" claim — that is what the
     // display is about. EDGE_BROAD (a longer-horizon signal) is NOT surfaced as an
-    // edge here: it lacks a same-horizon naive control and is under separate study.
+    // edge here: it is a single 15d bucket that clears only narrowly once overlap
+    // is priced in (ci_lo_eff ~0.51, 2026-08-18), so it stays under study. Both
+    // verdicts now clear max(naive, 1-naive) — see scripts/forecast_probation_audit.py.
     case "EDGE_HIGH_CONVICTION":
       return {
         tone: "edge",
