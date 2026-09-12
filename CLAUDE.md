@@ -9,6 +9,11 @@ pipeline), read `STRATEGY.md`. The ST strategy = SuperTrend flip + Close>SMA50;
 "LONG/entry/entered" wording may only derive from `entryReady`/`entry_buy`. New
 stance-rendering surfaces must add a below-SMA50-flip-is-not-LONG test. (2026-07-04 audit)
 
+For how the whole system fits together — the three execution surfaces, the daily
+schedule, data artifacts and their cadences, the four integrity guards, and the
+forecast probation regime — see `SYSTEM.md`. It is descriptive; `STRATEGY.md` stays
+normative and `CLAUDE.md` stays the build/ops guide.
+
 ## Commands
 
 ```bash
