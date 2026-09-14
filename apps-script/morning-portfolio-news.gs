@@ -2,6 +2,22 @@
  *  Morning Portfolio News Bot – Google Apps Script
  *  Sources: Yahoo Finance | Google News | MarketWatch
  *
+ *  v19 changes (news-identity fix):
+ *   - FIXED ticker/name collision: an ambiguous short name (e.g. 0939.HK
+ *     "CCB") was used verbatim as both the Google News query AND the
+ *     relevance needle, so US-listed Coastal Financial Corp (NASDAQ:CCB)
+ *     headlines were pulled under China Construction Bank. Verified
+ *     2026-08-24: q='"CCB" stock' returned 56/99 Coastal Financial items.
+ *   - Ambiguous names are now resolved through NEWS_PROFILES to a full
+ *     company name + market qualifier + impostor exclusions, and the bare
+ *     acronym is no longer an accepted match needle for those entries.
+ *   - VERIFIED: Google News IGNORES the hl/gl/ceid region params for these
+ *     queries (canonical link comes back en-US/US regardless), so region
+ *     scoping is NOT a defense — the query text must disambiguate.
+ *   - auditPortfolioNews() flags any portfolio entry whose name is
+ *     ambiguous and has no profile, so the 17th ticker self-reports
+ *     instead of silently pulling the wrong company's news.
+ *
  *  v18 changes:
  *   - Single source of truth: tickers + names come from portfolio.json
  *     in the v17 repo (same file the web app, Telegram bot & Python
@@ -24,11 +40,19 @@ const PORTFOLIO_URL =
 const PROP = PropertiesService.getScriptProperties();
 
 /* =========================================================
-   RELEVANCE FILTERS (v2)
+   NEWS IDENTITY, AMBIGUITY & RELEVANCE (v19)
    Shared by Yahoo + Google so loosely-related market-wide
    headlines (e.g. a GOOGL story under AAPL) get dropped, and
-   word-boundary matching avoids substring junk (META≠metaverse).
+   word-boundary matching avoids substring junk (META!=metaverse).
+
+   v19 adds the identity layer. portfolio.json carries a SHORT
+   DISPLAY name ("CCB"), which is fine for the dashboard but is not
+   a unique search key: "CCB" is also NASDAQ:CCB (Coastal Financial
+   Corp). Any short all-caps name has this problem, so instead of
+   special-casing one ticker we (a) detect ambiguous names by rule
+   and (b) resolve them through NEWS_PROFILES.
    ========================================================= */
+
 // Low-value / spam headline patterns dropped for every ticker.
 const DENY = [
   /shares?\s+(sold|bought|purchased|acquired)\s+by/i,  // 13F filing spam
@@ -36,24 +60,129 @@ const DENY = [
   /\b13[dfg]\s+filing\b/i,
 ];
 
+/* ---------------------------------------------------------
+   NEWS_PROFILES — keyed by portfolio.json symbol.
+   Only AMBIGUOUS names need an entry; run auditPortfolioNews()
+   to see which ones those are. Fields:
+     full     : full company/fund name — the default quoted search phrase.
+     phrases  : OPTIONAL. Search phrases OR'd together, when one name is
+                too narrow to find the instrument (index ETFs especially).
+                Defaults to [full]. A profiled ticker must never go silent.
+     aliases  : additional ACCEPTED match needles. NOTE: the bare
+                short name is deliberately absent for entries where
+                the acronym belongs to somebody else (0939.HK), and
+                present where the acronym IS the real identity (SPY).
+     exclude  : impostor names — subtracted from the query AND used
+                as a per-entry denylist on the results.
+   portfolio.json is intentionally NOT edited: it is the shared
+   universe read by the web app, Telegram and Python, and "CCB" is
+   the display name Steven wants to see there.
+   --------------------------------------------------------- */
+const NEWS_PROFILES = {
+  '0939.HK': {
+    full:    'China Construction Bank',
+    aliases: ['CCB Corp', 'CICHY', '中國建設銀行', '建設銀行'],
+    exclude: ['Coastal Financial', 'China Construction Bank Indonesia'],
+  },
+  '1211.HK': {
+    full:    'BYD',
+    aliases: ['BYD Company', 'BYD Auto', 'BYDDY', 'BYDDF', '比亞迪'],
+    exclude: ['Boyd Gaming'],
+  },
+  '3033.HK': {
+    full:    'Hang Seng TECH Index ETF',
+    phrases: ['Hang Seng TECH Index ETF', 'Hang Seng Tech ETF', 'Hang Seng TECH Index'],
+    aliases: ['HSTech ETF', 'Hang Seng Tech', 'Hang Seng TECH Index', 'HSTECH', '3033'],
+    exclude: [],
+  },
+  'SPY': {
+    full:    'SPDR S&P 500 ETF',
+    phrases: ['SPDR S&P 500 ETF', 'S&P 500 ETF', 'SPY ETF'],
+    aliases: ['SPY', 'S&P 500', 'SPDR S&P 500'],
+    exclude: ['Spy Shots'],
+  },
+  'QQQ': {
+    full:    'Invesco QQQ',
+    phrases: ['Invesco QQQ', 'QQQ ETF', 'Nasdaq 100 ETF'],
+    aliases: ['QQQ', 'Nasdaq 100', 'Nasdaq-100'],
+    exclude: [],
+  },
+  // Reviewed and NOT collision-prone, but profiled anyway so the acronym
+  // is not the only needle — headlines that spell the name out were being
+  // dropped by the relevance filter.
+  'AMD': {
+    full:    'AMD',
+    aliases: ['AMD', 'Advanced Micro Devices'],
+    exclude: [],
+  },
+  'TSM': {
+    full:    'TSMC',
+    aliases: ['TSMC', 'TSM', 'Taiwan Semiconductor'],
+    exclude: [],
+  },
+  // portfolio.json name "Meta" collapses to the symbol (name.toUpperCase()
+  // === symbol), so the query degraded to the bare ticker. The full name is
+  // both unambiguous and better-targeted.
+  'META': {
+    full:    'Meta Platforms',
+    aliases: ['Meta Platforms', 'Meta', 'META'],
+    exclude: [],
+  },
+};
+
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-// Needles to identify an article as being about `entry`.
-// Multi-word names must match as a full phrase (avoids "China"→every China story);
-// single-word names also allow the base/symbol code.
-function needlesFor(entry) {
+// A name is AMBIGUOUS when it carries no lower-case word — i.e. it is a
+// short ticker-like acronym rather than a company name. These cannot be
+// trusted as a unique search key on their own.
+function isAmbiguousName(name) {
+  const n = String(name || '').trim();
+  if (!n || /\s/.test(n)) return false;          // multi-word names are specific enough
+  return n.length <= 4 && n === n.toUpperCase(); // e.g. CCB, BYD, SPY, QQQ, AMD
+}
+
+// Resolved news identity for a portfolio entry.
+// Returns {symbol, base, full, needles[], excludes[], hasProfile, ambiguous}
+function identityFor(entry) {
   const sym  = entry.symbol;
   const base = sym.replace('.HK', '');
   const name = (entry.name && entry.name.toUpperCase() !== sym) ? entry.name : base;
-  const multiWord = /\s/.test(name);
-  const list = multiWord ? [name, sym] : [name, base, sym];
-  return list.map(s => String(s).trim()).filter(s => s.length >= 2);
+  const prof = NEWS_PROFILES[sym] || null;
+
+  let needles;
+  if (prof) {
+    // Profiled: the profile defines the ACCEPTED needles. The portfolio
+    // display name is NOT auto-included — that is what let "CCB" through.
+    needles = [prof.full].concat(prof.aliases || []).concat([sym]);
+    if (sym !== base && !isAmbiguousName(base)) needles.push(base);
+  } else {
+    // Unprofiled: previous behaviour. Multi-word names must match as a
+    // full phrase (avoids "China" -> every China story).
+    needles = /\s/.test(name) ? [name, sym] : [name, base, sym];
+  }
+
+  return {
+    symbol:     sym,
+    base:       base,
+    full:       prof ? prof.full : name,
+    phrases:    prof ? ((prof.phrases && prof.phrases.length) ? prof.phrases : [prof.full]) : [name],
+    needles:    needles.map(x => String(x).trim()).filter(x => x.length >= 2),
+    excludes:   prof ? (prof.exclude || []) : [],
+    hasProfile: !!prof,
+    ambiguous:  isAmbiguousName(name),
+  };
 }
+
+// Kept for backwards compatibility with any caller expecting needles.
+function needlesFor(entry) { return identityFor(entry).needles; }
 
 // Word-boundary, case-insensitive match against any needle.
 function matchesEntry(entry, title) {
-  const T = ' ' + String(title).toUpperCase() + ' ';
-  return needlesFor(entry).some(n => {
+  const id = identityFor(entry);
+  const T  = ' ' + String(title).toUpperCase() + ' ';
+  // An impostor name in the headline disqualifies it outright.
+  if (id.excludes.some(x => T.indexOf(String(x).toUpperCase()) !== -1)) return false;
+  return id.needles.some(n => {
     const re = new RegExp('(^|[^A-Z0-9])' + escapeRe(n.toUpperCase()) + '([^A-Z0-9]|$)');
     return re.test(T);
   });
@@ -61,6 +190,55 @@ function matchesEntry(entry, title) {
 
 function isDenied(title) {
   return DENY.some(re => re.test(String(title)));
+}
+
+/* ---------------------------------------------------------
+   QUERY BUILDER — the actual collision fix.
+   Google News ignores hl/gl/ceid for these searches (verified
+   2026-08-24: the canonical link returns en-US/US even when HK is
+   requested), so the MARKET must be expressed inside the query text,
+   not in the region params.
+   --------------------------------------------------------- */
+function marketQualifier(entry) {
+  return entry.exchange === 'HK'
+    ? '"Hong Kong" OR HKEX OR SEHK OR stock OR shares'
+    : 'stock OR shares';
+}
+
+function buildNewsQuery(entry) {
+  const id = identityFor(entry);
+  const phrase = id.phrases.length > 1
+    ? '(' + id.phrases.map(x => '"' + x + '"').join(' OR ') + ')'
+    : '"' + id.phrases[0] + '"';
+  let q = phrase + ' (' + marketQualifier(entry) + ')';
+  id.excludes.forEach(x => { q += ' -"' + x + '"'; });
+  return q;
+}
+
+/* =========================================================
+   AUDIT — run manually from the Apps Script editor.
+   Answers "what if I ran hundreds of names?": every ambiguous
+   name without a profile is reported, so a newly added ticker
+   surfaces here instead of silently importing another company's
+   news. Returns the list of unresolved entries.
+   ========================================================= */
+function auditPortfolioNews() {
+  const portfolio = getPortfolio();
+  const unresolved = [];
+  console.log('--- news-identity audit: ' + portfolio.length + ' tickers ---');
+  portfolio.forEach(e => {
+    const id = identityFor(e);
+    let status;
+    if (id.ambiguous && !id.hasProfile) { status = 'AMBIGUOUS - NEEDS PROFILE'; unresolved.push(e.symbol); }
+    else if (id.hasProfile)             { status = 'profiled'; }
+    else                                { status = 'ok'; }
+    console.log([e.symbol, '(' + e.name + ')', '->', id.full, '|', status,
+                 '| query: ' + buildNewsQuery(e)].join(' '));
+  });
+  console.log(unresolved.length
+    ? 'ACTION: add NEWS_PROFILES entries for ' + unresolved.join(', ')
+    : 'All ambiguous names are resolved.');
+  return unresolved;
 }
 
 function setup() {
@@ -157,12 +335,15 @@ function fetchNews(portfolio) {
 
   /* ---------- Google News (by company NAME — the HK fix) ---------- */
   function tryGoogle(entry) {
-    const sym   = entry.symbol;
-    const name  = (entry.name && entry.name.toUpperCase() !== sym) ? entry.name : sym.replace('.HK', '');
+    const sym = entry.symbol;
 
-    // `when:2d` is a valid Google News operator; the post-parse date filter
-    // below is the real guarantee in case it's ignored.
-    const q = `"${name}" stock when:2d`;
+    // v19: query is built from the RESOLVED identity (full company name +
+    // market qualifier + impostor exclusions), never from the bare short
+    // name. `when:2d` is a valid Google News operator; the post-parse date
+    // filter below is the real guarantee in case it's ignored.
+    const q = buildNewsQuery(entry) + ' when:2d';
+    // Region params are kept for the cases where Google does honour them,
+    // but they are NOT the defense — see marketQualifier().
     const region = entry.exchange === 'HK'
       ? 'hl=en-HK&gl=HK&ceid=HK:en'
       : 'hl=en-US&gl=US&ceid=US:en';
