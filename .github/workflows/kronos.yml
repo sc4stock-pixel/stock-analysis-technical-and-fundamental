@@ -46,6 +46,62 @@ jobs:
       - name: Run predictor
         run: python scripts/kronos_predict.py
 
+      # ⛔ BAR-DATE FRESHNESS GUARD (added 2026-09-15).
+      # The coverage gate below counts TICKERS via _metadata.missing; it cannot see a BAR
+      # DATE. yfinance serves an all-NaN placeholder for a session that has not settled,
+      # kronos_predict.py drops the NaN row, and that ticker silently keeps its PREVIOUS
+      # bar. Live on 2026-09-15 the file shipped 6 series on 2026-09-14 and 10 on 2026-09-11
+      # (all 9 US names + 3033.HK) and the run still reported success.
+      #
+      # The check is WITHIN-FILE on purpose: every series' bar date must equal the newest
+      # bar date in the file. That needs no external reference, so it cannot false-fire on a
+      # uniform lag (weekend, holiday, whole-market outage) and cannot be defeated by a
+      # reference that is itself stale. An earlier draft compared against KV
+      # regionLastRun -- that is WRONG at this job's run hour: the job lands 00:06-00:45 UTC
+      # and the autopilot worker does not write KV until ~00:55 UTC, so KV is still one
+      # session behind and the comparison would have passed on exactly the day it was
+      # written for. The same draft also read secrets.KV_REST_API_URL, which does not exist
+      # in this repo, so it would have gone red every day on an empty URL.
+      #
+      # ⛔ NOT covered: a file where ALL 16 series are stale. A uniform lag cannot be told
+      # apart from a closed market without a session calendar, and the benign case (weekend)
+      # is far more common than the harmful one. Do not "fix" that by adding a KV lookup.
+      #
+      # Placement is BEFORE the commit step on purpose. A stale bar is a WRONG number, not a
+      # missing one, and no consumer can detect staleness -- the 08:50 HKT debrief reads this
+      # file and would report it as current. This trades a red run that publishes nothing for
+      # a green run that publishes something misleading.
+      - name: Verify forecast bar-date freshness
+        run: |
+          python - <<'EOF'
+          import collections, json, sys
+
+          fc = json.load(open("kronos_forecasts.json"))
+          series = {k: v for k, v in fc.items() if k != "_metadata"}
+          if not series:
+              print("::error::kronos_forecasts.json carries no series")
+              sys.exit(1)
+
+          counts = collections.Counter(v.get("last_date") for v in series.values())
+          known = [d for d in counts if d]
+          if not known:
+              print("::error::no series carries a last_date")
+              sys.exit(1)
+
+          newest = max(known)
+          stale = sorted(k for k, v in series.items() if v.get("last_date") != newest)
+
+          print(f"RECEIPT(freshness): newest bar {newest}; "
+                f"{len(series) - len(stale)}/{len(series)} series on it")
+          for d in sorted(counts, key=str):
+              print(f"  {d}: {counts[d]}")
+
+          if stale:
+              detail = ", ".join(f"{k}={series[k].get('last_date')}" for k in stale)
+              print(f"::error::{len(stale)} series on an older bar than {newest}: {detail}")
+              sys.exit(1)
+          EOF
+
       - name: Rebase on latest main (avoid concurrent-push races)
         run: |
           git pull --rebase --autostash origin main || {
