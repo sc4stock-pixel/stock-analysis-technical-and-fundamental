@@ -59,10 +59,13 @@ Kronos forecasts are **not** computed at runtime — they're fetched as a static
 
 **TimesFM is retired.** Scored true-out-of-sample for ~11 weeks and dead at every horizon
 (5d 48%, 20d 47%), it was removed from every display surface in PR #50 (2026-08-10) and its
-runtime code deleted entirely. `scripts/timesfm_predict.py`, the frozen `timesfm_forecasts.json`,
-and the `TIMESFM` key in `forecast_skill.json` are kept **deliberately** so
-`scripts/forecast_probation_audit.py` can still reproduce the verdict. Do not re-add a
-freshness check on `timesfm_forecasts.json` — the file is frozen by design.
+runtime code deleted entirely. On 2026-09-16 it was dropped from the probation audit as well:
+`scripts/forecast_probation_audit.py` no longer scores it, so `forecast_skill.json` no longer
+carries a `TIMESFM` key. The historical verdict stays reproducible — every past
+`forecast_skill.json` is in git history — and `scripts/timesfm_predict.py` plus the frozen
+`timesfm_forecasts.json` are left untouched. Do not re-add `TIMESFM` to the audit or to the
+`ForecastSkill` union, and do not re-add a freshness check on `timesfm_forecasts.json` — that
+file is frozen by design.
 
 ### Key library modules (`src/lib/`)
 
