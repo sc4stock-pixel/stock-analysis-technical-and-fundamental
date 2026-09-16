@@ -42,7 +42,17 @@ def price_history(ticker):
 def closes_upto(ticker, date_str):
     return [c for d, c in price_history(ticker) if d <= date_str]
 
-FILES = {"KRONOS": "kronos_forecasts.json", "TIMESFM": "timesfm_forecasts.json"}
+# ⛔ TIMESFM WAS DROPPED 2026-09-16 — do not re-add it. It was retired from every display
+# surface on 2026-08-10 (PR #50) and its workflow deleted, but this audit kept scoring it,
+# so `forecast_skill.json` went on publishing an EDGE_BROAD badge for a model that no longer
+# exists — recomputed and recommitted every day. Because `timesfm_forecasts.json` froze on
+# 2026-08-10, the five horizon rates were BYTE-IDENTICAL across 09-13..09-16 (2d .5242,
+# 5d .5038, 10d .5241, 15d .5112, 20d .4843) while `_metadata.history_days` climbed
+# 109 -> 112: a frozen number wearing a live label. Nothing rendered it (zero references in
+# src/components or src/app; three tests actively guard against it leaking back).
+# The probation record is NOT lost — every historical `forecast_skill.json` is committed,
+# so git is the archive. That is why removing the key costs nothing.
+FILES = {"KRONOS": "kronos_forecasts.json"}
 HORIZONS = {"2d": 2, "5d": 5, "10d": 10, "15d": 15, "20d": 20}  # bday offset -> p50[h-1]
 MATCH_TOL_DAYS = 4                           # realized-day match tolerance (holidays)
 # Loud guard: the audit walks the git history of kronos_forecasts.json. If the runner
@@ -243,7 +253,7 @@ def _build_skill_dict(all_model_data, naive_data, kronos_snaps):
     }
 
     # Model entries
-    for model in ("KRONOS", "TIMESFM"):
+    for model in FILES:
         md = all_model_data.get(model)
         if not md:
             result[model] = {"verdict": "INSUFFICIENT", "horizons": {}, "conviction_5d": {}}
@@ -254,8 +264,8 @@ def _build_skill_dict(all_model_data, naive_data, kronos_snaps):
         buckets = {BUCKET_KEY[b]: _stat(*md["conv"][b], overlap=CONVICTION_HORIZON)
                    for b in md["conv"]}
         gt5 = buckets.get("gt5")
-        # Naive gates apply to KRONOS (naive pairs are Kronos's dates); TIMESFM is
-        # dead regardless, so pass None (its own dates differ from the naive pairs).
+        # The naive pairs are Kronos's dates, so the naive gates apply to Kronos only.
+        # A model added to FILES would need its OWN naive control, not Kronos's.
         ngr = naive_gt5_rate if model == "KRONOS" else None
         nhr = naive_horizon_rates if model == "KRONOS" else None
         v = "INSUFFICIENT" if shallow else _verdict(gt5, horizons, ngr, nhr)

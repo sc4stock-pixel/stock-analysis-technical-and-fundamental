@@ -484,11 +484,11 @@ export interface ForecastSkill {
     history_days: number; match_tol_days: number;
   };
   KRONOS: ModelSkill; NAIVE: ModelSkill;
-  /** TimesFM was retired from every display surface (PR #50, 2026-08-10), but
-   *  scripts/forecast_probation_audit.py still scores it and writes this key —
-   *  the probation record is deliberately kept auditable. Typed so the shape
-   *  stays honest; no display code reads it. */
-  TIMESFM: ModelSkill;
+  /** TimesFM was retired from every display surface (PR #50, 2026-08-10) and dropped from
+   *  the audit on 2026-09-16 — it is deliberately absent from this type. No display code
+   *  read it, and because `timesfm_forecasts.json` froze on 2026-08-10 the audit was
+   *  republishing byte-identical numbers under a climbing `history_days`: a frozen figure
+   *  wearing a live label. The probation record lives in git history. Do not re-add. */
 }
 
 export interface KronosForecast {
