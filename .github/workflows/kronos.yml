@@ -46,26 +46,52 @@ jobs:
       - name: Run predictor
         run: python scripts/kronos_predict.py
 
-      # ⛔ BAR-DATE FRESHNESS GUARD (added 2026-09-15).
-      # The coverage gate below counts TICKERS via _metadata.missing; it cannot see a BAR
-      # DATE. yfinance serves an all-NaN placeholder for a session that has not settled,
-      # kronos_predict.py drops the NaN row, and that ticker silently keeps its PREVIOUS
-      # bar. Live on 2026-09-15 the file shipped 6 series on 2026-09-14 and 10 on 2026-09-11
-      # (all 9 US names + 3033.HK) and the run still reported success.
+      # ⛔ BAR-DATE FRESHNESS GUARD — v2, region-aware (rewritten 2026-09-16).
       #
-      # The check is WITHIN-FILE on purpose: every series' bar date must equal the newest
-      # bar date in the file. That needs no external reference, so it cannot false-fire on a
-      # uniform lag (weekend, holiday, whole-market outage) and cannot be defeated by a
-      # reference that is itself stale. An earlier draft compared against KV
-      # regionLastRun -- that is WRONG at this job's run hour: the job lands 00:06-00:45 UTC
-      # and the autopilot worker does not write KV until ~00:55 UTC, so KV is still one
-      # session behind and the comparison would have passed on exactly the day it was
-      # written for. The same draft also read secrets.KV_REST_API_URL, which does not exist
-      # in this repo, so it would have gone red every day on an empty URL.
+      # WHAT v1 GOT WRONG (added 2026-09-15, shipped in #76). v1 demanded that EVERY series
+      # sit on the newest bar date in the file. That premise was false. The predictor runs at
+      # ~00:38 UTC, about 4h38m after the US close, and yfinance still serves an all-NaN
+      # placeholder for the newest US session. kronos_predict.py drops the NaN row, so the 9
+      # US names (plus 3033.HK, whose bars carry NaN for a separate, long-standing coverage
+      # reason) silently keep the PREVIOUS session. The result is a stable, expected shape:
       #
-      # ⛔ NOT covered: a file where ALL 16 series are stale. A uniform lag cannot be told
-      # apart from a closed market without a session calendar, and the benign case (weekend)
-      # is far more common than the harmful one. Do not "fix" that by adding a KV lookup.
+      #     normal weekday:   HK = session N,  US = session N-1
+      #     weekend/holiday:  all 16 on the same date
+      #
+      # v1 therefore failed on most weekdays and would have stopped publishing altogether.
+      # Measured against the last 20 revisions of kronos_forecasts.json on origin/main:
+      # v1 FAILS 16 of them -- every file from a session where the US market had traded --
+      # and v2 passes all 20. (Re-measure with the two scripts side by side if this is ever
+      # doubted; the four v1 passes are 09-13, 09-14, 09-06, 09-07, i.e. the weekend files
+      # plus US Labor Day.)
+      # Mechanism confirmed from the run log (`gh run view 35040780382 --log`): exactly 10
+      # symbols each logged "dropped 1 bar(s) with NaN OHLCV" -- the 9 US names + 3033.HK --
+      # and not one HK name.
+      #
+      # WHAT v2 DOES. Keeps the protective intent (never publish a genuinely stale series)
+      # while encoding the structure this pipeline can actually produce:
+      #   1. the newest bar must be recent relative to this run  -> catches a wholly frozen file
+      #   2. nothing may trail the newest bar by more than a long weekend + a holiday
+      #
+      # ⛔ A THIRD RULE WAS WRITTEN AND DELETED, TWICE. Both versions tried to assert that HK
+      # must not lag the US, and both false-fired on legitimate files:
+      #   - per-name ("every HK name must be current") fired on 2026-09-01, where 0939.HK had
+      #     legitimately dropped a NaN bar;
+      #   - one-step tolerance fired on an HK public holiday, because 3033.HK sits an extra
+      #     step back on those days, so saving it needed a hardcoded 3033.HK exception.
+      # Rules 1 and 2 need no exceptions and catch the real failure modes: a frozen file
+      # within 4 days, and any single series frozen for 6+ days. Do not re-add a region rule
+      # without a file that proves it silent on 2026-09-01 AND on a HK holiday.
+      #
+      # ⛔ DO NOT "fix" the US lag by moving the cron later. The 08:50 HKT debrief reads this
+      # file at ~00:50 UTC, so any run late enough for a settled US bar would be read a full
+      # session late by BOTH regions -- US no fresher, HK worse. The US lag is structural
+      # given the debrief's position, not a scheduling defect.
+      #
+      # ⛔ DO NOT add a KV lookup. KV is itself a session behind at this hour: the job lands
+      # 00:06-00:45 UTC and the autopilot worker does not write KV until ~00:55 UTC, so the
+      # comparison would pass on exactly the day it was written for. An earlier draft also
+      # read secrets.KV_REST_API_URL, which does not exist in this repo.
       #
       # Placement is BEFORE the commit step on purpose. A stale bar is a WRONG number, not a
       # missing one, and no consumer can detect staleness -- the 08:50 HKT debrief reads this
@@ -74,7 +100,10 @@ jobs:
       - name: Verify forecast bar-date freshness
         run: |
           python - <<'EOF'
-          import collections, json, sys
+          import collections, datetime as dt, json, sys
+
+          MAX_TRAIL_DAYS = 5   # a long weekend plus a holiday
+          MAX_AGE_DAYS = 4     # newest bar vs this run
 
           fc = json.load(open("kronos_forecasts.json"))
           series = {k: v for k, v in fc.items() if k != "_metadata"}
@@ -89,17 +118,39 @@ jobs:
               sys.exit(1)
 
           newest = max(known)
-          stale = sorted(k for k, v in series.items() if v.get("last_date") != newest)
+          newest_d = dt.date.fromisoformat(newest)
 
-          print(f"RECEIPT(freshness): newest bar {newest}; "
-                f"{len(series) - len(stale)}/{len(series)} series on it")
+          gen = (fc.get("_metadata") or {}).get("generated_at_utc", "")
+          run_date = dt.date.fromisoformat(gen[:10]) if len(gen) >= 10 else dt.date.today()
+
+          on_newest = sum(1 for v in series.values() if v.get("last_date") == newest)
+          print(f"RECEIPT(freshness): newest bar {newest}; run date {run_date.isoformat()}; "
+                f"{on_newest}/{len(series)} series on it")
           for d in sorted(counts, key=str):
-              print(f"  {d}: {counts[d]}")
+              names = sorted(k for k, v in series.items() if v.get("last_date") == d)
+              print(f"  {d}: {counts[d]}  ({', '.join(names)})")
 
-          if stale:
-              detail = ", ".join(f"{k}={series[k].get('last_date')}" for k in stale)
-              print(f"::error::{len(stale)} series on an older bar than {newest}: {detail}")
+          problems = []
+
+          # 1. a wholly frozen file
+          if (run_date - newest_d).days > MAX_AGE_DAYS:
+              problems.append(
+                  f"newest bar {newest} is {(run_date - newest_d).days} days before the "
+                  f"run date {run_date.isoformat()}")
+
+          # 2. nothing may trail the newest bar by more than a long weekend + holiday
+          for k, v in sorted(series.items()):
+              d = v.get("last_date")
+              if d and (newest_d - dt.date.fromisoformat(d)).days > MAX_TRAIL_DAYS:
+                  problems.append(
+                      f"{k} is on {d}, "
+                      f"{(newest_d - dt.date.fromisoformat(d)).days} days behind {newest}")
+
+          if problems:
+              for p in problems:
+                  print(f"::error::{p}")
               sys.exit(1)
+          print("OK: bar dates are within the expected structure")
           EOF
 
       - name: Rebase on latest main (avoid concurrent-push races)
