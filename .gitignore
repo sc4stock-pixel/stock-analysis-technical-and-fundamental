@@ -35,3 +35,7 @@ next-env.d.ts
 # and personal account preferences. Remove these lines to commit it deliberately.
 claude-export/
 claude-export.tar.gz
+
+# python
+__pycache__/
+*.pyc
