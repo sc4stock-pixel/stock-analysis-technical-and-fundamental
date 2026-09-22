@@ -89,6 +89,72 @@ export function buildRatioSeries(
   return sortedDates.map((date, i) => ({ date, ratio: sortedRatios[i], ma: mas[i] }));
 }
 
+/** Latest date carrying a usable bar, or null when the series has none. */
+export function lastBarDate(bars: CloseBar[] | null | undefined): string | null {
+  if (!Array.isArray(bars)) return null;
+  let last: string | null = null;
+  for (const b of bars) {
+    if (!b || typeof b.date !== "string") continue;
+    if (!Number.isFinite(b.close) || b.close <= 0) continue;
+    if (last === null || b.date.localeCompare(last) > 0) last = b.date;
+  }
+  return last;
+}
+
+/**
+ * A hole at the tail of the join, which the inner join cannot report on its own.
+ *
+ * Dropping unpaired dates is right for a gap *inside* the window: both sides have a bar
+ * that day, one market was shut, and carrying the other side's stale close forward would
+ * invent a move. The failure this catches is narrower — a date the join SHOULD have paired
+ * but could not, because one leg skipped a session the other traded and then resumed on a
+ * later one. `currentLead` then reads an older bar than the data supports, silently,
+ * because the series is still non-empty.
+ *
+ * The rule is `lastJoined < min(lastNumerator, lastDenominator)`: a date both series reach
+ * that the join still did not produce. Comparing the two legs' last dates directly is NOT
+ * the same test and would fire every HK morning — during HK hours `3033.HK` carries a live
+ * same-day bar while QQQ's last bar is the prior US close, so the legs legitimately differ
+ * by a day with nothing missing. `min` removes that case, and a genuine holiday gap too.
+ *
+ * Measured 2026-09-22: `3033.HK` had bars for 09-17, 09-18 and a live 09-22, with **no
+ * 09-21 bar at all**, while QQQ had 09-21. `min` = 09-21, last joined = 09-18, so this fires
+ * and the panel can say the ratio is older than the data allows.
+ *
+ * Returns both dates for the message; null in the normal case.
+ */
+export function joinGap(
+  numerator: CloseBar[] | null | undefined,
+  denominator: CloseBar[] | null | undefined,
+): { lastJoined: string; through: string } | null {
+  const n = lastBarDate(numerator);
+  const d = lastBarDate(denominator);
+  if (n === null || d === null) return null;
+  const through = n.localeCompare(d) <= 0 ? n : d;
+
+  const denDates = new Set<string>();
+  if (Array.isArray(denominator)) {
+    for (const b of denominator) {
+      if (!b || typeof b.date !== "string") continue;
+      if (!Number.isFinite(b.close) || b.close <= 0) continue;
+      denDates.add(b.date);
+    }
+  }
+
+  let lastJoined: string | null = null;
+  if (Array.isArray(numerator)) {
+    for (const b of numerator) {
+      if (!b || typeof b.date !== "string") continue;
+      if (!Number.isFinite(b.close) || b.close <= 0) continue;
+      if (!denDates.has(b.date)) continue;
+      if (lastJoined === null || b.date.localeCompare(lastJoined) > 0) lastJoined = b.date;
+    }
+  }
+
+  if (lastJoined === null || lastJoined.localeCompare(through) >= 0) return null;
+  return { lastJoined, through };
+}
+
 /**
  * Where the latest point sits relative to its mean — the one-word read for the panel.
  *

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { stripNaN } from "@/lib/fill-command";
 import { completePoints, type BreadthPoint } from "@/lib/breadth-history";
-import { buildRatioSeries, currentLead, type RatioPoint } from "@/lib/rotation-ratio";
+import { buildRatioSeries, currentLead, joinGap, type RatioPoint } from "@/lib/rotation-ratio";
 import { fetchYahooOHLCV } from "@/lib/marketData";
 
 export const dynamic = "force-dynamic";
@@ -78,7 +78,20 @@ export async function GET() {
     ratio = buildRatioSeries(hkBars, usBars).slice(-DISPLAY_DAYS);
     // A non-empty fetch on both legs can still yield nothing if their calendars never
     // line up — a distinct failure from a bad symbol, so it gets a distinct message.
-    if (ratio.length === 0) warnings.push("ratio: no overlapping sessions");
+    if (ratio.length === 0) {
+      warnings.push("ratio: no overlapping sessions");
+    } else {
+      // A third degradation, which neither guard above can see: the series is non-empty but
+      // the join lost a session at its tail, so `lead` is read off a bar older than the data
+      // supports. Invisible by construction — see `joinGap` for why the two legs' last dates
+      // are the wrong thing to compare.
+      const gap = joinGap(hkBars, usBars);
+      if (gap) {
+        warnings.push(
+          `ratio is stale — ends ${gap.lastJoined}, data available through ${gap.through}`
+        );
+      }
+    }
   } else {
     // Name the failing leg. The first deploy reported a bare "ratio series unavailable",
     // which took a manual Yahoo probe to trace to a symbol that 404s.

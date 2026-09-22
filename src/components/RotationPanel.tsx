@@ -212,6 +212,9 @@ export default function RotationPanel() {
                     {ratio.length > 0 && (
                       <Chip label="ratio" value={ratio[ratio.length - 1].ratio.toFixed(4)} />
                     )}
+                    {ratio.length > 0 && (
+                      <Chip label="as of" value={ratio[ratio.length - 1].date} />
+                    )}
                   </div>
                   <div className="text-[0.66rem] font-mono text-[#4a6080] mt-1">
                     <span style={{ color: HK }}>—</span> ratio · <span style={{ color: MUTED }}>- -</span> {RATIO_MA_PERIOD}d mean
