@@ -273,7 +273,17 @@ export function runPipeline(
     config.walkForward.trainRatio
   );
   if (stOosResult) {
-    dbg(sym, `ST WFO (true OOS): train(ATR=${stOosResult.wf_train_atr_period},Mult=${stOosResult.wf_train_multiplier}) Sharpe=${stOosResult.wf_train_sharpe.toFixed(2)} | test Sharpe=${stOosResult.wf_test_sharpe.toFixed(2)}, Return=${stOosResult.wf_test_return.toFixed(1)}% | eff=${stOosResult.wf_efficiency_ratio.toFixed(2)} (${stOosResult.wf_efficiency_quality})`);
+    // AUDIT FIX C3 (2026-10-07): when the held-out slice had too few trades the
+    // OOS stats are null — print the trade count that proves it, not a number
+    // that reads as a result.
+    const o = stOosResult;
+    const hasOos = o.wf_test_sharpe !== null && o.wf_test_sharpe !== undefined;
+    const testStr = hasOos
+      ? `Sharpe=${o.wf_test_sharpe!.toFixed(2)}, Return=${o.wf_test_return?.toFixed(1) ?? "—"}%`
+      : `NO DATA (${o.wf_test_trades} test trades)`;
+    const effStr = (o.wf_efficiency_ratio === null || o.wf_efficiency_ratio === undefined)
+      ? "n/a" : o.wf_efficiency_ratio.toFixed(2);
+    dbg(sym, `ST WFO (true OOS): train(ATR=${o.wf_train_atr_period},Mult=${o.wf_train_multiplier}) Sharpe=${o.wf_train_sharpe.toFixed(2)} | test ${testStr} | eff=${effStr} (${o.wf_efficiency_quality})`);
   }
 
   // Recompute ST with optimal params

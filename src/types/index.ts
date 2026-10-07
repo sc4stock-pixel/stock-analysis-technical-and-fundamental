@@ -261,10 +261,14 @@ export interface StrategyMetrics {
   wf_train_sharpe?:       number;
   wf_train_return?:       number;
   wf_train_trades?:       number;
-  wf_test_sharpe?:        number;
-  wf_test_return?:        number;
+  // AUDIT FIX C3 (2026-10-07): the OOS stats are null when the held-out test
+  // slice produced too few trades to carry evidence (see MIN_OOS_TEST_TRADES in
+  // supertrend_optimizer.ts). wf_test_trades stays a number — it is what
+  // explains the nulls. Surfaces must render "—", never 0, for a null.
+  wf_test_sharpe?:        number | null;
+  wf_test_return?:        number | null;
   wf_test_trades?:        number;
-  wf_efficiency_ratio?:   number;
+  wf_efficiency_ratio?:   number | null;
   wf_efficiency_quality?: "GOOD" | "ACCEPTABLE" | "OVERFIT" | "NO DATA" | "POOR IS" | "FAILED OOS";
   wf_passed?:             boolean;
   wf_is_true_oos?:        boolean;

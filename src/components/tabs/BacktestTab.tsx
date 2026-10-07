@@ -127,8 +127,11 @@ export default function BacktestTab({ result }: Props) {
             const qcolor = qcolors[wf.wf_efficiency_quality!] ?? "#4a6080";
             const passColor = wf.wf_passed ? "#00ff88" : "#ff4757";
             const passBg    = wf.wf_passed ? "bg-[#00ff88]/15" : "bg-[#ff4757]/15";
-            const testRet = wf.wf_test_return ?? 0;
-            const testRetColor = testRet >= 0 ? "#00ff88" : "#ff4757";
+            // AUDIT FIX C3 (2026-10-07): a null OOS return means "no evidence",
+            // not "0.0%". Rendering 0 here in green is exactly the misread the
+            // null was introduced to prevent.
+            const testRet = wf.wf_test_return ?? null;
+            const testRetColor = (testRet ?? 0) >= 0 ? "#00ff88" : "#ff4757";
             return (
               <div className="mt-2 pt-2 border-t border-[#1e2d4a]/40">
                 <div className="flex items-center gap-2 mb-1">
@@ -156,7 +159,7 @@ export default function BacktestTab({ result }: Props) {
                   </div>
                   <div className="bg-[#1e2d4a]/40 rounded px-2 py-1 text-center">
                     <div className="font-mono font-bold" style={{ color: testRetColor }}>
-                      {testRet >= 0 ? "+" : ""}{testRet.toFixed(1)}%
+                      {testRet === null ? "—" : `${testRet >= 0 ? "+" : ""}${testRet.toFixed(1)}%`}
                     </div>
                     <div className="text-[#4a6080] text-[0.55rem]">OOS Return</div>
                   </div>

@@ -91,6 +91,18 @@ TRAIN_RATIO   = 0.7       # AUDIT FIX C2 (2026-05-20): 70% train, 30% test for O
 DEFAULT_ATR_PERIOD = 10
 DEFAULT_MULTIPLIER = 3.0
 
+# AUDIT FIX C3 (2026-10-07): the walk-forward harness used to PUBLISH a test-slice
+# Sharpe/return even when the held-out window generated 0-1 trades. A Sharpe over
+# zero trades is not a bad result, it is no result — but it reads as evidence, and
+# it was (the 2026-10-07 red-team audit cited MSFT +1.89 / TSM +1.85 as genuine OOS
+# numbers; both were computed over 0 test trades). Below this trade count the
+# test-slice stats are written as null and wf_efficiency_quality is "NO DATA".
+#
+# This threshold is the one the gate already used for classification — it is NOT
+# being tightened. Changing it would flip wf_passed for real symbols and change
+# which params get published; that is a strategy decision, not a reporting fix.
+MIN_OOS_TEST_TRADES = 2
+
 # Output: repo root/st_params.json  (script lives in repo root/scripts/)
 OUTPUT_PATH = Path(__file__).parent.parent / "st_params.json"
 
@@ -356,6 +368,52 @@ def _grid_search(df: pd.DataFrame) -> dict:
     return best
 
 
+def _oos_verdict(train_atr, train_mult, train_sharpe, train_return, train_trades,
+                 test_sharpe, test_return, test_trades) -> dict:
+    """Classify a walk-forward result and build the published wf_* dict.
+
+    Pure — takes numbers, returns the dict — so the publication rule is
+    unit-testable without building a DataFrame or running a backtest.
+
+    PUBLICATION RULE (AUDIT FIX C3, 2026-10-07): when the held-out test slice
+    produced fewer than MIN_OOS_TEST_TRADES trades, the OOS numbers carry no
+    information, so wf_test_sharpe / wf_test_return / wf_efficiency_ratio are
+    written as None instead of as numbers. A Sharpe computed over 0-1 trades is
+    not a bad result, it is no result — but it reads as evidence, and it was
+    being read that way.
+
+    wf_passed is still derived from the RAW values, so the A1 gate decides
+    exactly as it did before: this fix changes what is REPORTED, never which
+    params are PUBLISHED.
+    """
+    if train_trades < 3 or test_trades < MIN_OOS_TEST_TRADES:
+        eff, quality = 0.0, "NO DATA"
+    elif train_sharpe <= 0:
+        eff, quality = 0.0, "POOR IS"
+    elif test_sharpe <= 0:
+        eff, quality = 0.0, "FAILED OOS"
+    else:
+        eff = min(test_sharpe / train_sharpe, 1.5)
+        quality = "GOOD" if eff >= 0.7 else "ACCEPTABLE" if eff >= 0.4 else "OVERFIT"
+    passed = bool(eff >= 0.4 and test_sharpe > 0)
+
+    publish = test_trades >= MIN_OOS_TEST_TRADES
+    return {
+        "wf_train_atr_period":   train_atr,
+        "wf_train_multiplier":   train_mult,
+        "wf_train_sharpe":       train_sharpe,
+        "wf_train_return":       train_return,
+        "wf_train_trades":       train_trades,
+        "wf_test_sharpe":        round(test_sharpe, 2) if publish else None,
+        "wf_test_return":        round(test_return, 2) if publish else None,
+        "wf_test_trades":        test_trades,
+        "wf_efficiency_ratio":   round(eff, 2) if quality != "NO DATA" else None,
+        "wf_efficiency_quality": quality,
+        "wf_passed":             passed,
+        "wf_is_true_oos":        True,
+    }
+
+
 def _compute_oos_wfo(df: pd.DataFrame) -> dict:
     """AUDIT FIX C2 (2026-05-20): true train/test split for honest OOS metrics.
 
@@ -385,32 +443,10 @@ def _compute_oos_wfo(df: pd.DataFrame) -> dict:
     test_return = round(test_r["total_return"], 2)
     test_trades = test_r["num_trades"]
 
-    # Efficiency ratio + quality classification (mirrors Python analyzer.py)
-    if train_trades < 3 or test_trades < 2:
-        eff, quality = 0.0, "NO DATA"
-    elif train_sharpe <= 0:
-        eff, quality = 0.0, "POOR IS"
-    elif test_sharpe <= 0:
-        eff, quality = 0.0, "FAILED OOS"
-    else:
-        eff = min(test_sharpe / train_sharpe, 1.5)
-        quality = "GOOD" if eff >= 0.7 else "ACCEPTABLE" if eff >= 0.4 else "OVERFIT"
-    passed = bool(eff >= 0.4 and test_sharpe > 0)
-
-    return {
-        "wf_train_atr_period":   train_atr,
-        "wf_train_multiplier":   train_mult,
-        "wf_train_sharpe":       train_sharpe,
-        "wf_train_return":       train_return,
-        "wf_train_trades":       train_trades,
-        "wf_test_sharpe":        test_sharpe,
-        "wf_test_return":        test_return,
-        "wf_test_trades":        test_trades,
-        "wf_efficiency_ratio":   round(eff, 2),
-        "wf_efficiency_quality": quality,
-        "wf_passed":             passed,
-        "wf_is_true_oos":        True,
-    }
+    # Efficiency ratio + quality classification, and the C3 publication rule,
+    # both live in _oos_verdict() (unit-testable; see test_optimize_gate.py).
+    return _oos_verdict(train_atr, train_mult, train_sharpe, train_return,
+                        train_trades, test_sharpe, test_return, test_trades)
 
 
 def _apply_wf_gate(best_params: dict, oos: dict, rerun_backtest, symbol: str = "?") -> dict:
@@ -491,9 +527,19 @@ def _optimize_symbol(stock: dict) -> tuple[str, dict | None]:
     bp = best_params
     oos_str = ""
     if oos:
-        oos_str = (f" | OOS Sharpe={oos['wf_test_sharpe']:.2f}, "
-                   f"Return={oos['wf_test_return']:.1f}%, "
-                   f"eff={oos['wf_efficiency_ratio']:.2f} ({oos['wf_efficiency_quality']})")
+        # C3: wf_test_* and wf_efficiency_ratio are null when there is no OOS
+        # evidence — print the trade count that proves it, not a number that
+        # reads as a result (a "Sharpe=1.89" over 0 trades is how the
+        # 2026-10-07 audit misread MSFT and TSM).
+        eff_str = (f"{oos['wf_efficiency_ratio']:.2f}"
+                   if oos.get("wf_efficiency_ratio") is not None else "n/a")
+        if oos.get("wf_test_sharpe") is None:
+            oos_str = (f" | OOS: NO DATA ({oos['wf_test_trades']} test trades "
+                       f"< {MIN_OOS_TEST_TRADES})")
+        else:
+            oos_str = (f" | OOS Sharpe={oos['wf_test_sharpe']:.2f}, "
+                       f"Return={oos['wf_test_return']:.1f}%, "
+                       f"eff={eff_str} ({oos['wf_efficiency_quality']})")
     src_tag = " [DEF-FALLBACK]" if bp.get("params_source") == "default_fallback" else ""
     print(f"    ✅ {symbol}: ATR={bp['atr_period']}, Mult={bp['multiplier']}{src_tag} "
           f"→ Return={bp['total_return']:.1f}%, Sharpe={bp['sharpe']:.2f}, "
