@@ -65,3 +65,55 @@ def test_rerun_failure_prints_warning(capsys):
     opt._apply_wf_gate(dict(GRID_WINNER), dict(OOS_FAILED), _boom, symbol="TEST")
     captured = capsys.readouterr()
     assert "TEST" in captured.out and "fallback rerun failed" in captured.out
+
+
+# ── AUDIT FIX C3 (2026-10-07): the publication rule ───────────────────────────
+# The 2026-10-07 red-team audit cited wf_test_sharpe = +1.89 (MSFT) and +1.85
+# (TSM) as genuine out-of-sample evidence. Both were computed over ZERO test
+# trades. The gate's verdict was right; what got published was not. These tests
+# pin the rule: no OOS evidence -> publish null, and never move the gate.
+
+def test_zero_test_trades_publishes_null_not_a_sharpe():
+    out = opt._oos_verdict(14, 2.5, 0.71, 12.0, 4, 1.89, 0.0, 0)
+    assert out["wf_test_sharpe"] is None
+    assert out["wf_test_return"] is None
+    assert out["wf_efficiency_ratio"] is None
+    assert out["wf_efficiency_quality"] == "NO DATA"
+    # The count that explains the nulls is always published.
+    assert out["wf_test_trades"] == 0
+    assert out["wf_is_true_oos"] is True
+
+
+def test_one_test_trade_is_still_no_data():
+    out = opt._oos_verdict(14, 2.5, 0.90, 20.0, 4, -0.02, -1.57, 1)
+    assert out["wf_test_sharpe"] is None
+    assert out["wf_test_return"] is None
+    assert out["wf_efficiency_ratio"] is None
+    assert out["wf_test_trades"] == 1
+
+
+def test_at_threshold_the_numbers_are_real_evidence_and_published():
+    """At/above MIN_OOS_TEST_TRADES the OOS numbers mean something — publish them."""
+    out = opt._oos_verdict(10, 3.0, 0.93, 37.0, 3, -1.84, -20.32, 2)
+    assert out["wf_test_sharpe"] == -1.84
+    assert out["wf_test_return"] == -20.32
+    assert out["wf_efficiency_ratio"] == 0.0
+    assert out["wf_efficiency_quality"] == "FAILED OOS"
+
+
+def test_publication_rule_does_not_move_the_gate():
+    """C3 changes what is REPORTED, never what is PUBLISHED. A flattering raw
+    Sharpe over no trades must still be rejected, and genuine evidence must
+    still be promoted — exactly as before the fix."""
+    nodata = opt._oos_verdict(14, 2.5, 0.71, 12.0, 4, 1.89, 0.0, 0)
+    assert nodata["wf_passed"] is False
+    out = opt._apply_wf_gate(dict(GRID_WINNER), nodata, _rerun_ok)
+    assert out["params_source"] == "default_fallback"
+    assert out["atr_period"] == opt.DEFAULT_ATR_PERIOD
+    assert out["multiplier"] == opt.DEFAULT_MULTIPLIER
+
+    good = opt._oos_verdict(14, 2.5, 1.26, 40.0, 6, 1.1, 22.0, 4)
+    assert good["wf_passed"] is True
+    out2 = opt._apply_wf_gate(dict(GRID_WINNER), good, _rerun_ok)
+    assert out2["params_source"] == "optimized"
+    assert out2["atr_period"] == 12 and out2["multiplier"] == 2.5

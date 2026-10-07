@@ -28,6 +28,13 @@ const ATR_PERIODS  = [10, 12, 14];
 const MULTIPLIERS  = [2.5, 2.75, 3.0, 3.25, 3.5];
 const MIN_TRADES   = 2;
 
+// AUDIT FIX C3 (2026-10-07): below this many trades in the held-out test slice
+// there is no OOS evidence to report, so wf_test_sharpe / wf_test_return /
+// wf_efficiency_ratio are emitted as null instead of as numbers. A Sharpe over
+// 0-1 trades reads as a result but is not one. Mirror of MIN_OOS_TEST_TRADES in
+// scripts/optimize_supertrend.py — change both or neither (four-way sync rule).
+export const MIN_OOS_TEST_TRADES = 2;
+
 function mean(arr: number[]): number {
   return arr.length === 0 ? 0 : arr.reduce((a, b) => a + b, 0) / arr.length;
 }
@@ -257,12 +264,15 @@ export interface STOosResult {
   wf_train_sharpe:       number;
   wf_train_return:       number;
   wf_train_trades:       number;
-  // Test slice (held-out, true OOS using train-derived params)
-  wf_test_sharpe:        number;
-  wf_test_return:        number;
+  // Test slice (held-out, true OOS using train-derived params).
+  // AUDIT FIX C3: null when the test slice had too few trades to mean anything
+  // (see MIN_OOS_TEST_TRADES). wf_test_trades is always published — it is the
+  // number that explains why the others are null.
+  wf_test_sharpe:        number | null;
+  wf_test_return:        number | null;
   wf_test_trades:        number;
   // Quality classification
-  wf_efficiency_ratio:   number;
+  wf_efficiency_ratio:   number | null;
   wf_efficiency_quality: "GOOD" | "ACCEPTABLE" | "OVERFIT" | "NO DATA" | "POOR IS" | "FAILED OOS";
   wf_passed:             boolean;
   wf_is_true_oos:        true;
@@ -301,7 +311,7 @@ export function optimizeSupertrendOos(
   let quality: STOosResult["wf_efficiency_quality"] = "NO DATA";
   if (trainBest.numTrades < 3) {
     quality = "NO DATA";
-  } else if (testResult.numTrades < 2) {
+  } else if (testResult.numTrades < MIN_OOS_TEST_TRADES) {
     quality = "NO DATA";
   } else if (trainBest.sharpe <= 0) {
     quality = "POOR IS";
@@ -319,10 +329,15 @@ export function optimizeSupertrendOos(
     wf_train_sharpe:       Number(trainBest.sharpe.toFixed(2)),
     wf_train_return:       Number(trainBest.totalReturn.toFixed(2)),
     wf_train_trades:       trainBest.numTrades,
-    wf_test_sharpe:        Number(testResult.sharpe.toFixed(2)),
-    wf_test_return:        Number(testResult.totalReturn.toFixed(2)),
+    // AUDIT FIX C3: publish null, not a number, when the test slice carried no
+    // usable evidence. wf_passed above is still derived from the raw values, so
+    // the gate's decision is unchanged — only what gets displayed.
+    wf_test_sharpe:        testResult.numTrades >= MIN_OOS_TEST_TRADES
+                             ? Number(testResult.sharpe.toFixed(2)) : null,
+    wf_test_return:        testResult.numTrades >= MIN_OOS_TEST_TRADES
+                             ? Number(testResult.totalReturn.toFixed(2)) : null,
     wf_test_trades:        testResult.numTrades,
-    wf_efficiency_ratio:   Number(eff.toFixed(2)),
+    wf_efficiency_ratio:   quality === "NO DATA" ? null : Number(eff.toFixed(2)),
     wf_efficiency_quality: quality,
     wf_passed:             passed,
     wf_is_true_oos:        true,
