@@ -1,0 +1,45 @@
+name: Web Tests
+
+# Runs the app's vitest suite on every push and every pull request.
+#
+# Informational, not a gate: `main` has no branch protection and no required
+# status checks, so a red run here does not block anything. That is deliberate —
+# kronos.yml, optimize-supertrend.yml and update-southbound.yml all push commits
+# straight to main on a schedule, and requiring status checks on main would block
+# those automated commits. This job exists so that a broken test is VISIBLE, not
+# so that it is blocking.
+#
+# No `paths:` filter on purpose: the whole point is that no push escapes the suite.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push supersedes an in-flight run for the same ref. The scheduled
+# workers commit to main several times a day; without this the queue piles up.
+concurrency:
+  group: web-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test
