@@ -1,6 +1,6 @@
 name: Web Tests
 
-# Runs the app's vitest suite on every push and every pull request.
+# Runs the app's vitest suite on every push, every pull request, and once a day.
 #
 # Informational, not a gate: `main` has no branch protection and no required
 # status checks, so a red run here does not block anything. That is deliberate —
@@ -9,11 +9,25 @@ name: Web Tests
 # those automated commits. This job exists so that a broken test is VISIBLE, not
 # so that it is blocking.
 #
-# No `paths:` filter on purpose: the whole point is that no push escapes the suite.
+# No `paths:` filter on purpose: within the pushes this workflow can see, none escapes
+# the suite.
+#
+# ⛔ WHY THE `schedule:` TRIGGER EXISTS (added 2026-10-16). `push:`/`pull_request:` do NOT
+# cover the commits that matter most here. kronos.yml, update-southbound.yml and
+# optimize-supertrend.yml commit with `stefanzweifel/git-auto-commit-action` using the
+# default `GITHUB_TOKEN`, and GitHub deliberately does not start workflow runs from events
+# raised by its own token — so every automated commit to `main` was invisible to this job.
+# The evidence: all three runs of this workflow were from 2026-10-12, while 14 commits
+# landed on `main` after the #84 merge that introduced it. This daily run is the backstop;
+# 10:00 UTC is after the last scheduled worker push (08:30 UTC), so it always tests a full
+# day of automated commits.
 
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '0 10 * * *'   # 18:00 HKT, after the last worker push (08:30 UTC)
+  workflow_dispatch:       # manual trigger via UI
 
 permissions:
   contents: read
