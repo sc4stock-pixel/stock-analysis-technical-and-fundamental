@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-18T09:19:55Z",
+  "updated": "2026-10-25T09:34:39Z",
   "stocks": [
     "AAPL",
     "MSFT",
@@ -182,6 +182,10 @@
       "frequency": "Q",
       "quarters": [
         {
+          "fiscalDateEnding": "2026-09-30",
+          "reportedEPS": "7.4"
+        },
+        {
           "fiscalDateEnding": "2026-06-30",
           "reportedEPS": "6.18"
         },
@@ -224,10 +228,6 @@
         {
           "fiscalDateEnding": "2023-12-31",
           "reportedEPS": "5.33"
-        },
-        {
-          "fiscalDateEnding": "2023-09-30",
-          "reportedEPS": "4.39"
         }
       ]
     },
