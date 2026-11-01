@@ -2,8 +2,8 @@
   "_metadata": {
     "conviction_pct": 5.0,
     "drift_window": 60,
-    "generated_at_hk": "2026-10-31 09:57 HKT",
-    "history_days": 157,
+    "generated_at_hk": "2026-11-01 09:35 HKT",
+    "history_days": 158,
     "match_tol_days": 4
   },
   "NAIVE": {
@@ -11,14 +11,14 @@
     "horizons": {
       "2d": {
         "hits": 1166,
-        "n": 2412,
-        "rate": 0.4834,
-        "ci_lo": 0.4635,
-        "ci_hi": 0.5034,
-        "p": 0.1033,
+        "n": 2413,
+        "rate": 0.4832,
+        "ci_lo": 0.4633,
+        "ci_hi": 0.5032,
+        "p": 0.0992,
         "n_eff": 1206,
-        "ci_lo_eff": 0.4553,
-        "p_eff": 0.2494
+        "ci_lo_eff": 0.4551,
+        "p_eff": 0.2437
       },
       "5d": {
         "hits": 1194,
@@ -106,14 +106,14 @@
     "horizons": {
       "2d": {
         "hits": 1209,
-        "n": 2412,
-        "rate": 0.5012,
-        "ci_lo": 0.4813,
-        "ci_hi": 0.5212,
-        "p": 0.9028,
+        "n": 2413,
+        "rate": 0.501,
+        "ci_lo": 0.4811,
+        "ci_hi": 0.521,
+        "p": 0.9189,
         "n_eff": 1206,
-        "ci_lo_eff": 0.4731,
-        "p_eff": 0.9312
+        "ci_lo_eff": 0.4729,
+        "p_eff": 0.9426
       },
       "5d": {
         "hits": 1293,
