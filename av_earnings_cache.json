@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-25T09:34:39Z",
+  "updated": "2026-11-01T11:39:50Z",
   "stocks": [
     "AAPL",
     "MSFT",
@@ -76,6 +76,10 @@
       "frequency": "Q",
       "quarters": [
         {
+          "fiscalDateEnding": "2026-09-30",
+          "reportedEPS": "4.89"
+        },
+        {
           "fiscalDateEnding": "2026-06-30",
           "reportedEPS": "4.74"
         },
@@ -118,16 +122,16 @@
         {
           "fiscalDateEnding": "2023-12-31",
           "reportedEPS": "2.93"
-        },
-        {
-          "fiscalDateEnding": "2023-09-30",
-          "reportedEPS": "2.99"
         }
       ]
     },
     "GOOGL": {
       "frequency": "Q",
       "quarters": [
+        {
+          "fiscalDateEnding": "2026-09-30",
+          "reportedEPS": "2.12"
+        },
         {
           "fiscalDateEnding": "2026-06-30",
           "reportedEPS": "9.11"
@@ -171,10 +175,6 @@
         {
           "fiscalDateEnding": "2023-12-31",
           "reportedEPS": "1.64"
-        },
-        {
-          "fiscalDateEnding": "2023-09-30",
-          "reportedEPS": "1.55"
         }
       ]
     },
@@ -532,6 +532,10 @@
       "frequency": "Q",
       "quarters": [
         {
+          "fiscalDateEnding": "2026-09-30",
+          "reportedEPS": "1.1"
+        },
+        {
           "fiscalDateEnding": "2026-06-30",
           "reportedEPS": "0.902"
         },
@@ -589,11 +593,7 @@
         },
         {
           "fiscalDateEnding": "2022-12-31",
-          "reportedEPS": "2.51"
-        },
-        {
-          "fiscalDateEnding": "2022-09-30",
-          "reportedEPS": "3.2"
+          "reportedEPS": "5.71"
         }
       ]
     },
@@ -735,6 +735,10 @@
       "frequency": "Q",
       "quarters": [
         {
+          "fiscalDateEnding": "2026-09-30",
+          "reportedEPS": "0.38"
+        },
+        {
           "fiscalDateEnding": "2026-06-30",
           "reportedEPS": "0.32"
         },
@@ -792,11 +796,7 @@
         },
         {
           "fiscalDateEnding": "2022-12-31",
-          "reportedEPS": "0.29"
-        },
-        {
-          "fiscalDateEnding": "2022-09-30",
-          "reportedEPS": "0.99"
+          "reportedEPS": "1.28"
         }
       ]
     }
