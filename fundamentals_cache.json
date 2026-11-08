@@ -1,9 +1,32 @@
 {
-  "updated": "2026-11-01T11:40:35Z",
+  "updated": "2026-11-08T11:41:53Z",
   "data": {
     "AAPL": {
       "frequency": "Q",
       "periods": [
+        {
+          "endDate": "2026-09-30",
+          "revenue": 114477000000.0,
+          "grossProfit": 54820000000.0,
+          "operatingIncome": 35631000000.0,
+          "netIncome": 30711000000.0,
+          "ebit": 35631000000.0,
+          "ar": 43817000000.0,
+          "inventory": 14541000000.0,
+          "ap": 82252000000.0,
+          "totalAssets": 404548000000.0,
+          "totalLiab": 292455000000.0,
+          "currentAssets": 173857000000.0,
+          "currentLiab": 169915000000.0,
+          "retainedEarnings": 13700000000.0,
+          "sharesOutstanding": 14532259000.0,
+          "longTermDebt": 68208000000.0,
+          "bookEquity": 112093000000.0,
+          "cfo": 28101000000.0,
+          "capex": -2242000000.0,
+          "fcf": 25859000000.0,
+          "workingCapital": 3942000000.0
+        },
         {
           "endDate": "2026-06-30",
           "revenue": 109417000000.0,
@@ -98,29 +121,11 @@
         },
         {
           "endDate": "2025-06-30",
-          "revenue": 94036000000.0,
-          "grossProfit": 43718000000.0,
-          "operatingIncome": 28202000000.0,
-          "netIncome": 23434000000.0,
-          "ebit": 28202000000.0,
-          "ar": 27557000000.0,
-          "inventory": 5925000000.0,
-          "ap": 50374000000.0,
-          "totalAssets": 331495000000.0,
-          "totalLiab": 265665000000.0,
-          "currentAssets": 122491000000.0,
-          "currentLiab": 141120000000.0,
-          "retainedEarnings": -17607000000.0,
-          "sharesOutstanding": 14856722000.0,
-          "longTermDebt": 82430000000.0,
-          "bookEquity": 65830000000.0,
-          "cfo": 27867000000.0,
-          "capex": -3462000000.0,
-          "fcf": 24405000000.0,
-          "workingCapital": -18629000000.0
-        },
-        {
-          "endDate": "2025-03-31",
+          "revenue": null,
+          "grossProfit": null,
+          "operatingIncome": null,
+          "netIncome": null,
+          "ebit": null,
           "ar": null,
           "inventory": null,
           "ap": null,
@@ -140,14 +145,14 @@
       ],
       "derived": {
         "altmanZ": [
-          11.579707388804282,
-          12.101363582291967,
-          11.166393664872245,
-          11.038253801784661
+          10.840214501918998,
+          11.461752653043332,
+          11.978435944665824,
+          11.054663110240655
         ],
         "piotroskiF": [
-          8,
-          2,
+          5,
+          3,
           null,
           null
         ],
@@ -195,7 +200,7 @@
           "currentAssets": 207710000000.0,
           "currentLiab": 168825000000.0,
           "retainedEarnings": 328265000000.0,
-          "sharesOutstanding": 7428434704.0,
+          "sharesOutstanding": 7427000000.0,
           "longTermDebt": 31067000000.0,
           "bookEquity": 442387000000.0,
           "cfo": 55441000000.0,
@@ -293,10 +298,10 @@
       ],
       "derived": {
         "altmanZ": [
-          8.534970863006409,
-          8.340903010326784,
-          9.296436389896302,
-          9.520460955035901
+          8.660466307892078,
+          8.463580666677206,
+          9.434950830824167,
+          9.661718156231533
         ],
         "piotroskiF": [
           5,
@@ -448,10 +453,10 @@
       ],
       "derived": {
         "altmanZ": [
-          7.5816547043454685,
-          8.99610046712763,
-          10.6273741175285,
-          12.846889829541073
+          7.693513429887623,
+          9.125546455301073,
+          10.789202729346032,
+          13.049313136407068
         ],
         "piotroskiF": [
           5,
@@ -592,10 +597,10 @@
       ],
       "derived": {
         "altmanZ": [
-          5.427133821523915,
-          5.952655527159268,
-          7.257026189051361,
-          7.420485765763987
+          5.391168741864513,
+          5.9133147016860725,
+          7.208038660627452,
+          7.370579256093985
         ],
         "piotroskiF": [
           4,
@@ -609,6 +614,29 @@
     "AMD": {
       "frequency": "Q",
       "periods": [
+        {
+          "endDate": "2026-09-30",
+          "revenue": 13377000000.0,
+          "grossProfit": 7210000000.0,
+          "operatingIncome": 2832000000.0,
+          "netIncome": 2428000000.0,
+          "ebit": 1930000000.0,
+          "ar": 9209000000.0,
+          "inventory": 11463000000.0,
+          "ap": 7756000000.0,
+          "totalAssets": 94812000000.0,
+          "totalLiab": 26423000000.0,
+          "currentAssets": 39471000000.0,
+          "currentLiab": 14486000000.0,
+          "retainedEarnings": 6720000000.0,
+          "sharesOutstanding": 1640000000.0,
+          "longTermDebt": 7079000000.0,
+          "bookEquity": 68389000000.0,
+          "cfo": 1202000000.0,
+          "capex": -648000000.0,
+          "fcf": 554000000.0,
+          "workingCapital": 24985000000.0
+        },
         {
           "endDate": "2026-06-30",
           "revenue": 11536000000.0,
@@ -703,29 +731,6 @@
         },
         {
           "endDate": "2025-06-30",
-          "revenue": 7685000000.0,
-          "grossProfit": 3059000000.0,
-          "operatingIncome": -134000000.0,
-          "netIncome": 872000000.0,
-          "ebit": -36000000.0,
-          "ar": 5115000000.0,
-          "inventory": 6677000000.0,
-          "ap": 3080000000.0,
-          "totalAssets": 74820000000.0,
-          "totalLiab": 15155000000.0,
-          "currentAssets": 24519000000.0,
-          "currentLiab": 9843000000.0,
-          "retainedEarnings": 3945000000.0,
-          "sharesOutstanding": 1622000000.0,
-          "longTermDebt": 3218000000.0,
-          "bookEquity": 59665000000.0,
-          "cfo": 2011000000.0,
-          "capex": -282000000.0,
-          "fcf": 1729000000.0,
-          "workingCapital": 14676000000.0
-        },
-        {
-          "endDate": "2025-03-31",
           "ar": null,
           "inventory": null,
           "ap": null,
@@ -745,13 +750,13 @@
       ],
       "derived": {
         "altmanZ": [
-          29.291885067821514,
-          33.1839272153053,
-          36.12135355640063,
-          31.220415556027124
+          17.346985213160682,
+          26.242862281146273,
+          29.721137172994286,
+          32.34701932488765
         ],
         "piotroskiF": [
-          8,
+          6,
           3,
           null,
           null
@@ -895,10 +900,10 @@
       ],
       "derived": {
         "altmanZ": [
-          35.05419219495288,
-          49.02462461707691,
-          62.55615167687809,
-          72.91528412342377
+          32.19743555662145,
+          44.949818367076915,
+          57.28877942884739,
+          66.74294264038195
         ],
         "piotroskiF": [
           4,
@@ -1053,10 +1058,10 @@
       ],
       "derived": {
         "altmanZ": [
-          2.1087849310726425,
-          2.079463723175926,
-          2.050161245877855,
-          2.043868643478859
+          2.077052529381835,
+          2.0465448361166585,
+          2.0151597383678115,
+          2.0062186936133206
         ],
         "piotroskiF": [
           7,
@@ -1832,6 +1837,29 @@
       "frequency": "Q",
       "periods": [
         {
+          "endDate": "2026-09-30",
+          "revenue": 201182000000.0,
+          "grossProfit": null,
+          "operatingIncome": null,
+          "netIncome": 104662000000.0,
+          "ebit": null,
+          "ar": null,
+          "inventory": null,
+          "ap": null,
+          "totalAssets": 48725437000000.0,
+          "totalLiab": 44756028000000.0,
+          "currentAssets": null,
+          "currentLiab": null,
+          "retainedEarnings": 2146875000000.0,
+          "sharesOutstanding": 261600381459.0,
+          "longTermDebt": 3781495000000.0,
+          "bookEquity": 3945717000000.0,
+          "cfo": 913333000000.0,
+          "capex": -2973000000.0,
+          "fcf": 910360000000.0,
+          "workingCapital": null
+        },
+        {
           "endDate": "2026-06-30",
           "revenue": 224888000000.0,
           "grossProfit": null,
@@ -1925,25 +1953,14 @@
         },
         {
           "endDate": "2025-03-31",
-          "revenue": 190066000000.0,
+          "revenue": null,
           "grossProfit": null,
           "operatingIncome": null,
-          "netIncome": 83351000000.0,
+          "netIncome": null,
           "ebit": null,
-          "ar": null,
-          "inventory": null,
-          "ap": null,
-          "totalAssets": 42794715000000.0,
-          "totalLiab": 39383387000000.0,
-          "currentAssets": null,
-          "currentLiab": null,
-          "retainedEarnings": 1864769000000.0,
-          "sharesOutstanding": 250010977486.0,
-          "longTermDebt": 3356196000000.0,
-          "bookEquity": 3388936000000.0,
-          "cfo": 721067000000.0,
-          "capex": -2872000000.0,
-          "fcf": 718195000000.0,
+          "cfo": null,
+          "capex": null,
+          "fcf": null,
           "workingCapital": null
         }
       ],
