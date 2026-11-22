@@ -2,23 +2,23 @@
   "_metadata": {
     "conviction_pct": 5.0,
     "drift_window": 60,
-    "generated_at_hk": "2026-11-21 11:34 HKT",
-    "history_days": 178,
+    "generated_at_hk": "2026-11-22 10:40 HKT",
+    "history_days": 179,
     "match_tol_days": 4
   },
   "NAIVE": {
     "verdict": "BASELINE",
     "horizons": {
       "2d": {
-        "hits": 1338,
-        "n": 2747,
-        "rate": 0.4871,
-        "ci_lo": 0.4684,
-        "ci_hi": 0.5058,
-        "p": 0.1755,
+        "hits": 1339,
+        "n": 2748,
+        "rate": 0.4873,
+        "ci_lo": 0.4686,
+        "ci_hi": 0.506,
+        "p": 0.1818,
         "n_eff": 1374,
-        "ci_lo_eff": 0.4607,
-        "p_eff": 0.338
+        "ci_lo_eff": 0.4609,
+        "p_eff": 0.3451
       },
       "5d": {
         "hits": 1370,
@@ -105,15 +105,15 @@
     "verdict": "NO_EDGE",
     "horizons": {
       "2d": {
-        "hits": 1357,
-        "n": 2747,
-        "rate": 0.494,
-        "ci_lo": 0.4753,
-        "ci_hi": 0.5127,
-        "p": 0.5289,
+        "hits": 1358,
+        "n": 2748,
+        "rate": 0.4942,
+        "ci_lo": 0.4755,
+        "ci_hi": 0.5129,
+        "p": 0.5416,
         "n_eff": 1374,
-        "ci_lo_eff": 0.4676,
-        "p_eff": 0.6561
+        "ci_lo_eff": 0.4678,
+        "p_eff": 0.666
       },
       "5d": {
         "hits": 1459,
